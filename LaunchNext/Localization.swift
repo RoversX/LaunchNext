@@ -226,7 +226,7 @@ final class LocalizationManager {
                 .searchPlaceholder: "Recherche",
                 .appTitle: "LaunchNext",
                 .modifiedFrom: "Basé sur LaunchNow 1.3.1",
-                .backgroundHint: "Pour exécuter LaunchNext en arrière-plan, épinglez-le au Dock ou utilisez un raccourci clavier pour ouvrir la fenêtre.",
+                .backgroundHint: "Pour exécuter LaunchNext en arrière-plan, épinglez l'application au Dock ou utilisez un raccourci clavier pour ouvrir la fenêtre.",
                 .classicMode: "Plein écran",
                 .iconSize: "Taille des icônes",
                 .smaller: "Petites",
