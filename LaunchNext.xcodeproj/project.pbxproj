@@ -6,8 +6,14 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		93A3BF782E82237900B73ECA /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 93A3BF762E82237900B73ECA /* Localizable.strings */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		0D1B0B402E4CDE460083EEF9 /* LaunchNext.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LaunchNext.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		93A3BF772E82237900B73ECA /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		93A3BF792E82237D00B73ECA /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -32,6 +38,7 @@
 		0D1B0B372E4CDE460083EEF9 = {
 			isa = PBXGroup;
 			children = (
+				93A3BF762E82237900B73ECA /* Localizable.strings */,
 				0D1B0B422E4CDE460083EEF9 /* LaunchNext */,
 				0D1B0B412E4CDE460083EEF9 /* Products */,
 			);
@@ -92,6 +99,7 @@
 			knownRegions = (
 				en,
 				Base,
+				"zh-Hans",
 			);
 			mainGroup = 0D1B0B372E4CDE460083EEF9;
 			minimizedProjectReferenceProxies = 1;
@@ -110,6 +118,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				93A3BF782E82237900B73ECA /* Localizable.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -124,6 +133,18 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXVariantGroup section */
+		93A3BF762E82237900B73ECA /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				93A3BF772E82237900B73ECA /* en */,
+				93A3BF792E82237D00B73ECA /* zh-Hans */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
 		0D1B0B492E4CDE480083EEF9 /* Debug */ = {
