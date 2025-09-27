@@ -300,6 +300,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
         window.makeKeyAndOrderFront(nil)
         window.collectionBehavior = [.transient, .canJoinAllApplications, .fullScreenAuxiliary, .ignoresCycle]
         window.orderFrontRegardless()
+        
+        // Force window to become key and main window for proper focus
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKey()
+        window.makeMain()
 
         lastShowAt = Date()
         windowIsVisible = true
@@ -308,6 +313,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
 
         animateWindow(to: 1) {
             self.windowIsVisible = true
+            // Ensure focus after animation completes
+            DispatchQueue.main.async {
+                self.window?.makeKey()
+                self.window?.makeMain()
+            }
         }
     }
 
