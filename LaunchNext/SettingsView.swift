@@ -40,6 +40,31 @@ struct SettingsView: View {
                         HStack(spacing: 8) {
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
                                 .fill(section.iconGradient)
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(Color.black.opacity(0.06))
+                                        .blendMode(.multiply)
+                                }
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [
+                                                    .white.opacity(0.45),
+                                                    .white.opacity(0.08),
+                                                    .clear
+                                                ],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .blendMode(.screen)
+                                }
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .stroke(.white.opacity(0.22), lineWidth: 0.5)
+                                        .blendMode(.screen)
+                                }
                                 .overlay(
                                     Image(systemName: section.iconName)
                                         .font(.caption.weight(.semibold))
