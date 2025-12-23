@@ -8,6 +8,10 @@ import Darwin
 struct SettingsView: View {
     @ObservedObject var appStore: AppStore
     @ObservedObject private var controllerManager = ControllerInputManager.shared
+    private enum ShortcutTarget {
+        case launchpad
+        // case aiOverlay
+    }
     @State private var showResetConfirm = false
     @State private var selectedSection: SettingsSection = .general
     @State private var titleSearch: String = ""
@@ -16,7 +20,7 @@ struct SettingsView: View {
     @State private var editingEntries: Set<String> = []
     @State private var iconImportError: String? = nil
     @State private var showAppSourcesResetDialog = false
-    @State private var isCapturingShortcut = false
+    @State private var capturingShortcutTarget: ShortcutTarget? = nil
     @State private var shortcutCaptureMonitor: Any?
     @State private var pendingShortcut: AppStore.HotKeyConfiguration?
 
@@ -114,6 +118,11 @@ struct SettingsView: View {
         } message: {
             Text(iconImportError ?? "")
         }
+        // .onChange(of: appStore.isAIEnabled) { enabled in
+        //     if !enabled && isCapturingShortcut(.aiOverlay) {
+        //         stopShortcutCapture(cancel: true)
+        //     }
+        // }
         .onDisappear {
             stopShortcutCapture(cancel: false)
         }
@@ -131,7 +140,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     case appSources
     case hiddenApps
     case development
-    case aiLab
+    // case aiOverlay
     case sound
     case gameController
     case updates
@@ -150,7 +159,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .titles: return "text.badge.plus"
         case .hiddenApps: return "eye.slash"
         case .development: return "hammer"
-        case .aiLab: return "sparkles"
+        // case .aiOverlay: return "sparkles"
         case .updates: return "arrow.down.circle"
         case .about: return "info.circle"
         }
@@ -177,8 +186,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             colors = [Color(red: 0.29, green: 0.39, blue: 0.96), Color(red: 0.11, green: 0.67, blue: 0.91)]
         case .development:
             colors = [Color(red: 0.98, green: 0.58, blue: 0.16), Color(red: 0.96, green: 0.20, blue: 0.24)]
-        case .aiLab:
-            colors = [Color(red: 0.39, green: 0.33, blue: 0.98), Color(red: 0.59, green: 0.73, blue: 0.99)]
+        // case .aiOverlay:
+        //     colors = [Color(red: 0.39, green: 0.33, blue: 0.98), Color(red: 0.59, green: 0.73, blue: 0.99)]
         case .updates:
             colors = [Color(red: 0.22, green: 0.78, blue: 0.55), Color(red: 0.10, green: 0.62, blue: 0.91)]
         case .about:
@@ -198,7 +207,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .titles: return .settingsSectionTitles
         case .hiddenApps: return .settingsSectionHiddenApps
         case .development: return .settingsSectionDevelopment
-        case .aiLab: return .settingsSectionAI
+        // case .aiOverlay: return .settingsSectionAIOverlay
         case .updates: return .settingsSectionUpdates
         case .about: return .settingsSectionAbout
         }
@@ -261,8 +270,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             hiddenAppsSection
         case .development:
             developmentSection
-        case .aiLab:
-            aiLabSection
+        // case .aiOverlay:
+        //     aiOverlaySection
         case .sound:
             soundSection
         case .gameController:
@@ -437,22 +446,36 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         }
     }
 
-    private var aiLabSection: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(appStore.localized(.aiSectionContextVision))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color(nsColor: .quaternarySystemFill))
-            )
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
+    // private var aiOverlaySection: some View {
+    //     VStack(alignment: .leading, spacing: 20) {
+    //         Toggle(isOn: $appStore.isAIEnabled) {
+    //             Text(appStore.localized(.aiFeatureToggleTitle))
+    //                 .font(.headline)
+    //         }
+    //         .toggleStyle(.switch)
+    //
+    //         Text("AI features are experimental. It’s recommended to keep them off unless you’re testing.")
+    //             .font(.footnote)
+    //             .foregroundStyle(.secondary)
+    //
+    //         Text(appStore.localized(.aiOverlayShortcutHint))
+    //             .font(.footnote)
+    //             .foregroundStyle(.secondary)
+    //
+    //         Button {
+    //             appStore.presentAIOverlayPreview()
+    //         } label: {
+    //             Label(appStore.localized(.aiOverlayPreviewButtonLabel), systemImage: "sparkles")
+    //                 .font(.headline)
+    //                 .frame(maxWidth: .infinity)
+    //                 .padding(.vertical, 6)
+    //         }
+    //         .buttonStyle(.borderedProminent)
+    //         .tint(Color.accentColor)
+    //         .disabled(!appStore.isAIEnabled)
+    //     }
+    //     .frame(maxWidth: .infinity, alignment: .leading)
+    // }
 
     private var performanceSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -906,10 +929,10 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private static let modifierOnlyKeyCodes: Set<UInt16> = [55, 54, 58, 61, 56, 60, 59, 62, 57]
 
-    private func startShortcutCapture() {
+    private func startShortcutCapture(for target: ShortcutTarget) {
         stopShortcutCapture(cancel: false)
         pendingShortcut = nil
-        isCapturingShortcut = true
+        capturingShortcutTarget = target
         shortcutCaptureMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
             handleShortcutCapture(event: event)
         }
@@ -922,9 +945,9 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         }
         if cancel {
             pendingShortcut = nil
-            if isCapturingShortcut { NSSound.beep() }
+            if capturingShortcutTarget != nil { NSSound.beep() }
         }
-        isCapturingShortcut = false
+        capturingShortcutTarget = nil
     }
 
     private func handleShortcutCapture(event: NSEvent) -> NSEvent? {
@@ -945,14 +968,19 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     }
 
     private func savePendingShortcut() {
-        guard let shortcut = pendingShortcut else { return }
-        appStore.setGlobalHotKey(keyCode: shortcut.keyCode, modifierFlags: shortcut.modifierFlags)
+        guard let shortcut = pendingShortcut, let target = capturingShortcutTarget else { return }
+        switch target {
+        case .launchpad:
+            appStore.setGlobalHotKey(keyCode: shortcut.keyCode, modifierFlags: shortcut.modifierFlags)
+        // case .aiOverlay:
+        //     appStore.setAIOverlayHotKey(keyCode: shortcut.keyCode, modifierFlags: shortcut.modifierFlags)
+        }
         pendingShortcut = nil
         stopShortcutCapture(cancel: false)
     }
 
-    private var shortcutStatusText: String {
-        if isCapturingShortcut {
+    private func shortcutStatusText(for target: ShortcutTarget) -> String {
+        if capturingShortcutTarget == target {
             if let shortcut = pendingShortcut {
                 let base = shortcut.displayString
                 if shortcut.modifierFlags.isEmpty {
@@ -962,14 +990,17 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             }
             return appStore.localized(.shortcutCapturePrompt)
         }
-        if let saved = appStore.globalHotKey {
-            let base = saved.displayString
-            if saved.modifierFlags.isEmpty {
-                return base + " • " + appStore.localized(.shortcutNoModifierWarning)
-            }
-            return base
+        let placeholder = appStore.localized(.shortcutNotSet)
+        switch target {
+        case .launchpad:
+            return appStore.hotKeyDisplayText(nonePlaceholder: placeholder)
+        // case .aiOverlay:
+        //     return appStore.aiOverlayHotKeyDisplayText(nonePlaceholder: placeholder)
         }
-        return appStore.localized(.shortcutNotSet)
+    }
+
+    private func isCapturingShortcut(_ target: ShortcutTarget) -> Bool {
+        capturingShortcutTarget == target
     }
 
     private var aboutSection: some View {
@@ -1597,29 +1628,31 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         .font(.headline)
                     HStack(spacing: 12) {
                         Button {
-                            if isCapturingShortcut {
+                            if isCapturingShortcut(.launchpad) {
                                 stopShortcutCapture(cancel: true)
                             } else {
-                                startShortcutCapture()
+                                startShortcutCapture(for: .launchpad)
                             }
                         } label: {
-                            Text(isCapturingShortcut ? appStore.localized(.cancel) : appStore.localized(.shortcutSetButton))
+                            Text(isCapturingShortcut(.launchpad) ? appStore.localized(.cancel) : appStore.localized(.shortcutSetButton))
                         }
 
                         Button(appStore.localized(.shortcutSaveButton)) {
                             savePendingShortcut()
                         }
-                        .disabled(!(isCapturingShortcut && pendingShortcut != nil))
+                        .disabled(!(isCapturingShortcut(.launchpad) && pendingShortcut != nil))
 
                         Button(appStore.localized(.shortcutClearButton)) {
-                            stopShortcutCapture(cancel: false)
-                            pendingShortcut = nil
+                            if isCapturingShortcut(.launchpad) {
+                                stopShortcutCapture(cancel: false)
+                                pendingShortcut = nil
+                            }
                             appStore.clearGlobalHotKey()
                         }
-                        .disabled(!isCapturingShortcut && appStore.globalHotKey == nil)
+                        .disabled(!isCapturingShortcut(.launchpad) && appStore.globalHotKey == nil)
                     }
 
-                    Text(shortcutStatusText)
+                    Text(shortcutStatusText(for: .launchpad))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }

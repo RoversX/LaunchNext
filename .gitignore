@@ -24,3 +24,6 @@ UpdaterScripts/SwiftUpdater/.build-*/
 
 # Parallel sources
 parallel_version/
+
+# Local AI notes
+LaunchNext/AI/TODO.md

@@ -24,13 +24,17 @@ struct LaunchpadApp: App {
 
 class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureRecognizerDelegate {
     static var shared: AppDelegate?
-    
+
+    // let authStore = FileAuthStore()
     private var window: NSWindow?
     private let minimumContentSize = NSSize(width: 800, height: 600)
     private var lastShowAt: Date?
     private var cancellables = Set<AnyCancellable>()
     private var hotKeyRef: EventHotKeyRef?
     private var hotKeyEventHandler: EventHandlerRef?
+    // private var aiHotKeyRef: EventHotKeyRef?
+    private let launchpadHotKeySignature = fourCharCode("LNXK")
+    // private let aiOverlayHotKeySignature = fourCharCode("AIOV")
     
     let appStore = AppStore()
     var modelContainer: ModelContainer?
@@ -42,7 +46,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
+        // let copilotProvider = CopilotProvider(authStore: authStore)
+        // LLMProviderRegistry.shared.register(provider: copilotProvider)
+
         appStore.syncGlobalHotKeyRegistration()
+        // appStore.syncAIOverlayHotKeyRegistration()
 
         SoundManager.shared.bind(appStore: appStore)
         VoiceManager.shared.bind(appStore: appStore)
@@ -74,9 +82,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
         registerGlobalHotKey(configuration)
     }
 
+    // func updateAIOverlayHotKey(configuration: AppStore.HotKeyConfiguration?) {
+    //     unregisterAIOverlayHotKey()
+    //     guard let configuration, appStore.isAIEnabled else { return }
+    //     registerAIOverlayHotKey(configuration)
+    // }
+
     private func registerGlobalHotKey(_ configuration: AppStore.HotKeyConfiguration) {
         ensureHotKeyEventHandler()
-        var hotKeyID = EventHotKeyID(signature: fourCharCode("LNXK"), id: 1)
+        var hotKeyID = EventHotKeyID(signature: launchpadHotKeySignature, id: 1)
         let status = RegisterEventHotKey(configuration.keyCodeUInt32,
                                          configuration.carbonModifierFlags,
                                          hotKeyID,
@@ -84,16 +98,45 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
                                          0,
                                          &hotKeyRef)
         if status != noErr {
-            NSLog("LaunchNext: Failed to register hotkey (status %d)", status)
+            NSLog("LaunchNext: Failed to register launchpad hotkey (status %d)", status)
+            hotKeyRef = nil
         }
     }
+
+    // private func registerAIOverlayHotKey(_ configuration: AppStore.HotKeyConfiguration) {
+    //     ensureHotKeyEventHandler()
+    //     var hotKeyID = EventHotKeyID(signature: aiOverlayHotKeySignature, id: 1)
+    //     let status = RegisterEventHotKey(configuration.keyCodeUInt32,
+    //                                      configuration.carbonModifierFlags,
+    //                                      hotKeyID,
+    //                                      GetEventDispatcherTarget(),
+    //                                      0,
+    //                                      &aiHotKeyRef)
+    //     if status != noErr {
+    //         NSLog("LaunchNext: Failed to register AI overlay hotkey (status %d)", status)
+    //         aiHotKeyRef = nil
+    //     }
+    // }
 
     private func unregisterGlobalHotKey() {
         if let hotKeyRef {
             UnregisterEventHotKey(hotKeyRef)
             self.hotKeyRef = nil
         }
-        if let handler = hotKeyEventHandler, hotKeyRef == nil {
+        cleanUpHotKeyEventHandlerIfNeeded()
+    }
+
+    // private func unregisterAIOverlayHotKey() {
+    //     if let aiHotKeyRef {
+    //         UnregisterEventHotKey(aiHotKeyRef)
+    //         self.aiHotKeyRef = nil
+    //     }
+    //     cleanUpHotKeyEventHandlerIfNeeded()
+    // }
+
+    private func cleanUpHotKeyEventHandlerIfNeeded() {
+        // if hotKeyRef == nil && aiHotKeyRef == nil, let handler = hotKeyEventHandler {
+        if hotKeyRef == nil, let handler = hotKeyEventHandler {
             RemoveEventHandler(handler)
             hotKeyEventHandler = nil
         }
@@ -108,9 +151,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
         }
     }
 
-    fileprivate func handleHotKeyEvent() {
+    fileprivate func handleHotKeyEvent(signature: OSType, id: UInt32) {
         DispatchQueue.main.async { [weak self] in
-            self?.toggleWindow()
+            guard let self else { return }
+            switch (signature, id) {
+            case (self.launchpadHotKeySignature, 1):
+                self.toggleWindow()
+            // case (self.aiOverlayHotKeySignature, 1):
+            //     self.appStore.toggleAIOverlayPreview()
+            default:
+                break
+            }
         }
     }
 
@@ -479,9 +530,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
 }
 
 private func hotKeyEventCallback(eventHandlerCallRef: EventHandlerCallRef?, event: EventRef?, userData: UnsafeMutableRawPointer?) -> OSStatus {
-    guard let userData else { return noErr }
+    guard let userData, let event else { return noErr }
+    var hotKeyID = EventHotKeyID()
+    let status = GetEventParameter(event,
+                                   EventParamName(kEventParamDirectObject),
+                                   EventParamType(typeEventHotKeyID),
+                                   nil,
+                                   MemoryLayout<EventHotKeyID>.size,
+                                   nil,
+                                   &hotKeyID)
+    if status != noErr {
+        return status
+    }
     let delegate = Unmanaged<AppDelegate>.fromOpaque(userData).takeUnretainedValue()
-    delegate.handleHotKeyEvent()
+    delegate.handleHotKeyEvent(signature: hotKeyID.signature, id: hotKeyID.id)
     return noErr
 }
 

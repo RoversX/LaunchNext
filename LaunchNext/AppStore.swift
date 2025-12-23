@@ -161,6 +161,8 @@ final class AppStore: ObservableObject {
     private static let voiceFeedbackEnabledKey = "voiceFeedbackEnabled"
     private static let folderDropZoneScaleKey = "folderDropZoneScale"
     private static let pageIndicatorTopPaddingKey = "pageIndicatorTopPadding"
+    // private static let aiFeatureEnabledKey = "aiFeatureEnabled"
+    // private static let aiOverlayHotKeyKey = "aiOverlayHotKeyConfiguration"
 
     private static func loadHiddenApps() -> Set<String> {
         if let array = UserDefaults.standard.array(forKey: hiddenAppsKey) as? [String] {
@@ -837,6 +839,29 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // @Published var isAIEnabled: Bool = {
+    //     if UserDefaults.standard.object(forKey: AppStore.aiFeatureEnabledKey) == nil { return false }
+    //     return UserDefaults.standard.bool(forKey: AppStore.aiFeatureEnabledKey)
+    // }() {
+    //     didSet {
+    //         guard isAIEnabled != oldValue else { return }
+    //         UserDefaults.standard.set(isAIEnabled, forKey: AppStore.aiFeatureEnabledKey)
+    //         // if !isAIEnabled {
+    //         //     AIOverlayController.shared.hide()
+    //         // }
+    //         // AppDelegate.shared?.updateAIOverlayHotKey(configuration: isAIEnabled ? aiOverlayHotKey : nil)
+    //     }
+    // }
+    //
+    // @Published var aiOverlayHotKey: HotKeyConfiguration? = AppStore.loadAIOverlayHotKeyConfiguration() {
+    //     didSet {
+    //         persistAIOverlayHotKeyConfiguration()
+    //         // if isAIEnabled {
+    //         //     AppDelegate.shared?.updateAIOverlayHotKey(configuration: aiOverlayHotKey)
+    //         // }
+    //     }
+    // }
+
     @Published private(set) var currentAppIcon: NSImage {
         didSet { applyCurrentAppIcon() }
     }
@@ -1414,6 +1439,11 @@ final class AppStore: ObservableObject {
         return HotKeyConfiguration(dictionary: dict)
     }
 
+    // private static func loadAIOverlayHotKeyConfiguration() -> HotKeyConfiguration? {
+    //     guard let dict = UserDefaults.standard.dictionary(forKey: aiOverlayHotKeyKey) else { return nil }
+    //     return HotKeyConfiguration(dictionary: dict)
+    // }
+
     private func persistCustomTitles() {
         let sanitized = customTitles.reduce(into: [String: String]()) { partialResult, entry in
             let trimmed = entry.value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1428,6 +1458,15 @@ final class AppStore: ObservableObject {
             UserDefaults.standard.set(sanitized, forKey: AppStore.customTitlesKey)
         }
     }
+
+    // private func persistAIOverlayHotKeyConfiguration() {
+    //     let defaults = UserDefaults.standard
+    //     if let config = aiOverlayHotKey {
+    //         defaults.set(config.dictionaryRepresentation, forKey: Self.aiOverlayHotKeyKey)
+    //     } else {
+    //         defaults.removeObject(forKey: Self.aiOverlayHotKeyKey)
+    //     }
+    // }
 
     private func persistHotKeyConfiguration() {
         let defaults = UserDefaults.standard
@@ -2003,6 +2042,33 @@ final class AppStore: ObservableObject {
         } catch {
         }
     }
+
+    // MARK: - AI Overlay Preview
+    //
+    // func presentAIOverlayPreview() {
+    //     // guard isAIEnabled else { return }
+    //     // DispatchQueue.main.async { [weak self] in
+    //     //     guard let self else { return }
+    //     //     AIOverlayController.shared.show(with: self)
+    //     // }
+    // }
+    //
+    // func dismissAIOverlayPreview() {
+    //     // DispatchQueue.main.async {
+    //     //     AIOverlayController.shared.hide()
+    //     // }
+    // }
+    //
+    // func toggleAIOverlayPreview() {
+    //     // guard isAIEnabled else {
+    //     //     AIOverlayController.shared.hide()
+    //     //     return
+    //     // }
+    //     // DispatchQueue.main.async { [weak self] in
+    //     //     guard let self else { return }
+    //     //     AIOverlayController.shared.toggle(with: self)
+    //     // }
+    // }
 
     deinit {
         autoCheckTimer?.cancel()
@@ -3812,6 +3878,20 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // func setAIOverlayHotKey(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) {
+    //     let normalized = modifierFlags.normalizedShortcutFlags
+    //     let configuration = HotKeyConfiguration(keyCode: keyCode, modifierFlags: normalized)
+    //     if aiOverlayHotKey != configuration {
+    //         aiOverlayHotKey = configuration
+    //     }
+    // }
+    //
+    // func clearAIOverlayHotKey() {
+    //     if aiOverlayHotKey != nil {
+    //         aiOverlayHotKey = nil
+    //     }
+    // }
+
     func persistCurrentPageIfNeeded() {
         guard rememberLastPage else { return }
         UserDefaults.standard.set(currentPage, forKey: Self.rememberedPageIndexKey)
@@ -3829,6 +3909,19 @@ final class AppStore: ObservableObject {
     func syncGlobalHotKeyRegistration() {
         AppDelegate.shared?.updateGlobalHotKey(configuration: globalHotKey)
     }
+
+    // func aiOverlayHotKeyDisplayText(nonePlaceholder: String) -> String {
+    //     guard let config = aiOverlayHotKey else { return nonePlaceholder }
+    //     let base = config.displayString
+    //     if config.modifierFlags.isEmpty {
+    //         return base + " • " + localized(.shortcutNoModifierWarning)
+    //     }
+    //     return base
+    // }
+    //
+    // func syncAIOverlayHotKeyRegistration() {
+    //     // AppDelegate.shared?.updateAIOverlayHotKey(configuration: isAIEnabled ? aiOverlayHotKey : nil)
+    // }
     
     // MARK: - 导入应用排序功能
     /// 从JSON数据导入应用排序
