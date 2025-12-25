@@ -188,6 +188,10 @@ struct FolderView: View {
 
         ZStack(alignment: .topLeading) {
             ScrollView {
+                ScrollOffsetReader { offsetY in
+                    scrollOffsetY = offsetY
+                }
+                .frame(height: 0)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: spacing), count: desiredColumns), spacing: spacing) {
                     ForEach(Array(visualApps.enumerated()), id: \.element.id) { (idx, app) in
                         appDraggable(
@@ -205,14 +209,6 @@ struct FolderView: View {
                 .animation(LNAnimations.gridUpdate, value: pendingDropIndex)
                 .id(forceRefreshTrigger) // 使用forceRefreshTrigger强制刷新应用网格
                 .padding(EdgeInsets(top: gridPadding, leading: gridPadding, bottom: gridPadding, trailing: gridPadding))
-                .background(
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: FolderScrollOffsetPreferenceKey.self,
-                            value: -proxy.frame(in: .named("folderGrid")).origin.y
-                        )
-                    }
-                )
             }
             .scrollIndicators(.hidden)
             .disabled(isEditingName) // 编辑状态下禁用滚动
@@ -231,9 +227,6 @@ struct FolderView: View {
             }
         }
         .coordinateSpace(name: "folderGrid")
-        .onPreferenceChange(FolderScrollOffsetPreferenceKey.self) { scrollOffset in
-            scrollOffsetY = scrollOffset
-        }
     }
     
     // 拖拽视觉重排
@@ -496,11 +489,61 @@ extension FolderView {
     }
 }
 
-// MARK: - Folder scroll offset preference key
-private struct FolderScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
+// MARK: - Scroll offset reader for NSScrollView
+private struct ScrollOffsetReader: NSViewRepresentable {
+    var onChange: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = OffsetProxyView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        guard let proxy = nsView as? OffsetProxyView else { return }
+        proxy.onChange = onChange
+        proxy.attachIfNeeded()
+    }
+
+    private final class OffsetProxyView: NSView {
+        var onChange: (CGFloat) -> Void = { _ in }
+        private var observer: NSObjectProtocol?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            attachIfNeeded()
+        }
+
+        override func removeFromSuperview() {
+            detach()
+            super.removeFromSuperview()
+        }
+
+        func attachIfNeeded() {
+            guard observer == nil, let scrollView = enclosingScrollView else { return }
+            scrollView.contentView.postsBoundsChangedNotifications = true
+            observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification,
+                                                              object: scrollView.contentView,
+                                                              queue: .main) { [weak self] _ in
+                self?.notify()
+            }
+            notify()
+        }
+
+        private func detach() {
+            if let observer {
+                NotificationCenter.default.removeObserver(observer)
+                self.observer = nil
+            }
+        }
+
+        private func notify() {
+            guard let scrollView = enclosingScrollView else { return }
+            let offsetY = scrollView.contentView.bounds.origin.y
+            onChange(offsetY)
+        }
+
+        deinit { detach() }
     }
 }
 // MARK: - Keyboard navigation (mirror outer behavior)
