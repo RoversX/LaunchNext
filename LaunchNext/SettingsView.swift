@@ -42,15 +42,15 @@ struct SettingsView: View {
 
                     ForEach(SettingsSection.allCases) { section in
                         HStack(spacing: 8) {
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .fill(section.iconGradient)
                                 .overlay {
-                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                                         .fill(Color.black.opacity(0.06))
                                         .blendMode(.multiply)
                                 }
                                 .overlay {
-                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                                         .fill(
                                             LinearGradient(
                                                 colors: [
@@ -65,20 +65,20 @@ struct SettingsView: View {
                                         .blendMode(.screen)
                                 }
                                 .overlay {
-                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                                         .stroke(.white.opacity(0.22), lineWidth: 0.5)
                                         .blendMode(.screen)
                                 }
                                 .overlay(
                                     Image(systemName: section.iconName)
-                                        .font(.caption.weight(.semibold))
+                                        .font(.system(size: 12, weight: .semibold))
                                         .foregroundStyle(.white)
                                 )
-                                .frame(width: 24, height: 24)
+                                .frame(width: 26, height: 26)
                                 .liquidGlass()
 
                             Text(appStore.localized(section.localizationKey))
-                                .font(.callout.weight(.medium))
+                                .font(.system(size: 13.5, weight: .regular))
                         }
                         .padding(.vertical, 2)
                         .tag(section)
@@ -139,6 +139,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     case titles
     case appSources
     case hiddenApps
+    case backup
     case development
     // case aiOverlay
     case sound
@@ -158,6 +159,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .performance: return "speedometer"
         case .titles: return "text.badge.plus"
         case .hiddenApps: return "eye.slash"
+        case .backup: return "clock.arrow.trianglehead.counterclockwise.rotate.90"
         case .development: return "hammer"
         // case .aiOverlay: return "sparkles"
         case .updates: return "arrow.down.circle"
@@ -184,6 +186,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             colors = [Color(red: 0.95, green: 0.37, blue: 0.32), Color(red: 0.98, green: 0.55, blue: 0.44)]
         case .hiddenApps:
             colors = [Color(red: 0.29, green: 0.39, blue: 0.96), Color(red: 0.11, green: 0.67, blue: 0.91)]
+        case .backup:
+            colors = [Color(red: 0.12, green: 0.80, blue: 0.46), Color(red: 0.10, green: 0.62, blue: 0.34)]
         case .development:
             colors = [Color(red: 0.98, green: 0.58, blue: 0.16), Color(red: 0.96, green: 0.20, blue: 0.24)]
         // case .aiOverlay:
@@ -206,6 +210,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .performance: return .settingsSectionPerformance
         case .titles: return .settingsSectionTitles
         case .hiddenApps: return .settingsSectionHiddenApps
+        case .backup: return .settingsSectionBackup
         case .development: return .settingsSectionDevelopment
         // case .aiOverlay: return .settingsSectionAIOverlay
         case .updates: return .settingsSectionUpdates
@@ -268,6 +273,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             appSourcesSection
         case .hiddenApps:
             hiddenAppsSection
+        case .backup:
+            backupSection
         case .development:
             developmentSection
         // case .aiOverlay:
@@ -421,6 +428,16 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color(nsColor: .windowBackgroundColor))
         )
+    }
+
+    private var backupSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(appStore.localized(.backupPlaceholderTitle))
+                .font(.headline)
+            Text(appStore.localized(.backupPlaceholderSubtitle))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var developmentSection: some View {
