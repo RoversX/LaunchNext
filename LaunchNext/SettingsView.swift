@@ -1324,14 +1324,83 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         .padding(.horizontal, 4)
                 } else {
                     ForEach(appStore.customAppSourcePaths, id: \.self) { path in
-                        appSourceRow(icon: "folder", path: path, isAvailable: pathExists(path)) {
-                            Button {
-                                appStore.removeCustomAppSource(path: path)
-                            } label: {
-                                Image(systemName: "minus.circle.fill")
-                                    .foregroundStyle(Color.red)
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                appSourceRow(icon: "folder", path: path, isAvailable: pathExists(path)) {
+                                    HStack(spacing: 10) {
+                                        Button {
+                                            toggleExpandedSource(path)
+                                        } label: {
+                                            // Image(systemName: expandedSource == standardizePath(path) ? "chevron.down.circle" : "chevron.right.circle")
+                                            //     .foregroundStyle(.secondary)
+                                            Image(systemName: "ellipsis.circle")
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        .buttonStyle(.borderless)
+
+                                        Button {
+                                            appStore.removeCustomAppSource(path: path)
+                                        } label: {
+                                            Image(systemName: "minus.circle.fill")
+                                                .foregroundStyle(Color.red)
+                                        }
+                                        .buttonStyle(.borderless)
+                                    }
+                                }
                             }
-                            .buttonStyle(.borderless)
+
+                            if expandedSource == standardizePath(path) {
+                                let apps = appsForSource(path)
+                                VStack(alignment: .leading, spacing: 8) {
+                                    if apps.isEmpty {
+                                        Text(appStore.localized(.scanSourcesEmptyHint))
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                            .padding(.horizontal, 4)
+                                    } else {
+                                        ScrollView {
+                                            LazyVStack(alignment: .leading, spacing: 8) {
+                                                ForEach(apps, id: \.path) { app in
+                                                    HStack(spacing: 8) {
+                                                        Image(nsImage: app.icon)
+                                                            .resizable()
+                                                            .interpolation(.high)
+                                                            .antialiased(true)
+                                                            .frame(width: 24, height: 24)
+                                                            .cornerRadius(5)
+                                                        VStack(alignment: .leading, spacing: 2) {
+                                                            Text(app.name)
+                                                                .font(.callout)
+                                                                .lineLimit(1)
+                                                            Text(app.path)
+                                                                .font(.caption2)
+                                                                .foregroundStyle(.secondary)
+                                                                .lineLimit(1)
+                                                        }
+                                                        Spacer()
+                                                        Button(role: .destructive) {
+                                                            removeAppFromLayout(app.path)
+                                                        } label: {
+                                                            Image(systemName: "trash")
+                                                                .foregroundStyle(Color.red)
+                                                        }
+                                                        .buttonStyle(.borderless)
+                                                    }
+                                                    .padding(.horizontal, 6)
+                                                }
+                                            }
+                                            .padding(.vertical, 6)
+                                        }
+                                        .frame(maxHeight: 220)
+                                    }
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(Color.secondary.opacity(0.08))
+                                )
+                            }
                         }
                     }
                 }
@@ -1343,6 +1412,98 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             }
             Button(appStore.localized(.cancel), role: .cancel) {}
         }
+    }
+
+    // MARK: - Helpers
+    private struct SourceApp {
+        let name: String
+        let path: String
+        let icon: NSImage
+    }
+
+    private func appsForSource(_ sourcePath: String) -> [SourceApp] {
+        let normalizedSource = standardizePath(sourcePath)
+        let prefix = normalizedSource.hasSuffix("/") ? normalizedSource : normalizedSource + "/"
+        var apps: [SourceApp] = []
+        var seen: Set<String> = []
+
+        func consider(name: String, path: String, icon: NSImage) {
+            let normalized = standardizePath(path)
+            guard normalized == normalizedSource || normalized.hasPrefix(prefix) else { return }
+            if seen.insert(normalized).inserted {
+                apps.append(SourceApp(name: name, path: normalized, icon: icon))
+            }
+        }
+
+        for item in appStore.items {
+            switch item {
+            case .app(let app):
+                consider(name: app.name, path: app.url.path, icon: app.icon)
+            case .missingApp(let placeholder):
+                consider(name: placeholder.displayName, path: placeholder.bundlePath, icon: placeholder.icon)
+            case .folder(let folder):
+                for app in folder.apps {
+                    consider(name: app.name, path: app.url.path, icon: app.icon)
+                }
+            case .empty:
+                break
+            }
+        }
+
+        return apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func standardizePath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardized.path
+    }
+    
+    @State private var expandedSource: String? = nil
+    
+    private func toggleExpandedSource(_ path: String) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            let normalized = standardizePath(path)
+            expandedSource = (expandedSource == normalized) ? nil : normalized
+        }
+    }
+
+    private func removeAppFromLayout(_ rawPath: String) {
+        let normalized = standardizePath(rawPath)
+        // Replace matching top-level items with empty placeholders.
+        var updatedItems = appStore.items
+        for idx in updatedItems.indices {
+            switch updatedItems[idx] {
+            case .app(let app) where standardizePath(app.url.path) == normalized:
+                updatedItems[idx] = .empty(UUID().uuidString)
+            case .missingApp(let placeholder) where standardizePath(placeholder.bundlePath) == normalized:
+                updatedItems[idx] = .empty(UUID().uuidString)
+            case .folder(var folder):
+                let originalCount = folder.apps.count
+                folder.apps.removeAll { standardizePath($0.url.path) == normalized }
+                if folder.apps.count != originalCount {
+                    if folder.apps.isEmpty {
+                        updatedItems[idx] = .empty(UUID().uuidString)
+                    } else {
+                        updatedItems[idx] = .folder(folder)
+                    }
+                }
+            default:
+                break
+            }
+        }
+        appStore.items = updatedItems
+
+        // Sync cleanup in the folders list.
+        for idx in appStore.folders.indices {
+            appStore.folders[idx].apps.removeAll { standardizePath($0.url.path) == normalized }
+        }
+        // Cleanup in the apps list.
+        appStore.apps.removeAll { standardizePath($0.url.path) == normalized }
+
+        appStore.compactItemsWithinPages()
+        appStore.removeEmptyPages()
+        appStore.folderUpdateTrigger = UUID()
+        appStore.gridRefreshTrigger = UUID()
+        appStore.saveAllOrder()
     }
 
     private var appearanceSection: some View {
