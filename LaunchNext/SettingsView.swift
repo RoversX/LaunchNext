@@ -175,7 +175,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .appSources:
             colors = [Color(nsColor: .systemGray), Color(nsColor: .lightGray)]
         case .sound:
-            colors = [Color(red: 0.96, green: 0.48, blue: 0.24), Color(red: 0.98, green: 0.68, blue: 0.30)]
+            colors = [Color(red: 0.92, green: 0.12, blue: 0.12), Color(red: 0.99, green: 0.30, blue: 0.30)]
         case .gameController:
             colors = [Color(red: 0.46, green: 0.34, blue: 0.97), Color(red: 0.31, green: 0.54, blue: 0.99)]
         case .appearance:
