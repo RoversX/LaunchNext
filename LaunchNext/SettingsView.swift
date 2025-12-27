@@ -24,19 +24,61 @@ struct SettingsView: View {
     @State private var shortcutCaptureMonitor: Any?
     @State private var pendingShortcut: AppStore.HotKeyConfiguration?
 
+    // Sidebar sizing presets
+    private var sidebarIconFrame: CGFloat {
+        switch appStore.sidebarIconPreset {
+        case .large: return 26
+        case .medium: return 24
+        }
+    }
+
+    private var sidebarIconFontSize: CGFloat {
+        switch appStore.sidebarIconPreset {
+        case .large: return 13
+        case .medium: return 12
+        }
+    }
+
+    private var sidebarRowVerticalPadding: CGFloat {
+        switch appStore.sidebarIconPreset {
+        case .large: return 2
+        case .medium: return 1
+        }
+    }
+
+    private var sidebarHeaderIconFrame: CGFloat {
+        return 36
+    }
+
+    private var sidebarHeaderCornerRadius: CGFloat {
+        switch appStore.sidebarIconPreset {
+        case .large: return 3
+        case .medium: return 3
+        }
+    }
+
     var body: some View {
         ZStack(alignment: .topTrailing) {
             NavigationSplitView {
                 List(selection: $selectedSection) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(appStore.localized(.appTitle))
-                            .font(.headline.weight(.semibold))
-                        Text("\(appStore.localized(.versionPrefix))\(getVersion())")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    HStack(alignment: .center, spacing: 2) {
+                        Image(nsImage: NSApplication.shared.applicationIconImage)
+                            .resizable()
+                            .interpolation(.high)
+                            .antialiased(true)
+                            .frame(width: sidebarHeaderIconFrame, height: sidebarHeaderIconFrame)
+                            .cornerRadius(sidebarHeaderCornerRadius)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(appStore.localized(.appTitle))
+                                .font(.headline.weight(.semibold))
+                            Text("\(appStore.localized(.versionPrefix))\(getVersion())")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    .padding(.vertical, 8)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 10))
+                    .padding(.bottom, 17)
+                    .listRowInsets(EdgeInsets(top: 0, leading: -4, bottom: 15, trailing: 10))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
 
@@ -71,16 +113,17 @@ struct SettingsView: View {
                                 }
                                 .overlay(
                                     Image(systemName: section.iconName)
-                                        .font(.system(size: 12, weight: .semibold))
+                                        .font(.system(size: sidebarIconFontSize, weight: .semibold))
                                         .foregroundStyle(.white)
                                 )
-                                .frame(width: 26, height: 26)
+                                .frame(width: sidebarIconFrame, height: sidebarIconFrame)
                                 .liquidGlass()
+                                .shadow(color: .black.opacity(0.12), radius: 4, x: 0, y: 1)
 
                             Text(appStore.localized(section.localizationKey))
                                 .font(.system(size: 13.5, weight: .regular))
                         }
-                        .padding(.vertical, 2)
+                        .padding(.vertical, sidebarRowVerticalPadding)
                         .tag(section)
                     }
                 }
@@ -126,6 +169,37 @@ struct SettingsView: View {
         .onDisappear {
             stopShortcutCapture(cancel: false)
         }
+    }
+
+    private var systemVersionText: String {
+        let v = ProcessInfo.processInfo.operatingSystemVersion
+        return "macOS \(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
+    }
+
+    private var chipText: String {
+        var size: size_t = 0
+        sysctlbyname("machdep.cpu.brand_string", nil, &size, nil, 0)
+        var nameBuffer = [CChar](repeating: 0, count: Int(size))
+        if sysctlbyname("machdep.cpu.brand_string", &nameBuffer, &size, nil, 0) == 0 {
+            return String(cString: nameBuffer)
+        }
+        return "Unknown Chip"
+    }
+
+    private var displayResolutionText: String {
+        guard let screen = NSScreen.main else { return "Unknown" }
+        let scale = screen.backingScaleFactor
+        let size = screen.frame.size
+        let width = Int(size.width * scale)
+        let height = Int(size.height * scale)
+        return "\(width)×\(height)"
+    }
+
+    private var displayNameText: String {
+        if let name = NSScreen.main?.localizedName, !name.isEmpty {
+            return name
+        }
+        return "Display"
     }
 
 private func getVersion() -> String {
@@ -247,6 +321,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         .padding(.vertical, 12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .scrollDisabled(section == .about)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .scrollBounceBehavior(.basedOnSize)
                 }
@@ -407,7 +482,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             Text(appStore.localized(title))
                 .font(.subheadline.weight(.semibold))
 
-            Spacer(minLength: 12)
+            Spacer(minLength: 24)
 
             Picker("", selection: binding) {
                 Text(appStore.localized(.soundOptionNone)).tag("")
@@ -1020,38 +1095,142 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         capturingShortcutTarget == target
     }
 
+    @ViewBuilder
+    private var headlineGlass: some View {
+        let label = Text(appStore.localized(.appTitle))
+            .font(.largeTitle.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+
+        label
+            .glassEffect(.clear, in: Capsule())
+    }
+
     private var aboutSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(appStore.localized(.appTitle))
+        VStack(alignment: .leading, spacing: 16) {
+            ZStack(alignment: .center) {
+                Image("AboutBackground")
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(16.0/9.0, contentMode: .fill)
+                    .frame(maxWidth: .infinity)
+                    .clipped()
+
+                VStack(spacing: 12) {
+                    headlineGlass
+
+                    Text("Version \(getVersion())")
                         .font(.title2.weight(.semibold))
-                    Text("\(appStore.localized(.versionPrefix))\(getVersion())")
+                        .foregroundStyle(.white)
+
+                    Text(appStore.localized(.backgroundHint))
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Text(appStore.localized(.modifiedFrom))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.85))
                 }
-                Spacer()
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 18)
             }
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 180, maxHeight: 200)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(0.18), lineWidth: 1.4)
+            )
+            .padding(.bottom, 12)
+
+            HStack(alignment: .bottom, spacing: 12) {
+                TicTacToeBoard()
+                    .frame(width: 130)
+
+                infoCard
+            }
+
+            Spacer()
+
+            HStack(spacing: 12) {
+                glassButton(title: "Project Link", systemImage: "arrow.up.right.square") {
+                    if let url = URL(string: "https://github.com/RoversX/LaunchNext") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                glassButton(title: "Report a bug", systemImage: "exclamationmark.bubble") {
+                    if let url = URL(string: "https://github.com/RoversX/LaunchNext/issues") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                glassButton(title: "Contribute", systemImage: "hands.sparkles") {
+                    if let url = URL(string: "https://github.com/RoversX/LaunchNext") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                glassButton(title: "Blog", systemImage: "globe") {
+                    if let url = URL(string: "https://blog.closex.org") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity, minHeight: 550, alignment: .top)
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    @ViewBuilder
+    private var infoCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Operation System")
+                .font(.headline.weight(.semibold))
+            infoRow(label: "macOS Version", value: systemVersionText)
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text(appStore.localized(.backgroundHint))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            Text("Processor Information")
+                .font(.headline.weight(.semibold))
+            infoRow(label: "Chip", value: chipText)
 
-                TicTacToeBoard()
-                    .frame(width: 130)
-            }
+            Divider()
 
-            Link(destination: URL(string: "https://github.com/RoversX/LaunchNext")!) {
-                Label(appStore.localized(.viewOnGitHub), systemImage: "arrow.up.right.square")
-            }
-            .buttonStyle(.link)
+            Text("Displays")
+                .font(.headline.weight(.semibold))
+            infoRow(label: displayNameText, value: displayResolutionText)
         }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.05))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func infoRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .foregroundStyle(.primary)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.secondary)
+        }
+        .font(.subheadline)
+    }
+
+    @ViewBuilder
+    private func glassButton(title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.subheadline.weight(.medium))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     // MARK: - Inline Games
@@ -1573,6 +1752,16 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         .toggleStyle(.switch)
                 }
 
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(appStore.localized(.sidebarIconSizeTitle))
+                        .font(.subheadline.weight(.semibold))
+                Picker(appStore.localized(.sidebarIconSizeTitle), selection: $appStore.sidebarIconPreset) {
+                    Text(appStore.localized(.sidebarIconSizeLarge)).tag(AppStore.SidebarIconPreset.large)
+                    Text(appStore.localized(.sidebarIconSizeMedium)).tag(AppStore.SidebarIconPreset.medium)
+                }
+                .pickerStyle(.menu)
+            }
+
                 HStack {
                     Text(appStore.localized(.rememberPageTitle))
                     Spacer()
@@ -1932,13 +2121,15 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             panel.message = appStore.localized(.exportPanelMessage)
             if panel.runModal() == .OK, let destParent = panel.url {
                 let formatter = DateFormatter()
-                formatter.dateFormat = "yyyyMMdd_HHmmss"
-                let folderName = "LaunchNext_Export_" + formatter.string(from: Date())
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.dateFormat = "yyyy-MM-dd'_'HH.mm.ss" // e.g., 2025-12-27_15.16.02
+                let folderName = "LaunchNext_" + formatter.string(from: Date()) + ".launchnext"
                 let destDir = destParent.appendingPathComponent(folderName, isDirectory: true)
                 try copyDirectory(from: sourceDir, to: destDir)
+                exportPreferences(to: destDir)
             }
         } catch {
-            // 忽略错误或可在此添加用户提示
+            // Ignore errors or surface a user-facing message if desired
         }
     }
 
@@ -1952,19 +2143,204 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         panel.message = appStore.localized(.importPanelMessage)
         if panel.runModal() == .OK, let srcDir = panel.url {
             do {
-                // 验证是否为有效的排序数据目录
+                // Validate this is a valid export folder
                 guard isValidExportFolder(srcDir) else { return }
-                let destDir = try supportDirectoryURL()
-                // 若用户选的就是目标目录，跳过
-                if srcDir.standardizedFileURL == destDir.standardizedFileURL { return }
-                try replaceDirectory(with: srcDir, at: destDir)
-                // 导入完成后加载并刷新
-                appStore.applyOrderAndFolders()
-                appStore.refresh()
+
+                func performImport(importData: Bool, importPrefs: Bool, allowedPrefKeys: Set<String>) throws {
+                    let destDir = try supportDirectoryURL()
+                    if importData {
+                        if srcDir.standardizedFileURL != destDir.standardizedFileURL {
+                            try replaceDirectory(with: srcDir, at: destDir)
+                            appStore.applyOrderAndFolders()
+                            appStore.refresh()
+                        }
+                    }
+                    if importPrefs {
+                        importPreferences(from: srcDir, allowedKeys: allowedPrefKeys.isEmpty ? nil : allowedPrefKeys)
+                        appStore.reloadPreferencesFromDefaults()
+                        appStore.refresh()
+                    }
+                }
+
+                // Ask user what to import (attach as sheet to stay on the same screen)
+                let alert = NSAlert()
+                alert.messageText = appStore.localized(.importPrompt)
+                alert.informativeText = appStore.localized(.importPanelMessage)
+                alert.icon = NSApplication.shared.applicationIconImage
+                alert.addButton(withTitle: appStore.localized(.importPrompt)) // Confirm
+                alert.addButton(withTitle: appStore.localized(.cancel))      // Cancel
+
+                let content = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
+
+                func makeCheckbox(_ title: String, state: NSControl.StateValue = .on) -> NSButton {
+                    let button = NSButton(checkboxWithTitle: title, target: nil, action: nil)
+                    button.state = state
+                    button.allowsMixedState = false
+                    button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+                    button.cell?.wraps = true
+                    button.cell?.lineBreakMode = .byWordWrapping
+                    return button
+                }
+
+                let dataCheckbox = makeCheckbox("Layout & data")
+                let generalCheckbox = makeCheckbox(appStore.localized(.settingsSectionGeneral))
+                let appearanceCheckbox = makeCheckbox(appStore.localized(.settingsSectionAppearance))
+                let sourcesCheckbox = makeCheckbox(appStore.localized(.settingsSectionAppSources))
+                let hiddenCheckbox = makeCheckbox(appStore.localized(.settingsSectionHiddenApps))
+                let titlesCheckbox = makeCheckbox(appStore.localized(.settingsSectionTitles))
+
+                let stack = NSStackView(views: [
+                    dataCheckbox,
+                    generalCheckbox,
+                    appearanceCheckbox,
+                    sourcesCheckbox,
+                    hiddenCheckbox,
+                    titlesCheckbox
+                ])
+                stack.orientation = .vertical
+                stack.alignment = .leading
+                stack.spacing = 6
+                stack.translatesAutoresizingMaskIntoConstraints = false
+                content.addSubview(stack)
+
+                NSLayoutConstraint.activate([
+                    stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 4),
+                    stack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -8),
+                    stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 4),
+                    stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor)
+                ])
+
+                // Size to fit content (min width 320, min height 160)
+                let fitting = stack.fittingSize
+                let minWidth: CGFloat = 320
+                let minHeight: CGFloat = 160
+                content.setFrameSize(NSSize(width: max(minWidth, fitting.width + 16),
+                                            height: max(minHeight, fitting.height + 12)))
+
+                alert.accessoryView = content
+
+                func selectedPrefKeys() -> Set<String> {
+                    var keys = Set<String>()
+                    if generalCheckbox.state == .on {
+                        keys.insert("preferredLanguage")
+                        keys.insert("appearancePreference")
+                        keys.insert("isStartOnLogin")
+                        keys.insert(AppStore.showQuickRefreshButtonKey)
+                        keys.insert(AppStore.lockLayoutKey)
+                    }
+                    if appearanceCheckbox.state == .on {
+                        keys.insert(AppStore.sidebarIconPresetKey)
+                        keys.insert(AppStore.backgroundStyleKey)
+                        keys.insert("scrollSensitivity")
+                        keys.insert("isFullscreenMode")
+                        keys.insert("showLabels")
+                        keys.insert("hideDock")
+                        keys.insert("enableAnimations")
+                        keys.insert("useLocalizedThirdPartyTitles")
+                        keys.insert("enableDropPrediction")
+                        keys.insert(AppStore.rememberPageKey)
+                        keys.insert(AppStore.rememberedPageIndexKey)
+                        keys.insert("iconScale")
+                        keys.insert("iconLabelFontSize")
+                        keys.insert(AppStore.iconLabelFontWeightKey)
+                        keys.insert("gridColumnsPerPage")
+                        keys.insert("gridRowsPerPage")
+                        keys.insert("gridColumnSpacing")
+                        keys.insert("gridRowSpacing")
+                        keys.insert("folderDropZoneScale")
+                        keys.insert("pageIndicatorOffset")
+                        keys.insert(AppStore.pageIndicatorTopPaddingKey)
+                        keys.insert("folderPopoverWidthFactor")
+                        keys.insert("folderPopoverHeightFactor")
+                        keys.insert(AppStore.hoverMagnificationKey)
+                        keys.insert(AppStore.hoverMagnificationScaleKey)
+                        keys.insert(AppStore.activePressEffectKey)
+                        keys.insert(AppStore.activePressScaleKey)
+                        keys.insert("animationDuration")
+                        keys.insert("globalHotKeyConfiguration")
+                        keys.insert("showFPSOverlay")
+                    }
+                    if hiddenCheckbox.state == .on {
+                        keys.insert(AppStore.hiddenAppsKey)
+                    }
+                    if sourcesCheckbox.state == .on {
+                        keys.insert(AppStore.customAppSourcesKey)
+                    }
+                    if titlesCheckbox.state == .on {
+                        keys.insert(AppStore.customTitlesKey)
+                    }
+                    return keys
+                }
+
+                if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+                    alert.beginSheetModal(for: window) { response in
+                        guard response == .alertFirstButtonReturn else { return }
+                        let importData = dataCheckbox.state == .on
+                        let keys = selectedPrefKeys()
+                        let importPrefs = !keys.isEmpty
+                        do {
+                            try performImport(importData: importData, importPrefs: importPrefs, allowedPrefKeys: keys)
+                        } catch {
+                            // Ignore failed import
+                        }
+                    }
+                } else {
+                    let response = alert.runModal()
+                    guard response == .alertFirstButtonReturn else { return }
+                    let importData = dataCheckbox.state == .on
+                    let keys = selectedPrefKeys()
+                    let importPrefs = !keys.isEmpty
+                    try performImport(importData: importData, importPrefs: importPrefs, allowedPrefKeys: keys)
+                }
             } catch {
-                // 忽略错误或可在此添加用户提示
+                // Ignore errors or surface a user-facing message if desired
             }
         }
+    }
+
+    // MARK: - Preferences export/import
+    private var currentPrefsDomain: String {
+        Bundle.main.bundleIdentifier ?? "LaunchNextAppStore"
+    }
+
+    private func exportPreferences(to folder: URL) {
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: folder.path) {
+            try? fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+
+        let domain = currentPrefsDomain
+        guard let dict = UserDefaults.standard.persistentDomain(forName: domain), !dict.isEmpty else { return }
+        let url = folder.appendingPathComponent("\(domain).plist")
+        do {
+            let data = try PropertyListSerialization.data(fromPropertyList: dict, format: .xml, options: 0)
+            try data.write(to: url)
+        } catch {
+            // ignore failure
+        }
+    }
+
+    private func importPreferences(from folder: URL, allowedKeys: Set<String>? = nil) {
+        let domain = currentPrefsDomain
+        let url = folder.appendingPathComponent("\(domain).plist")
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            guard var incoming = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else { return }
+
+            if let allowedKeys, !allowedKeys.isEmpty {
+                incoming = incoming.filter { allowedKeys.contains($0.key) }
+            }
+            guard !incoming.isEmpty else { return }
+
+            // Merge with existing prefs to avoid wiping unselected keys
+            var current = UserDefaults.standard.persistentDomain(forName: domain) ?? [:]
+            incoming.forEach { current[$0.key] = $0.value }
+            UserDefaults.standard.setPersistentDomain(current, forName: domain)
+        } catch {
+            // ignore failed domain restore
+        }
+        UserDefaults.standard.synchronize()
     }
 
     private func copyDirectory(from src: URL, to dst: URL) throws {
@@ -1977,7 +2353,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private func replaceDirectory(with src: URL, at dst: URL) throws {
         let fm = FileManager.default
-        // 确保父目录存在
+        // Ensure parent directory exists
         let parent = dst.deletingLastPathComponent()
         if !fm.fileExists(atPath: parent.path) {
             try fm.createDirectory(at: parent, withIntermediateDirectories: true)
@@ -1992,7 +2368,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         let fm = FileManager.default
         let storeURL = folder.appendingPathComponent("Data.store")
         guard fm.fileExists(atPath: storeURL.path) else { return false }
-        // 尝试打开该库并检查是否有排序数据
+        // Try opening the store and verify it contains layout data
         do {
             let config = ModelConfiguration(url: storeURL)
             let container = try ModelContainer(for: TopItemData.self, PageEntryData.self, configurations: config)
@@ -2173,7 +2549,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // 自动检查更新开关
+            // Auto-check for updates toggle
             Toggle(appStore.localized(.autoCheckForUpdates), isOn: $appStore.autoCheckForUpdates)
                 .font(.footnote)
         }

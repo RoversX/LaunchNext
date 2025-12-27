@@ -90,7 +90,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
 
     private func registerGlobalHotKey(_ configuration: AppStore.HotKeyConfiguration) {
         ensureHotKeyEventHandler()
-        var hotKeyID = EventHotKeyID(signature: launchpadHotKeySignature, id: 1)
+        let hotKeyID = EventHotKeyID(signature: launchpadHotKeySignature, id: 1)
         let status = RegisterEventHotKey(configuration.keyCodeUInt32,
                                          configuration.carbonModifierFlags,
                                          hotKeyID,

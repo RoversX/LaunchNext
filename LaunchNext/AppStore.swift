@@ -106,6 +106,20 @@ final class AppStore: ObservableObject {
         }
     }
 
+    enum SidebarIconPreset: String, CaseIterable, Identifiable {
+        case large
+        case medium
+
+        var id: String { rawValue }
+        
+        var localizationKeyTitle: LocalizationKey {
+            switch self {
+            case .large: return .sidebarIconSizeLarge
+            case .medium: return .sidebarIconSizeMedium
+            }
+        }
+    }
+
     enum IconLabelFontWeightOption: String, CaseIterable, Identifiable {
         case light
         case regular
@@ -136,31 +150,32 @@ final class AppStore: ObservableObject {
         }
     }
 
-    private static let customTitlesKey = "customAppTitles"
-    private static let hiddenAppsKey = "hiddenAppBundlePaths"
-    private static let gridColumnsKey = "gridColumnsPerPage"
-    private static let gridRowsKey = "gridRowsPerPage"
-    private static let columnSpacingKey = "gridColumnSpacing"
-    private static let rowSpacingKey = "gridRowSpacing"
-    private static let iconLabelFontWeightKey = "iconLabelFontWeight"
-    private static let showQuickRefreshButtonKey = "showQuickRefreshButton"
-    private static let lockLayoutKey = "lockLayoutEnabled"
-    private static let rememberPageKey = "rememberLastPage"
-    private static let rememberedPageIndexKey = "rememberedPageIndex"
-    private static let globalHotKeyKey = "globalHotKeyConfiguration"
-    private static let hoverMagnificationKey = "enableHoverMagnification"
-    private static let hoverMagnificationScaleKey = "hoverMagnificationScale"
-    private static let activePressEffectKey = "enableActivePressEffect"
-    private static let activePressScaleKey = "activePressScale"
-    private static let backgroundStyleKey = "launchpadBackgroundStyle"
+    static let customTitlesKey = "customAppTitles"
+    static let hiddenAppsKey = "hiddenAppBundlePaths"
+    static let gridColumnsKey = "gridColumnsPerPage"
+    static let gridRowsKey = "gridRowsPerPage"
+    static let columnSpacingKey = "gridColumnSpacing"
+    static let rowSpacingKey = "gridRowSpacing"
+    static let iconLabelFontWeightKey = "iconLabelFontWeight"
+    static let showQuickRefreshButtonKey = "showQuickRefreshButton"
+    static let lockLayoutKey = "lockLayoutEnabled"
+    static let rememberPageKey = "rememberLastPage"
+    static let rememberedPageIndexKey = "rememberedPageIndex"
+    static let globalHotKeyKey = "globalHotKeyConfiguration"
+    static let hoverMagnificationKey = "enableHoverMagnification"
+    static let hoverMagnificationScaleKey = "hoverMagnificationScale"
+    static let activePressEffectKey = "enableActivePressEffect"
+    static let activePressScaleKey = "activePressScale"
+    static let backgroundStyleKey = "launchpadBackgroundStyle"
+    static let sidebarIconPresetKey = "sidebarIconPreset"
     private static let gameControllerEnabledKey = "gameControllerEnabled"
     private static let soundEffectsEnabledKey = "soundEffectsEnabled"
     private static let soundLaunchpadOpenKey = "soundLaunchpadOpenSound"
     private static let soundLaunchpadCloseKey = "soundLaunchpadCloseSound"
     private static let soundNavigationKey = "soundNavigationSound"
     private static let voiceFeedbackEnabledKey = "voiceFeedbackEnabled"
-    private static let folderDropZoneScaleKey = "folderDropZoneScale"
-    private static let pageIndicatorTopPaddingKey = "pageIndicatorTopPadding"
+    static let folderDropZoneScaleKey = "folderDropZoneScale"
+    static let pageIndicatorTopPaddingKey = "pageIndicatorTopPadding"
     // private static let aiFeatureEnabledKey = "aiFeatureEnabled"
     // private static let aiOverlayHotKeyKey = "aiOverlayHotKeyConfiguration"
 
@@ -349,6 +364,50 @@ final class AppStore: ObservableObject {
             guard launchpadBackgroundStyle != oldValue else { return }
             UserDefaults.standard.set(launchpadBackgroundStyle.rawValue, forKey: Self.backgroundStyleKey)
         }
+    }
+
+    @Published var sidebarIconPreset: SidebarIconPreset = {
+        if let raw = UserDefaults.standard.string(forKey: AppStore.sidebarIconPresetKey),
+           let preset = SidebarIconPreset(rawValue: raw) {
+            return preset
+        }
+        return .large
+    }() {
+        didSet {
+            guard sidebarIconPreset != oldValue else { return }
+            UserDefaults.standard.set(sidebarIconPreset.rawValue, forKey: Self.sidebarIconPresetKey)
+        }
+    }
+
+    // Reload selected preferences from UserDefaults after an import
+    func reloadPreferencesFromDefaults() {
+        hiddenAppPaths = AppStore.loadHiddenApps()
+
+        if let savedSources = UserDefaults.standard.array(forKey: AppStore.customAppSourcesKey) as? [String] {
+            customAppSourcePaths = savedSources
+        }
+
+        if let raw = UserDefaults.standard.string(forKey: AppStore.sidebarIconPresetKey),
+           let preset = SidebarIconPreset(rawValue: raw) {
+            sidebarIconPreset = preset
+        }
+
+        launchpadBackgroundStyle = AppStore.loadBackgroundStyle()
+
+        isFullscreenMode = UserDefaults.standard.bool(forKey: "isFullscreenMode")
+        showLabels = UserDefaults.standard.object(forKey: "showLabels") as? Bool ?? true
+        hideDock = UserDefaults.standard.object(forKey: "hideDock") as? Bool ?? false
+        useLocalizedThirdPartyTitles = UserDefaults.standard.object(forKey: "useLocalizedThirdPartyTitles") as? Bool ?? true
+        enableAnimations = UserDefaults.standard.object(forKey: "enableAnimations") as? Bool ?? true
+        scrollSensitivity = UserDefaults.standard.object(forKey: "scrollSensitivity") as? Double ?? scrollSensitivity
+
+        // Apply hidden filtering immediately
+        pruneHiddenAppsFromAppList()
+        applyHiddenFilteringToOpenFolder()
+        compactItemsWithinPages()
+        removeEmptyPages()
+        triggerFolderUpdate()
+        triggerGridRefresh()
     }
     @Published var isSetting = false
     @Published var isInitialLoading = true
@@ -1277,7 +1336,7 @@ final class AppStore: ObservableObject {
         "/System/Cryptexes/App/System/Applications"
     ]
 
-    private static let customAppSourcesKey = "customApplicationSourcePaths"
+    static let customAppSourcesKey = "customApplicationSourcePaths"
 
     @Published var customAppSourcePaths: [String] = {
         guard let saved = UserDefaults.standard.array(forKey: AppStore.customAppSourcesKey) as? [String] else { return [] }
