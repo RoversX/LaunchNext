@@ -980,6 +980,7 @@ final class AppStore: ObservableObject {
     private let customIconFileURL: URL
     private let defaultAppIcon: NSImage
     private var autoCheckTimer: DispatchSourceTimer?
+    private var autoCheckWorkItem: DispatchWorkItem?
     private var loginItemUpdateInProgress = false
     private var volumeObservers: [NSObjectProtocol] = []
     
@@ -4254,10 +4255,16 @@ final class AppStore: ObservableObject {
     private func scheduleAutomaticUpdateCheck() {
         autoCheckTimer?.cancel()
         autoCheckTimer = nil
+        autoCheckWorkItem?.cancel()
+        autoCheckWorkItem = nil
 
         guard autoCheckForUpdates else { return }
 
-        performAutomaticUpdateCheckIfNeeded()
+        let work = DispatchWorkItem { [weak self] in
+            self?.performAutomaticUpdateCheckIfNeeded()
+        }
+        autoCheckWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: work)
 
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.main)
         timer.schedule(deadline: .now() + Self.automaticUpdateInterval,

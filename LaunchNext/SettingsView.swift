@@ -8,6 +8,7 @@ import Darwin
 struct SettingsView: View {
     @ObservedObject var appStore: AppStore
     @ObservedObject private var controllerManager = ControllerInputManager.shared
+    @Environment(\.colorScheme) private var colorScheme
     private enum ShortcutTarget {
         case launchpad
         // case aiOverlay
@@ -20,6 +21,12 @@ struct SettingsView: View {
     @State private var editingEntries: Set<String> = []
     @State private var iconImportError: String? = nil
     @State private var showAppSourcesResetDialog = false
+    @State private var showUpdateNotes = false
+    @State private var showCleanupCommand = false
+    @State private var cleanupCommandCopied = false
+    @State private var backupRootPath: String = UserDefaults.standard.string(forKey: "backupRootDirectory") ?? ""
+    @State private var backupRefreshToken = UUID()
+    @State private var selectedBackupIDs: Set<String> = []
     @State private var capturingShortcutTarget: ShortcutTarget? = nil
     @State private var shortcutCaptureMonitor: Any?
     @State private var pendingShortcut: AppStore.HotKeyConfiguration?
@@ -149,6 +156,7 @@ struct SettingsView: View {
                         Circle()
                             .fill(.ultraThinMaterial)
                             .liquidGlass()
+                            .shadow(color: .black.opacity(0.12), radius: 6, x: 0, y: 2)
                     )
             }
             .buttonStyle(.plain)
@@ -321,7 +329,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         .padding(.vertical, 12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .scrollDisabled(section == .about)
+                    .scrollDisabled(section == .about || section == .general)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .scrollBounceBehavior(.basedOnSize)
                 }
@@ -509,9 +517,332 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         VStack(alignment: .leading, spacing: 12) {
             Text(appStore.localized(.backupPlaceholderTitle))
                 .font(.headline)
-            Text(appStore.localized(.backupPlaceholderSubtitle))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                updateControlButton(
+                    title: "Choose Backup Folder",
+                    systemImage: "folder"
+                ) {
+                    chooseBackupFolder()
+                }
+
+                updateControlButton(
+                    title: "Create Backup",
+                    systemImage: "tray.and.arrow.down",
+                    isPrimary: true
+                ) {
+                    createBackupInSelectedFolder()
+                }
+                .disabled(backupRootURL == nil)
+
+                updateControlButton(
+                    title: "Delete Selected",
+                    systemImage: "trash"
+                ) {
+                    deleteSelectedBackups()
+                }
+                .disabled(selectedBackupIDs.isEmpty)
+            }
+
+            DisclosureGroup(isExpanded: $showCleanupCommand) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("LaunchNext keeps a local change history in its database. The app does not use this history, but it can grow over time.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+
+                    Text("We do not run this inside the app because it is destructive and requires the database to be closed. Doing it manually in Terminal avoids accidental data loss.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+
+                    Text("Important: quit LaunchNext before running this command, or the database may be locked.")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text("Run this command in Terminal to remove history rows and shrink the database.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Spacer()
+                        Button {
+                            copyCleanupCommand()
+                        } label: {
+                            Label(cleanupCommandCopied ? "Copied" : "Copy",
+                                  systemImage: cleanupCommandCopied ? "checkmark" : "doc.on.doc")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    Text(dataStoreCleanupCommand)
+                        .font(.system(.footnote, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color(nsColor: .windowBackgroundColor))
+                        )
+
+                    Text("Command details: `PRAGMA wal_checkpoint(FULL)` flushes the WAL, `DELETE FROM ACHANGE` removes history rows, and `VACUUM` reclaims space.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            } label: {
+                Label("Clear unused history (Advanced)", systemImage: "wand.and.stars")
+                    .font(.callout.weight(.semibold))
+            }
+
+            if let backupRootURL {
+                Text(backupRootURL.path)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            } else {
+                Text("No backup folder selected.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if backupEntries.isEmpty {
+                Text("No backups found.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(backupEntries.enumerated()), id: \.element.id) { index, entry in
+                        HStack {
+                            Toggle("", isOn: selectionBinding(for: entry.id))
+                                .labelsHidden()
+                                .toggleStyle(.checkbox)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.displayDate)
+                                    .font(.callout.weight(.semibold))
+                                Text(entry.displaySize)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Import") {
+                                importDataFolder(from: entry.url)
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button("Delete") {
+                                deleteBackup(entry)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.red)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+
+                        if index < backupEntries.count - 1 {
+                            Divider()
+                        }
+                    }
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(nsColor: .windowBackgroundColor))
+                )
+
+                Text("Estimated size based on Data.store.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 6)
+            }
+        }
+    }
+
+    private var backupRootURL: URL? {
+        guard !backupRootPath.isEmpty else { return nil }
+        return URL(fileURLWithPath: backupRootPath, isDirectory: true)
+    }
+
+    private var backupEntries: [BackupEntry] {
+        _ = backupRefreshToken
+        guard let root = backupRootURL else { return [] }
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) else {
+            return []
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd'_'HH.mm.ss"
+
+        var entries: [BackupEntry] = []
+        for url in contents {
+            let name = url.lastPathComponent
+            guard name.hasPrefix("LaunchNext_"), name.hasSuffix(".launchnext") else { continue }
+            let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            guard isDirectory else { continue }
+            let storeURL = url.appendingPathComponent("Data.store")
+            guard fm.fileExists(atPath: storeURL.path) else { continue }
+            let rawDate = name
+                .replacingOccurrences(of: "LaunchNext_", with: "")
+                .replacingOccurrences(of: ".launchnext", with: "")
+            guard let date = formatter.date(from: rawDate) else { continue }
+            let size = dataStoreSize(at: url)
+            entries.append(BackupEntry(id: url.path, url: url, date: date, sizeBytes: size))
+        }
+
+        return entries.sorted { $0.date > $1.date }
+    }
+
+    private struct BackupEntry: Identifiable {
+        let id: String
+        let url: URL
+        let date: Date
+        let sizeBytes: Int64
+
+        var displayDate: String {
+            let formatter = DateFormatter()
+            formatter.locale = .current
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .short
+            return formatter.string(from: date)
+        }
+
+        var displaySize: String {
+            let formatter = ByteCountFormatter()
+            formatter.countStyle = .file
+            return formatter.string(fromByteCount: sizeBytes)
+        }
+    }
+
+    private func dataStoreSize(at url: URL) -> Int64 {
+        let storeURL = url.appendingPathComponent("Data.store")
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: storeURL.path),
+              let size = attributes[.size] as? NSNumber else {
+            return 0
+        }
+        return size.int64Value
+    }
+
+    private var dataStoreCleanupCommand: String {
+        let dataStorePath: String
+        if let supportURL = try? supportDirectoryURL() {
+            dataStorePath = supportURL.appendingPathComponent("Data.store").path
+        } else {
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            dataStorePath = "\(home)/Library/Application Support/LaunchNext/Data.store"
+        }
+        let escapedPath = dataStorePath.replacingOccurrences(of: "\"", with: "\\\"")
+        return """
+        DB="\(escapedPath)"
+        sqlite3 "$DB" <<'SQL'
+        PRAGMA wal_checkpoint(FULL);
+        DELETE FROM ACHANGE;
+        VACUUM;
+        SQL
+        """
+    }
+
+    private func copyCleanupCommand() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(dataStoreCleanupCommand, forType: .string)
+        cleanupCommandCopied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            cleanupCommandCopied = false
+        }
+    }
+
+    private func chooseBackupFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        if panel.runModal() == .OK, let url = panel.url {
+            backupRootPath = url.path
+            UserDefaults.standard.set(backupRootPath, forKey: "backupRootDirectory")
+            backupRefreshToken = UUID()
+            selectedBackupIDs.removeAll()
+        }
+    }
+
+    private func createBackupInSelectedFolder() {
+        guard let destParent = backupRootURL else { return }
+        do {
+            try exportDataFolder(to: destParent)
+            backupRefreshToken = UUID()
+        } catch {
+            // ignore for now
+        }
+    }
+
+    private func selectionBinding(for id: String) -> Binding<Bool> {
+        Binding(
+            get: { selectedBackupIDs.contains(id) },
+            set: { isSelected in
+                if isSelected {
+                    selectedBackupIDs.insert(id)
+                } else {
+                    selectedBackupIDs.remove(id)
+                }
+            }
+        )
+    }
+
+    private func deleteSelectedBackups() {
+        let targets = backupEntries.filter { selectedBackupIDs.contains($0.id) }
+        guard !targets.isEmpty else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Delete Backups"
+        alert.informativeText = "This will permanently remove \(targets.count) selected backups."
+        alert.alertStyle = .warning
+        let deleteButton = alert.addButton(withTitle: "Delete")
+        if #available(macOS 11.0, *) {
+            deleteButton.hasDestructiveAction = true
+        }
+        alert.addButton(withTitle: appStore.localized(.cancel))
+
+        let handler: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .alertFirstButtonReturn else { return }
+            for entry in targets {
+                try? FileManager.default.removeItem(at: entry.url)
+            }
+            selectedBackupIDs.removeAll()
+            backupRefreshToken = UUID()
+        }
+
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            alert.beginSheetModal(for: window, completionHandler: handler)
+        } else {
+            handler(alert.runModal())
+        }
+    }
+
+    private func deleteBackup(_ entry: BackupEntry) {
+        let alert = NSAlert()
+        alert.messageText = "Delete Backup"
+        alert.informativeText = "This will permanently remove the selected backup."
+        alert.alertStyle = .warning
+        let deleteButton = alert.addButton(withTitle: "Delete")
+        if #available(macOS 11.0, *) {
+            deleteButton.hasDestructiveAction = true
+        }
+        alert.addButton(withTitle: appStore.localized(.cancel))
+
+        let handler: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .alertFirstButtonReturn else { return }
+            do {
+                try FileManager.default.removeItem(at: entry.url)
+                backupRefreshToken = UUID()
+            } catch {
+                // ignore for now
+            }
+        }
+
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            alert.beginSheetModal(for: window, completionHandler: handler)
+        } else {
+            handler(alert.runModal())
         }
     }
 
@@ -535,6 +866,19 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             Text(appStore.localized(.showFPSOverlayDisclaimer))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(appStore.localized(.importLegacy))
+                    .font(.headline)
+                Button { importLegacyArchive() } label: {
+                    Label(appStore.localized(.importLegacy), systemImage: "clock.arrow.circlepath")
+                }
+                Text(appStore.localized(.importTip))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -1107,6 +1451,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             .glassEffect(.clear, in: Capsule())
     }
 
+
     private var aboutSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             ZStack(alignment: .center) {
@@ -1180,6 +1525,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     @ViewBuilder
     private var infoCard: some View {
+        let cardFill = colorScheme == .light ? Color.white : Color.white.opacity(0.05)
         VStack(alignment: .leading, spacing: 10) {
             Text("Operation System")
                 .font(.headline.weight(.semibold))
@@ -1200,7 +1546,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(0.05))
+                .fill(cardFill)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -1341,112 +1687,27 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private var generalSection: some View {
         VStack(alignment: .leading, spacing: 24) {
-            HStack(alignment: .top, spacing: 32) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(appStore.localized(.languagePickerTitle))
-                        .font(.headline)
-                    Picker(appStore.localized(.languagePickerTitle), selection: $appStore.preferredLanguage) {
-                        ForEach(AppLanguage.allCases) { language in
-                            Text(appStore.localizedLanguageName(for: language)).tag(language)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                }
+            appearanceModeCard
 
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(appStore.localized(.appearanceModeTitle))
-                        .font(.headline)
-                    Picker(appStore.localized(.appearanceModeTitle), selection: $appStore.appearancePreference) {
-                        ForEach(AppearancePreference.allCases) { preference in
-                            Text(appStore.localized(preference.localizationKey)).tag(preference)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                }
-                Spacer(minLength: 0)
-            }
+            loginLayoutCard
+                .padding(.top, -10)
 
-            Toggle(appStore.localized(.launchAtLoginTitle), isOn: $appStore.isStartOnLogin)
-            .toggleStyle(.switch)
-            .disabled(!appStore.canConfigureStartOnLogin)
+            Text(appStore.localized(.lockLayoutDescription))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.top, -20)
 
-            VStack(alignment: .leading, spacing: 12) {
-                Text(appStore.localized(.customIconTitle))
-                    .font(.headline)
-                HStack(spacing: 16) {
-                    Image(nsImage: appStore.currentAppIcon)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 72, height: 72)
-                        .cornerRadius(16)
-                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.white.opacity(0.1)))
-                        .shadow(radius: 6, y: 3)
+            applicationIconCard
+                .padding(.top, -15)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Button(appStore.localized(.customIconChoose)) {
-                            presentAppIconPicker()
-                        }
-                        .buttonStyle(.bordered)
+            dataManagementCard
+                .padding(.top, -10)
 
-                        Button(appStore.localized(.customIconReset)) {
-                            appStore.resetCustomAppIcon()
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(.red)
-                        .disabled(!appStore.hasCustomAppIcon)
-                    }
-                }
+            Text(appStore.localized(.importTip))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.top, -15)
 
-                Text(appStore.localized(.customIconHint))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text(appStore.localized(.importSystem))
-                    .font(.headline)
-                HStack(spacing: 12) {
-                    Button { importFromLaunchpad() } label: {
-                        Label(appStore.localized(.importSystem), systemImage: "square.and.arrow.down.on.square")
-                    }
-                    .help(appStore.localized(.importTip))
-
-                    Button { importLegacyArchive() } label: {
-                        Label(appStore.localized(.importLegacy), systemImage: "clock.arrow.circlepath")
-                    }
-                }
-                Text(appStore.localized(.importTip))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 12) {
-                    Button { exportDataFolder() } label: {
-                        Label(appStore.localized(.exportData), systemImage: "square.and.arrow.up")
-                    }
-
-                    Button { importDataFolder() } label: {
-                        Label(appStore.localized(.importData), systemImage: "square.and.arrow.down")
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top, spacing: 32) {
-                    Toggle(appStore.localized(.lockLayoutTitle), isOn: $appStore.isLayoutLocked)
-                        .toggleStyle(.switch)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Toggle(appStore.localized(.showQuickRefreshButton), isOn: $appStore.showQuickRefreshButton)
-                        .toggleStyle(.switch)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                Text(appStore.localized(.lockLayoutDescription))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
             HStack {
                 Button { appStore.refresh() } label: {
                     Label(appStore.localized(.refresh), systemImage: "arrow.clockwise")
@@ -1472,6 +1733,243 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 }
             }
         }
+    }
+
+    private var loginLayoutCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(appStore.localized(.launchAtLoginTitle))
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Toggle("", isOn: $appStore.isStartOnLogin)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .disabled(!appStore.canConfigureStartOnLogin)
+            }
+
+            Divider()
+
+            HStack(alignment: .center, spacing: 24) {
+                HStack {
+                    Text(appStore.localized(.lockLayoutTitle))
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Toggle("", isOn: $appStore.isLayoutLocked)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack {
+                    Text(appStore.localized(.showQuickRefreshButton))
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Toggle("", isOn: $appStore.showQuickRefreshButton)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+    }
+
+    private var applicationIconCard: some View {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(appStore.localized(.customIconTitle))
+                    .font(.headline)
+                let hint = appStore.localized(.customIconHint)
+                Text(twoLineHint(hint))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 8)
+
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .trailing, spacing: 8) {
+                    Button {
+                        presentAppIconPicker()
+                    } label: {
+                        Label(appStore.localized(.customIconChoose), systemImage: "checkmark.circle")
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button {
+                        appStore.resetCustomAppIcon()
+                    } label: {
+                        Label(appStore.localized(.customIconReset), systemImage: "arrow.counterclockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                    .disabled(!appStore.hasCustomAppIcon)
+                }
+
+                Image(nsImage: appStore.currentAppIcon)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 66, height: 66)
+                    .cornerRadius(12)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+    }
+
+    private var dataManagementCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center) {
+                Text("Data Management")
+                    .font(.headline)
+                Spacer()
+                HStack(spacing: 10) {
+                    Button { exportDataFolder() } label: {
+                        Text(appStore.localized(.exportData))
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button { importDataFolder() } label: {
+                        Text(appStore.localized(.importData))
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
+            HStack(spacing: 10) {
+                Button { importFromLaunchpad() } label: {
+                    Label(appStore.localized(.importSystem), systemImage: "square.and.arrow.down.on.square")
+                }
+                .buttonStyle(.bordered)
+                .help(appStore.localized(.importTip))
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+    }
+
+    private func twoLineHint(_ text: String) -> String {
+        let separators = [". ", "。", "！", "？", "；", ";", "，", ",", "、"]
+        for sep in separators {
+            if let range = text.range(of: sep) {
+                let before = text[..<range.upperBound]
+                let after = text[range.upperBound...].trimmingCharacters(in: .whitespaces)
+                if after.isEmpty {
+                    return String(before)
+                }
+                return String(before) + "\n" + after
+            }
+        }
+
+        let words = text.split(separator: " ")
+        if words.count >= 2 {
+            let mid = words.count / 2
+            let first = words[..<mid].joined(separator: " ")
+            let second = words[mid...].joined(separator: " ")
+            return first + "\n" + second
+        }
+
+        return text
+    }
+
+    @ViewBuilder
+    private var appearanceModeCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Text(appStore.localized(.appearanceModeTitle))
+                    .font(.headline)
+                    .frame(minWidth: 90, alignment: .leading)
+
+                Spacer(minLength: 8)
+
+                HStack(spacing: 16) {
+                    appearanceOptionCard(
+                        title: appStore.localized(.appearanceModeFollowSystem),
+                        imageName: "AppearanceAuto",
+                        mode: .system
+                    )
+                    appearanceOptionCard(
+                        title: appStore.localized(.appearanceModeLight),
+                        imageName: "AppearanceLight",
+                        mode: .light
+                    )
+                    appearanceOptionCard(
+                        title: appStore.localized(.appearanceModeDark),
+                        imageName: "AppearanceDark",
+                        mode: .dark
+                    )
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+
+            Divider()
+
+            languageRow
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+    }
+
+    private func appearanceOptionCard(title: String, imageName: String, mode: AppearancePreference) -> some View {
+        let isSelected = appStore.appearancePreference == mode
+        return Button {
+            appStore.appearancePreference = mode
+        } label: {
+            VStack(spacing: 2) {
+                Image(imageName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 60)
+                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .stroke(isSelected ? Color.accentColor : Color.primary.opacity(0.08), lineWidth: isSelected ? 2 : 1)
+                    )
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+            }
+            .frame(minWidth: 52, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var languageRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text(appStore.localized(.languagePickerTitle))
+                .font(.headline)
+                .frame(minWidth: 90, alignment: .leading)
+            Spacer()
+            Picker("", selection: $appStore.preferredLanguage) {
+                ForEach(AppLanguage.allCases) { language in
+                    Text(appStore.localizedLanguageName(for: language)).tag(language)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(width: 180, alignment: .trailing)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var appSourcesSection: some View {
@@ -2111,7 +2609,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private func exportDataFolder() {
         do {
-            let sourceDir = try supportDirectoryURL()
             let panel = NSOpenPanel()
             panel.canChooseFiles = false
             panel.canChooseDirectories = true
@@ -2120,17 +2617,22 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             panel.prompt = appStore.localized(.chooseButton)
             panel.message = appStore.localized(.exportPanelMessage)
             if panel.runModal() == .OK, let destParent = panel.url {
-                let formatter = DateFormatter()
-                formatter.locale = Locale(identifier: "en_US_POSIX")
-                formatter.dateFormat = "yyyy-MM-dd'_'HH.mm.ss" // e.g., 2025-12-27_15.16.02
-                let folderName = "LaunchNext_" + formatter.string(from: Date()) + ".launchnext"
-                let destDir = destParent.appendingPathComponent(folderName, isDirectory: true)
-                try copyDirectory(from: sourceDir, to: destDir)
-                exportPreferences(to: destDir)
+                try exportDataFolder(to: destParent)
             }
         } catch {
             // Ignore errors or surface a user-facing message if desired
         }
+    }
+
+    private func exportDataFolder(to destParent: URL) throws {
+        let sourceDir = try supportDirectoryURL()
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd'_'HH.mm.ss"
+        let folderName = "LaunchNext_" + formatter.string(from: Date()) + ".launchnext"
+        let destDir = destParent.appendingPathComponent(folderName, isDirectory: true)
+        try copyDirectory(from: sourceDir, to: destDir)
+        exportPreferences(to: destDir)
     }
 
     private func importDataFolder() {
@@ -2142,159 +2644,163 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         panel.prompt = appStore.localized(.importPrompt)
         panel.message = appStore.localized(.importPanelMessage)
         if panel.runModal() == .OK, let srcDir = panel.url {
-            do {
-                // Validate this is a valid export folder
-                guard isValidExportFolder(srcDir) else { return }
+            importDataFolder(from: srcDir)
+        }
+    }
 
-                func performImport(importData: Bool, importPrefs: Bool, allowedPrefKeys: Set<String>) throws {
-                    let destDir = try supportDirectoryURL()
-                    if importData {
-                        if srcDir.standardizedFileURL != destDir.standardizedFileURL {
-                            try replaceDirectory(with: srcDir, at: destDir)
-                            appStore.applyOrderAndFolders()
-                            appStore.refresh()
-                        }
-                    }
-                    if importPrefs {
-                        importPreferences(from: srcDir, allowedKeys: allowedPrefKeys.isEmpty ? nil : allowedPrefKeys)
-                        appStore.reloadPreferencesFromDefaults()
+    private func importDataFolder(from srcDir: URL) {
+        do {
+            // Validate this is a valid export folder
+            guard isValidExportFolder(srcDir) else { return }
+
+            func performImport(importData: Bool, importPrefs: Bool, allowedPrefKeys: Set<String>) throws {
+                let destDir = try supportDirectoryURL()
+                if importData {
+                    if srcDir.standardizedFileURL != destDir.standardizedFileURL {
+                        try replaceDirectory(with: srcDir, at: destDir)
+                        appStore.applyOrderAndFolders()
                         appStore.refresh()
                     }
                 }
-
-                // Ask user what to import (attach as sheet to stay on the same screen)
-                let alert = NSAlert()
-                alert.messageText = appStore.localized(.importPrompt)
-                alert.informativeText = appStore.localized(.importPanelMessage)
-                alert.icon = NSApplication.shared.applicationIconImage
-                alert.addButton(withTitle: appStore.localized(.importPrompt)) // Confirm
-                alert.addButton(withTitle: appStore.localized(.cancel))      // Cancel
-
-                let content = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
-
-                func makeCheckbox(_ title: String, state: NSControl.StateValue = .on) -> NSButton {
-                    let button = NSButton(checkboxWithTitle: title, target: nil, action: nil)
-                    button.state = state
-                    button.allowsMixedState = false
-                    button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-                    button.cell?.wraps = true
-                    button.cell?.lineBreakMode = .byWordWrapping
-                    return button
+                if importPrefs {
+                    importPreferences(from: srcDir, allowedKeys: allowedPrefKeys.isEmpty ? nil : allowedPrefKeys)
+                    appStore.reloadPreferencesFromDefaults()
+                    appStore.refresh()
                 }
+            }
 
-                let dataCheckbox = makeCheckbox("Layout & data")
-                let generalCheckbox = makeCheckbox(appStore.localized(.settingsSectionGeneral))
-                let appearanceCheckbox = makeCheckbox(appStore.localized(.settingsSectionAppearance))
-                let sourcesCheckbox = makeCheckbox(appStore.localized(.settingsSectionAppSources))
-                let hiddenCheckbox = makeCheckbox(appStore.localized(.settingsSectionHiddenApps))
-                let titlesCheckbox = makeCheckbox(appStore.localized(.settingsSectionTitles))
+            // Ask user what to import (attach as sheet to stay on the same screen)
+            let alert = NSAlert()
+            alert.messageText = appStore.localized(.importPrompt)
+            alert.informativeText = appStore.localized(.importPanelMessage)
+            alert.icon = NSApplication.shared.applicationIconImage
+            alert.addButton(withTitle: appStore.localized(.importPrompt)) // Confirm
+            alert.addButton(withTitle: appStore.localized(.cancel))      // Cancel
 
-                let stack = NSStackView(views: [
-                    dataCheckbox,
-                    generalCheckbox,
-                    appearanceCheckbox,
-                    sourcesCheckbox,
-                    hiddenCheckbox,
-                    titlesCheckbox
-                ])
-                stack.orientation = .vertical
-                stack.alignment = .leading
-                stack.spacing = 6
-                stack.translatesAutoresizingMaskIntoConstraints = false
-                content.addSubview(stack)
+            let content = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
 
-                NSLayoutConstraint.activate([
-                    stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 4),
-                    stack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -8),
-                    stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 4),
-                    stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor)
-                ])
+            func makeCheckbox(_ title: String, state: NSControl.StateValue = .on) -> NSButton {
+                let button = NSButton(checkboxWithTitle: title, target: nil, action: nil)
+                button.state = state
+                button.allowsMixedState = false
+                button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+                button.cell?.wraps = true
+                button.cell?.lineBreakMode = .byWordWrapping
+                return button
+            }
 
-                // Size to fit content (min width 320, min height 160)
-                let fitting = stack.fittingSize
-                let minWidth: CGFloat = 320
-                let minHeight: CGFloat = 160
-                content.setFrameSize(NSSize(width: max(minWidth, fitting.width + 16),
-                                            height: max(minHeight, fitting.height + 12)))
+            let dataCheckbox = makeCheckbox("Layout & data")
+            let generalCheckbox = makeCheckbox(appStore.localized(.settingsSectionGeneral))
+            let appearanceCheckbox = makeCheckbox(appStore.localized(.settingsSectionAppearance))
+            let sourcesCheckbox = makeCheckbox(appStore.localized(.settingsSectionAppSources))
+            let hiddenCheckbox = makeCheckbox(appStore.localized(.settingsSectionHiddenApps))
+            let titlesCheckbox = makeCheckbox(appStore.localized(.settingsSectionTitles))
 
-                alert.accessoryView = content
+            let stack = NSStackView(views: [
+                dataCheckbox,
+                generalCheckbox,
+                appearanceCheckbox,
+                sourcesCheckbox,
+                hiddenCheckbox,
+                titlesCheckbox
+            ])
+            stack.orientation = .vertical
+            stack.alignment = .leading
+            stack.spacing = 6
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            content.addSubview(stack)
 
-                func selectedPrefKeys() -> Set<String> {
-                    var keys = Set<String>()
-                    if generalCheckbox.state == .on {
-                        keys.insert("preferredLanguage")
-                        keys.insert("appearancePreference")
-                        keys.insert("isStartOnLogin")
-                        keys.insert(AppStore.showQuickRefreshButtonKey)
-                        keys.insert(AppStore.lockLayoutKey)
-                    }
-                    if appearanceCheckbox.state == .on {
-                        keys.insert(AppStore.sidebarIconPresetKey)
-                        keys.insert(AppStore.backgroundStyleKey)
-                        keys.insert("scrollSensitivity")
-                        keys.insert("isFullscreenMode")
-                        keys.insert("showLabels")
-                        keys.insert("hideDock")
-                        keys.insert("enableAnimations")
-                        keys.insert("useLocalizedThirdPartyTitles")
-                        keys.insert("enableDropPrediction")
-                        keys.insert(AppStore.rememberPageKey)
-                        keys.insert(AppStore.rememberedPageIndexKey)
-                        keys.insert("iconScale")
-                        keys.insert("iconLabelFontSize")
-                        keys.insert(AppStore.iconLabelFontWeightKey)
-                        keys.insert("gridColumnsPerPage")
-                        keys.insert("gridRowsPerPage")
-                        keys.insert("gridColumnSpacing")
-                        keys.insert("gridRowSpacing")
-                        keys.insert("folderDropZoneScale")
-                        keys.insert("pageIndicatorOffset")
-                        keys.insert(AppStore.pageIndicatorTopPaddingKey)
-                        keys.insert("folderPopoverWidthFactor")
-                        keys.insert("folderPopoverHeightFactor")
-                        keys.insert(AppStore.hoverMagnificationKey)
-                        keys.insert(AppStore.hoverMagnificationScaleKey)
-                        keys.insert(AppStore.activePressEffectKey)
-                        keys.insert(AppStore.activePressScaleKey)
-                        keys.insert("animationDuration")
-                        keys.insert("globalHotKeyConfiguration")
-                        keys.insert("showFPSOverlay")
-                    }
-                    if hiddenCheckbox.state == .on {
-                        keys.insert(AppStore.hiddenAppsKey)
-                    }
-                    if sourcesCheckbox.state == .on {
-                        keys.insert(AppStore.customAppSourcesKey)
-                    }
-                    if titlesCheckbox.state == .on {
-                        keys.insert(AppStore.customTitlesKey)
-                    }
-                    return keys
+            NSLayoutConstraint.activate([
+                stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 4),
+                stack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -8),
+                stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 4),
+                stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor)
+            ])
+
+            // Size to fit content (min width 320, min height 160)
+            let fitting = stack.fittingSize
+            let minWidth: CGFloat = 320
+            let minHeight: CGFloat = 160
+            content.setFrameSize(NSSize(width: max(minWidth, fitting.width + 16),
+                                        height: max(minHeight, fitting.height + 12)))
+
+            alert.accessoryView = content
+
+            func selectedPrefKeys() -> Set<String> {
+                var keys = Set<String>()
+                if generalCheckbox.state == .on {
+                    keys.insert("preferredLanguage")
+                    keys.insert("appearancePreference")
+                    keys.insert("isStartOnLogin")
+                    keys.insert(AppStore.showQuickRefreshButtonKey)
+                    keys.insert(AppStore.lockLayoutKey)
                 }
+                if appearanceCheckbox.state == .on {
+                    keys.insert(AppStore.sidebarIconPresetKey)
+                    keys.insert(AppStore.backgroundStyleKey)
+                    keys.insert("scrollSensitivity")
+                    keys.insert("isFullscreenMode")
+                    keys.insert("showLabels")
+                    keys.insert("hideDock")
+                    keys.insert("enableAnimations")
+                    keys.insert("useLocalizedThirdPartyTitles")
+                    keys.insert("enableDropPrediction")
+                    keys.insert(AppStore.rememberPageKey)
+                    keys.insert(AppStore.rememberedPageIndexKey)
+                    keys.insert("iconScale")
+                    keys.insert("iconLabelFontSize")
+                    keys.insert(AppStore.iconLabelFontWeightKey)
+                    keys.insert("gridColumnsPerPage")
+                    keys.insert("gridRowsPerPage")
+                    keys.insert("gridColumnSpacing")
+                    keys.insert("gridRowSpacing")
+                    keys.insert("folderDropZoneScale")
+                    keys.insert("pageIndicatorOffset")
+                    keys.insert(AppStore.pageIndicatorTopPaddingKey)
+                    keys.insert("folderPopoverWidthFactor")
+                    keys.insert("folderPopoverHeightFactor")
+                    keys.insert(AppStore.hoverMagnificationKey)
+                    keys.insert(AppStore.hoverMagnificationScaleKey)
+                    keys.insert(AppStore.activePressEffectKey)
+                    keys.insert(AppStore.activePressScaleKey)
+                    keys.insert("animationDuration")
+                    keys.insert("globalHotKeyConfiguration")
+                    keys.insert("showFPSOverlay")
+                }
+                if hiddenCheckbox.state == .on {
+                    keys.insert(AppStore.hiddenAppsKey)
+                }
+                if sourcesCheckbox.state == .on {
+                    keys.insert(AppStore.customAppSourcesKey)
+                }
+                if titlesCheckbox.state == .on {
+                    keys.insert(AppStore.customTitlesKey)
+                }
+                return keys
+            }
 
-                if let window = NSApp.keyWindow ?? NSApp.mainWindow {
-                    alert.beginSheetModal(for: window) { response in
-                        guard response == .alertFirstButtonReturn else { return }
-                        let importData = dataCheckbox.state == .on
-                        let keys = selectedPrefKeys()
-                        let importPrefs = !keys.isEmpty
-                        do {
-                            try performImport(importData: importData, importPrefs: importPrefs, allowedPrefKeys: keys)
-                        } catch {
-                            // Ignore failed import
-                        }
-                    }
-                } else {
-                    let response = alert.runModal()
+            if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+                alert.beginSheetModal(for: window) { response in
                     guard response == .alertFirstButtonReturn else { return }
                     let importData = dataCheckbox.state == .on
                     let keys = selectedPrefKeys()
                     let importPrefs = !keys.isEmpty
-                    try performImport(importData: importData, importPrefs: importPrefs, allowedPrefKeys: keys)
+                    do {
+                        try performImport(importData: importData, importPrefs: importPrefs, allowedPrefKeys: keys)
+                    } catch {
+                        // Ignore failed import
+                    }
                 }
-            } catch {
-                // Ignore errors or surface a user-facing message if desired
+            } else {
+                let response = alert.runModal()
+                guard response == .alertFirstButtonReturn else { return }
+                let importData = dataCheckbox.state == .on
+                let keys = selectedPrefKeys()
+                let importPrefs = !keys.isEmpty
+                try performImport(importData: importData, importPrefs: importPrefs, allowedPrefKeys: keys)
             }
+        } catch {
+            // Ignore errors or surface a user-facing message if desired
         }
     }
 
@@ -2436,122 +2942,240 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     // MARK: - Update Check Section
     private var updatesSection: some View {
-        let isChecking = appStore.updateState == .checking
+        return VStack(alignment: .leading, spacing: 16) {
+            updatesHero
 
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(appStore.localized(.checkForUpdates))
-                        .font(.headline)
+            updatesControlCard
 
-                    switch appStore.updateState {
-                    case .idle:
-                        Button(action: {
-                            appStore.checkForUpdates()
-                        }) {
-                            Label(appStore.localized(.checkForUpdatesButton), systemImage: "arrow.clockwise")
-                        }
-                        .buttonStyle(.bordered)
+            updatesStatusCard
 
-                    case .checking:
-                        HStack {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                            Text(appStore.localized(.checkingForUpdates))
-                                .foregroundStyle(.secondary)
-                        }
+            updateControlButton(
+                title: appStore.localized(.openUpdaterConfig),
+                systemImage: "doc.text"
+            ) {
+                appStore.openUpdaterConfigFile()
+            }
+        }
+    }
 
-                    case .upToDate(let latest):
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text(appStore.localized(.upToDate))
-                                .foregroundStyle(.secondary)
-                        }
+    private var updatesStatusCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            let availableRelease: AppStore.UpdateRelease? = {
+                if case .updateAvailable(let release) = appStore.updateState { return release }
+                return nil
+            }()
+            let availableNotes: String? = {
+                if case .updateAvailable(let release) = appStore.updateState {
+                    return release.notes
+                }
+                return nil
+            }()
 
-                    case .updateAvailable(let release):
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Image(systemName: "party.popper.fill")
-                                    .foregroundStyle(.orange)
-                                Text(appStore.localized(.updateAvailable))
-                                    .font(.subheadline.weight(.medium))
-                            }
+            Text(appStore.localized(.checkForUpdates))
+                .font(.headline)
 
-                            Text(appStore.localized(.newVersion) + " \(release.version)")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
+            switch appStore.updateState {
+            case .idle:
+                EmptyView()
 
-                            if let notes = release.notes, !notes.isEmpty {
-                                Text(notes)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(3)
-                            }
+            case .checking:
+                HStack {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text(appStore.localized(.checkingForUpdates))
+                        .foregroundStyle(.secondary)
+                }
 
-                            Button {
-                                appStore.launchUpdater(for: release)
-                            } label: {
-                                Label(appStore.localized(.downloadUpdate), systemImage: "arrow.down.circle")
-                            }
-                            .buttonStyle(.borderedProminent)
+            case .upToDate:
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text(appStore.localized(.upToDate))
+                        .foregroundStyle(.secondary)
+                }
 
-                            Button {
-                                appStore.openReleaseURL(release.url)
-                            } label: {
-                                Label(appStore.localized(.viewOnGitHub), systemImage: "arrow.up.right.square")
-                            }
-                            .buttonStyle(.bordered)
-                        }
+            case .updateAvailable(let release):
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "party.popper.fill")
+                            .foregroundStyle(.orange)
+                        Text(appStore.localized(.updateAvailable))
+                            .font(.subheadline.weight(.medium))
+                    }
 
-                    case .failed(let error):
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(.red)
-                                Text(appStore.localized(.updateCheckFailed))
-                                    .font(.subheadline.weight(.medium))
-                            }
+                    Text(appStore.localized(.newVersion) + " \(release.version)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
 
-                            Text(error)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-
-                            Button(action: {
-                                appStore.checkForUpdates()
-                            }) {
-                                Label(appStore.localized(.tryAgain), systemImage: "arrow.clockwise")
-                            }
-                            .buttonStyle(.bordered)
-                        }
+                    if let notes = release.notes, !notes.isEmpty {
+                        Text(linkifiedText(notes))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                            .frame(maxHeight: updateNotesPreviewMaxHeight)
+                            .clipped()
                     }
                 }
-                Spacer()
+
+            case .failed(let error):
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                        Text(appStore.localized(.updateCheckFailed))
+                            .font(.subheadline.weight(.medium))
+                    }
+
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if showUpdateNotes, let notes = availableNotes, !notes.isEmpty {
+                Text(linkifiedText(notes))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
             }
 
             HStack(spacing: 12) {
-                Button {
+                updateControlButton(
+                    title: appStore.updateState == .idle
+                        ? appStore.localized(.checkForUpdatesButton)
+                        : appStore.localized(.updatesRefreshButton),
+                    systemImage: "arrow.clockwise",
+                    isPrimary: true
+                ) {
                     appStore.checkForUpdates()
-                } label: {
-                    Label(appStore.localized(.updatesRefreshButton), systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(isChecking)
+                .disabled(appStore.updateState == .checking)
 
-                Button {
-                    appStore.openUpdaterConfigFile()
-                } label: {
-                    Label(appStore.localized(.openUpdaterConfig), systemImage: "doc.text")
+                Spacer(minLength: 0)
+
+                if let release = availableRelease {
+                    updateControlButton(
+                        title: appStore.localized(.downloadUpdate),
+                        systemImage: "arrow.down.circle"
+                    ) {
+                        appStore.launchUpdater(for: release)
+                    }
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+
+                if let notes = availableNotes, !notes.isEmpty {
+                    Button {
+                        showUpdateNotes.toggle()
+                    } label: {
+                        Image(systemName: showUpdateNotes ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            // Auto-check for updates toggle
-            Toggle(appStore.localized(.autoCheckForUpdates), isOn: $appStore.autoCheckForUpdates)
-                .font(.footnote)
         }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+    }
+
+    private var updatesControlCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(appStore.localized(.autoCheckForUpdates))
+                    .font(.subheadline)
+                Spacer()
+                Toggle("", isOn: $appStore.autoCheckForUpdates)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+    }
+
+    private func updateControlButton(title: String, systemImage: String, isPrimary: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .frame(minWidth: 160)
+        }
+        .buttonStyle(.plain)
+        .background(
+            Capsule()
+                .fill(isPrimary ? Color.accentColor.opacity(0.16) : Color(nsColor: .windowBackgroundColor))
+        )
+        .overlay(
+            Capsule()
+                .stroke(isPrimary ? Color.accentColor.opacity(0.6) : Color.primary.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private var updateNotesPreviewMaxHeight: CGFloat {
+        let size = NSFont.systemFontSize(for: .small)
+        return size * 1.2 * 3
+    }
+
+    private func linkifiedText(_ source: String) -> AttributedString {
+        var attributed = AttributedString(source)
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+            return attributed
+        }
+        detector.enumerateMatches(in: source, options: [], range: NSRange(location: 0, length: (source as NSString).length)) { match, _, _ in
+            guard let match, let url = match.url,
+                  let range = Range(match.range, in: source),
+                  let attrRange = Range(range, in: attributed) else { return }
+            attributed[attrRange].link = url
+            attributed[attrRange].foregroundColor = .accentColor
+        }
+        return attributed
+    }
+
+
+
+    private var updatesHero: some View {
+        let statusText: String = {
+            if case .updateAvailable = appStore.updateState {
+                return "Update available"
+            }
+            return "Version \(getVersion())"
+        }()
+
+        return ZStack(alignment: .center) {
+            Image("AboutBackground")
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(16.0/9.0, contentMode: .fill)
+                .frame(maxWidth: .infinity)
+                .clipped()
+
+            VStack(spacing: 12) {
+                headlineGlass
+
+                Text(statusText)
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .padding(.top, 6)
+            }
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 180, maxHeight: 200)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.18), lineWidth: 1.4)
+        )
+        .padding(.bottom, 12)
     }
 }
