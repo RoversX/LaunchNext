@@ -1366,8 +1366,15 @@ final class AppStore: ObservableObject {
         let shouldRememberPage = defaults.object(forKey: Self.rememberPageKey) == nil ? false : defaults.bool(forKey: Self.rememberPageKey)
         let savedPageIndex = defaults.object(forKey: Self.rememberedPageIndexKey) as? Int
 
-        let storedSensitivity = defaults.double(forKey: "scrollSensitivity")
-        self.scrollSensitivity = storedSensitivity == 0 ? Self.defaultScrollSensitivity : storedSensitivity
+        let initialScrollSensitivity: Double
+        if defaults.object(forKey: "scrollSensitivity") == nil {
+            initialScrollSensitivity = 0.8
+            defaults.set(initialScrollSensitivity, forKey: "scrollSensitivity")
+        } else {
+            let storedSensitivity = defaults.double(forKey: "scrollSensitivity")
+            initialScrollSensitivity = storedSensitivity == 0 ? Self.defaultScrollSensitivity : storedSensitivity
+        }
+        scrollSensitivity = initialScrollSensitivity
 
         let storedColumns = defaults.object(forKey: Self.gridColumnsKey) as? Int ?? 7
         let clampedColumns = Self.clampColumns(storedColumns)
