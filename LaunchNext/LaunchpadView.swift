@@ -126,11 +126,18 @@ struct LaunchpadView: View {
     @State private var performanceMetrics: [String: TimeInterval] = [:]
     private let enablePerformanceMonitoring = false // 设置为true启用性能监控
     @State private var isHandoffDragging: Bool = false
-    @State private var isUserSwiping: Bool = false
-    @State private var accumulatedScrollX: CGFloat = 0
-    @State private var wheelAccumulatedSinceFlip: CGFloat = 0
-    @State private var wheelLastDirection: Int = 0
-    @State private var wheelLastFlipAt: Date? = nil
+    private struct ScrollState {
+        var isUserSwiping: Bool = false
+        var accumulatedX: CGFloat = 0
+        var wheelAccumulated: CGFloat = 0
+        var wheelLastDirection: Int = 0
+        var wheelLastFlipAt: Date? = nil
+        var followOffset: CGFloat = 0
+        var followLastUpdateAt: TimeInterval = 0
+        var followLastOffset: CGFloat = 0
+    }
+
+    @State private var scrollState = ScrollState()
     private let wheelFlipCooldown: TimeInterval = 0.15
     @State private var dragPointerOffset: CGPoint = .zero
     @State private var blankDragStartPoint: CGPoint? = nil
@@ -189,14 +196,7 @@ struct LaunchpadView: View {
                 }
                 for app in matchingApps {
                     if !searchedApps.contains(app.url.path) {
-                        // 确保应用对象有效且图标可用
-                        let icon = app.icon.size.width > 0 ? app.icon : NSWorkspace.shared.icon(forFile: app.url.path)
-                        let validApp = AppInfo(
-                            name: app.name,
-                            icon: icon,
-                            url: app.url
-                        )
-                        result.append(.app(validApp))
+                        result.append(.app(app))
                         searchedApps.insert(app.url.path)
                     }
                 }
@@ -424,6 +424,7 @@ struct LaunchpadView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         let hStackOffset = -CGFloat(appStore.currentPage) * effectivePageWidth
+                            + (appStore.followScrollPagingEnabled ? scrollState.followOffset : 0)
                         ZStack(alignment: .topLeading) {
                             // 内容
                             HStack(spacing: config.pageSpacing) {
@@ -737,6 +738,15 @@ struct LaunchpadView: View {
                 }
             }
         )
+        .onChange(of: appStore.followScrollPagingEnabled) { _ in
+            if scrollState.followOffset != 0 || scrollState.accumulatedX != 0 || scrollState.isUserSwiping {
+                scrollState.followOffset = 0
+                scrollState.accumulatedX = 0
+                scrollState.isUserSwiping = false
+                scrollState.followLastUpdateAt = 0
+                scrollState.followLastOffset = 0
+            }
+        }
         .overlay(alignment: .bottomTrailing) {
             if appStore.showFPSOverlay {
                 Text(String(format: "%.0f FPS  %.1f ms", fpsValue, frameTimeMilliseconds))
@@ -1682,7 +1692,7 @@ extension LaunchpadView {
                             pageIndex: Int,
                             columnWidth: CGFloat,
                             appHeight: CGFloat) -> CGPoint {
-        // 性能优化：使用缓存避免重复计算
+        // Cache geometry to avoid repeating layout math.
         let cacheKey = "center_\(globalIndex)_\(pageIndex)_\(containerSize.width)_\(containerSize.height)_\(columnWidth)_\(appHeight)"
         
         // 检查缓存是否有效
@@ -1695,7 +1705,7 @@ extension LaunchpadView {
         let origin = cellOrigin(for: globalIndex, in: containerSize, pageIndex: pageIndex, columnWidth: columnWidth, appHeight: appHeight)
         let center = CGPoint(x: origin.x + columnWidth / 2, y: origin.y + appHeight / 2)
         
-        // 异步更新缓存，避免在视图更新期间修改状态
+        // Update cache on the next run loop to avoid state writes during layout.
         DispatchQueue.main.async {
             Self.geometryCache[cacheKey] = center
             Self.lastGeometryUpdate = now
@@ -1852,6 +1862,47 @@ extension LaunchpadView {
 
 // MARK: - Scroll handling (mouse wheel and trackpad)
 extension LaunchpadView {
+    private func rubberbandOffset(_ value: CGFloat, limit: CGFloat) -> CGFloat {
+        let factor: CGFloat = 0.5
+        let distance = abs(value)
+        let scaled = (factor * distance) / (distance + limit)
+        return scaled * (value >= 0 ? 1 : -1) * limit
+    }
+
+    private func handleWheelScroll(_ primaryDelta: CGFloat) {
+        if primaryDelta == 0 { return }
+        let direction = primaryDelta > 0 ? 1 : -1
+        if scrollState.wheelLastDirection != direction { scrollState.wheelAccumulated = 0 }
+        scrollState.wheelLastDirection = direction
+        scrollState.wheelAccumulated += abs(primaryDelta)
+        let baselineSensitivity = max(AppStore.defaultScrollSensitivity, 0.0001)
+        let relativeSensitivity = max(appStore.scrollSensitivity, 0.0001) / baselineSensitivity
+        // Scale wheel threshold by sensitivity.
+        let threshold: CGFloat = 2.0 / CGFloat(relativeSensitivity)
+        let now = Date()
+        if scrollState.wheelAccumulated >= threshold {
+            if let last = scrollState.wheelLastFlipAt, now.timeIntervalSince(last) < wheelFlipCooldown { return }
+            if direction > 0 { navigateToNextPage() } else { navigateToPreviousPage() }
+            scrollState.wheelLastFlipAt = now
+            // Reset so one tick flips at most once.
+            scrollState.wheelAccumulated = 0
+        }
+    }
+
+    private func flipThreshold(_ pageWidth: CGFloat) -> CGFloat {
+        let baseline = max(AppStore.defaultScrollSensitivity, 0.001)
+        return pageWidth * ((baseline * baseline) / max(appStore.scrollSensitivity, 0.001))
+    }
+
+    private func resetFollowOffset(animated: Bool) {
+        guard scrollState.followOffset != 0 else { return }
+        if animated && appStore.enableAnimations {
+            withAnimation(LNAnimations.springFast) { scrollState.followOffset = 0 }
+        } else {
+            scrollState.followOffset = 0
+        }
+    }
+
     private func handleScroll(deltaX: CGFloat,
                               deltaY: CGFloat,
                               phase: NSEvent.Phase,
@@ -1859,53 +1910,92 @@ extension LaunchpadView {
                               isPrecise: Bool,
                               pageWidth: CGFloat) {
         guard !isFolderOpen else { return }
-        // Mouse wheel (non-precise): accumulate distance; apply small cooldown to avoid multi-page flips
+
+        let primaryDelta = abs(deltaX) >= abs(deltaY) ? deltaX : -deltaY
+
+        // Non-precise wheel: accumulate deltas and apply a short cooldown.
         if !isPrecise {
-            // Map vertical wheel to horizontal direction like precise scroll
-            let primaryDelta = abs(deltaX) >= abs(deltaY) ? deltaX : -deltaY
-            if primaryDelta == 0 { return }
-            let direction = primaryDelta > 0 ? 1 : -1
-            if wheelLastDirection != direction { wheelAccumulatedSinceFlip = 0 }
-            wheelLastDirection = direction
-            wheelAccumulatedSinceFlip += abs(primaryDelta)
-            let baselineSensitivity = max(AppStore.defaultScrollSensitivity, 0.0001)
-            let relativeSensitivity = max(appStore.scrollSensitivity, 0.0001) / baselineSensitivity
-            let threshold: CGFloat = 2.0 / CGFloat(relativeSensitivity) // 根据灵敏度调整鼠标滚轮阈值
-            let now = Date()
-            if wheelAccumulatedSinceFlip >= threshold {
-                if let last = wheelLastFlipAt, now.timeIntervalSince(last) < wheelFlipCooldown { return }
-                if direction > 0 { navigateToNextPage() } else { navigateToPreviousPage() }
-                wheelLastFlipAt = now
-                // reset accumulation so one wheel tick only flips once
-                wheelAccumulatedSinceFlip = 0
+            handleWheelScroll(primaryDelta)
+            return
+        }
+
+        // Precise scroll without follow: accumulate and flip once past the threshold.
+        if !appStore.followScrollPagingEnabled {
+            // Skip momentum to keep one flip per gesture.
+            if isMomentum { return }
+            // Treat vertical input as horizontal paging.
+            let delta = primaryDelta
+            switch phase {
+            case .began:
+                scrollState.isUserSwiping = true
+                scrollState.accumulatedX = 0
+            case .changed:
+                scrollState.isUserSwiping = true
+                scrollState.accumulatedX += delta
+            case .ended, .cancelled:
+                let threshold = flipThreshold(pageWidth)
+                if scrollState.accumulatedX <= -threshold {
+                    navigateToNextPage()
+                } else if scrollState.accumulatedX >= threshold {
+                    navigateToPreviousPage()
+                }
+                scrollState.accumulatedX = 0
+                scrollState.isUserSwiping = false
+            default:
+                break
             }
             return
         }
 
-        // Trackpad precise scroll: accumulate and flip after threshold
-        // Ignore momentum phase to ensure only one flip per gesture
-        if isMomentum { return }
-        let delta = abs(deltaX) >= abs(deltaY) ? deltaX : -deltaY // vertical swipes map to horizontal
+        // Follow-scroll mode: drag-like offset while scrolling, then settle.
+        if phase == [] {
+            handleWheelScroll(primaryDelta)
+            return
+        }
+        if isMomentum && phase != .ended && phase != .cancelled { return }
+        // Treat vertical input as horizontal paging.
+        let delta = primaryDelta
         switch phase {
         case .began:
-            isUserSwiping = true
-            accumulatedScrollX = 0
+            scrollState.isUserSwiping = true
+            scrollState.accumulatedX = 0
+            scrollState.followOffset = 0
+            scrollState.followLastUpdateAt = 0
+            scrollState.followLastOffset = 0
         case .changed:
-            isUserSwiping = true
-            accumulatedScrollX += delta
+            scrollState.isUserSwiping = true
+            scrollState.accumulatedX += delta
+            var proposed = scrollState.accumulatedX
+            let atFirstPage = appStore.currentPage <= 0
+            let atLastPage = appStore.currentPage >= max(pages.count - 1, 0)
+            if atFirstPage && proposed > 0 {
+                proposed = rubberbandOffset(proposed, limit: pageWidth)
+            } else if atLastPage && proposed < 0 {
+                proposed = rubberbandOffset(proposed, limit: pageWidth)
+            } else {
+                let maxOffset = pageWidth * 0.95
+                proposed = max(-maxOffset, min(maxOffset, proposed))
+            }
+            let now = CFAbsoluteTimeGetCurrent()
+            let minInterval = 1.0 / 90.0
+            let minDelta: CGFloat = 0.6
+            if abs(proposed - scrollState.followLastOffset) >= minDelta || (now - scrollState.followLastUpdateAt) >= minInterval {
+                scrollState.followOffset = proposed
+                scrollState.followLastUpdateAt = now
+                scrollState.followLastOffset = proposed
+            }
         case .ended, .cancelled:
-            // 使灵敏度越大阈值越小，以符合直觉（与鼠标滚轮一致）
-            // 归一到默认值：threshold = pageWidth * (baseline^2 / sensitivity)
-            // 当 sensitivity=baseline 时，阈值为 baseline*pageWidth；越大则更灵敏（阈值更小）
-            let baselineSensitivity = max(AppStore.defaultScrollSensitivity, 0.001)
-            let threshold = pageWidth * ((baselineSensitivity * baselineSensitivity) / max(appStore.scrollSensitivity, 0.001))
-            if accumulatedScrollX <= -threshold {
+            let threshold = flipThreshold(pageWidth)
+            if scrollState.accumulatedX <= -threshold {
                 navigateToNextPage()
-            } else if accumulatedScrollX >= threshold {
+            } else if scrollState.accumulatedX >= threshold {
                 navigateToPreviousPage()
             }
-            accumulatedScrollX = 0
-            isUserSwiping = false
+            resetFollowOffset(animated: true)
+            scrollState.accumulatedX = 0
+            scrollState.isUserSwiping = false
+            scrollState.followLastUpdateAt = 0
+            scrollState.followLastOffset = 0
         default:
             break
         }
@@ -2168,7 +2258,7 @@ struct DragPreviewItem: View {
         switch item {
         case .app(let app):
             let pathExists = FileManager.default.fileExists(atPath: app.url.path)
-            let icon = app.icon
+            let icon = IconStore.shared.icon(for: app)
             if pathExists && icon.size.width > 0 && icon.size.height > 0 {
                 return icon
             }

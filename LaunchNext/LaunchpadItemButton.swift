@@ -127,7 +127,7 @@ private struct LaunchpadItemButtonContent: View {
                            cachedIcon.size.height > 0 {
                             return cachedIcon
                         }
-                        let base = app.icon
+                        let base = IconStore.shared.icon(for: app)
                         if FileManager.default.fileExists(atPath: app.url.path),
                            base.size.width > 0 && base.size.height > 0 {
                             return base

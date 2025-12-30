@@ -23,8 +23,12 @@ final class AppCacheManager: ObservableObject {
     @Published var cacheSize: Int = 0
     // MARK: - 缓存键生成
     private let cacheKeyGenerator = CacheKeyGenerator()
-    
+
     private init() {}
+
+    private var isLeanMode: Bool {
+        PerformanceMode.current == .lean
+    }
     // MARK: - 公共接口
     
     /// 生成应用缓存 - 在应用启动或扫描后调用
@@ -64,7 +68,9 @@ final class AppCacheManager: ObservableObject {
             self.cacheAppInfos(uniqueApps)
             
             // 缓存应用图标
-            self.cacheAppIcons(uniqueApps)
+            if !self.isLeanMode {
+                self.cacheAppIcons(uniqueApps)
+            }
             
             // 缓存网格布局数据
             self.cacheGridLayout(items,
@@ -83,6 +89,9 @@ final class AppCacheManager: ObservableObject {
     
     /// 获取缓存的应用图标
     func getCachedIcon(for appPath: String) -> NSImage? {
+        if isLeanMode {
+            return nil
+        }
         let key = cacheKeyGenerator.generateIconKey(for: appPath)
         
         cacheLock.lock()
@@ -112,6 +121,9 @@ final class AppCacheManager: ObservableObject {
     
     /// 预加载应用图标到缓存
     func preloadIcons(for appPaths: [String]) {
+        if isLeanMode {
+            return
+        }
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
             
@@ -140,6 +152,9 @@ final class AppCacheManager: ObservableObject {
     
     /// 智能预加载：预加载当前页面和相邻页面的图标
     func smartPreloadIcons(for items: [LaunchpadItem], currentPage: Int, itemsPerPage: Int) {
+        if isLeanMode {
+            return
+        }
         let startIndex = max(0, (currentPage - 1) * itemsPerPage)
         let endIndex = min(items.count, (currentPage + 2) * itemsPerPage)
         
@@ -225,6 +240,9 @@ final class AppCacheManager: ObservableObject {
     }
     
     private func cacheAppIcons(_ apps: [AppInfo]) {
+        if isLeanMode {
+            return
+        }
         cacheLock.lock()
         for app in apps {
             let key = cacheKeyGenerator.generateIconKey(for: app.url.path)

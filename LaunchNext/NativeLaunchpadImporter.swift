@@ -463,7 +463,9 @@ class NativeLaunchpadImporter {
     private func findLocalApp(bundleId: String, title: String) -> AppInfo? {
         // 优先使用 NSWorkspace 查找
         if let appPath = NSWorkspace.shared.absolutePathForApplication(withBundleIdentifier: bundleId) {
-            return AppInfo.from(url: URL(fileURLWithPath: appPath), preferredName: title)
+            return AppInfo.from(url: URL(fileURLWithPath: appPath),
+                                preferredName: title,
+                                loadIcon: PerformanceMode.current == .full)
         }
 
         // 备用方案：在常见路径中搜索
@@ -496,12 +498,16 @@ class NativeLaunchpadImporter {
                 if let bundle = Bundle(url: url) {
                     // 精确匹配 bundle ID
                     if bundle.bundleIdentifier == bundleId {
-                        return AppInfo.from(url: url, preferredName: title)
+                        return AppInfo.from(url: url,
+                                            preferredName: title,
+                                            loadIcon: PerformanceMode.current == .full)
                     }
                     // 备用：名称匹配
                     if let appName = bundle.infoDictionary?["CFBundleName"] as? String,
                        appName == title {
-                        return AppInfo.from(url: url, preferredName: title)
+                        return AppInfo.from(url: url,
+                                            preferredName: title,
+                                            loadIcon: PerformanceMode.current == .full)
                     }
                 }
             }

@@ -7,6 +7,17 @@ struct AppInfo: Identifiable, Equatable, Hashable {
     let icon: NSImage
     let url: URL
 
+    static let transparentPlaceholderIcon: NSImage = {
+        let size = NSSize(width: 1, height: 1)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSColor.clear.setFill()
+        NSBezierPath(rect: NSRect(origin: .zero, size: size)).fill()
+        image.unlockFocus()
+        image.isTemplate = false
+        return image
+    }()
+
     // 使用应用路径作为稳定唯一标识
     var id: String { url.path }
 
@@ -19,7 +30,7 @@ struct AppInfo: Identifiable, Equatable, Hashable {
     }
 
     // MARK: - 创建 AppInfo
-    static func from(url: URL, preferredName: String? = nil, customTitle: String? = nil) -> AppInfo {
+    static func from(url: URL, preferredName: String? = nil, customTitle: String? = nil, loadIcon: Bool = true) -> AppInfo {
         let fallbackName = normalizeCandidate(url.deletingPathExtension().lastPathComponent)
         let bundle = Bundle(url: url)
         let localizedName = localizedAppName(for: url,
@@ -32,7 +43,12 @@ struct AppInfo: Identifiable, Equatable, Hashable {
 
         let shouldUseLocalized = shouldUseLocalizedTitles()
         let chosenName = shouldUseLocalized ? localizedName : englishName
-        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        let icon: NSImage
+        if loadIcon {
+            icon = NSWorkspace.shared.icon(forFile: url.path)
+        } else {
+            icon = transparentPlaceholderIcon
+        }
 
         if let override = customTitle.flatMap({ title -> String? in
             let normalized = normalizeCandidate(title)

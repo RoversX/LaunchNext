@@ -15,15 +15,20 @@ struct FolderInfo: Identifiable, Equatable {
         self.createdAt = createdAt
     }
     
-    var folderIcon: NSImage { 
-        // 每次访问都重新生成图标，确保反映最新的应用状态
+    var folderIcon: NSImage {
+        // 使用缓存生成文件夹图标，避免重复渲染
         let icon = icon(of: 72)
         return icon
     }
 
     func icon(of side: CGFloat) -> NSImage {
         let normalizedSide = max(16, side)
+        let cacheKey = folderPreviewCacheKey(for: normalizedSide)
+        if let cached = FolderPreviewCache.shared.image(forKey: cacheKey) {
+            return cached
+        }
         let icon = renderFolderIcon(side: normalizedSide)
+        FolderPreviewCache.shared.store(icon, forKey: cacheKey)
         return icon
     }
 
@@ -66,16 +71,27 @@ struct FolderInfo: Identifiable, Equatable {
             
             // 图标兜底：若应用图标尺寸为0，回退到系统文件图标
             let iconToDraw: NSImage = {
-                if app.icon.size.width > 0 && app.icon.size.height > 0 {
-                    return app.icon
-                } else {
-                    return NSWorkspace.shared.icon(forFile: app.url.path)
+                let baseIcon = IconStore.shared.icon(for: app)
+                if baseIcon.size.width > 0 && baseIcon.size.height > 0 {
+                    return baseIcon
                 }
+                return NSWorkspace.shared.icon(forFile: app.url.path)
             }()
             iconToDraw.draw(in: iconRect)
         }
 
         return image
+    }
+
+    private func folderPreviewCacheKey(for side: CGFloat) -> String {
+        var hasher = Hasher()
+        hasher.combine(id)
+        for app in apps {
+            hasher.combine(app.url.path)
+        }
+        let contentHash = hasher.finalize()
+        let sizeKey = Int(side.rounded())
+        return "folderPreview_\(id)_\(sizeKey)_\(contentHash)"
     }
     
     static func == (lhs: FolderInfo, rhs: FolderInfo) -> Bool {

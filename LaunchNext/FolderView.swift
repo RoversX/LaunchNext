@@ -422,7 +422,7 @@ extension FolderView {
                                 let clamped = min(max(0, insertIndex), apps.count)
                                 apps.insert(dragging, at: clamped)
                                 folder.apps = apps
-                                appStore.saveAllOrder()
+                                appStore.notifyFolderContentChanged(folder)
                                 
                                 // 文件夹内拖拽结束后也触发压缩，确保主界面的empty项目移动到页面末尾
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {

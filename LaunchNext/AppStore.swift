@@ -166,6 +166,7 @@ final class AppStore: ObservableObject {
     static let hoverMagnificationScaleKey = "hoverMagnificationScale"
     static let activePressEffectKey = "enableActivePressEffect"
     static let activePressScaleKey = "activePressScale"
+    static let followScrollPagingKey = "followScrollPagingEnabled"
     static let backgroundStyleKey = "launchpadBackgroundStyle"
     static let sidebarIconPresetKey = "sidebarIconPreset"
     private static let gameControllerEnabledKey = "gameControllerEnabled"
@@ -466,6 +467,7 @@ final class AppStore: ObservableObject {
             }
             
             DispatchQueue.main.async { [weak self] in
+                self?.clearIconCachesForLayoutChange()
                 self?.triggerGridRefresh()
             }
         }
@@ -648,6 +650,13 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(enableActivePressEffect, forKey: Self.activePressEffectKey) }
     }
 
+    @Published var followScrollPagingEnabled: Bool = {
+        if UserDefaults.standard.object(forKey: AppStore.followScrollPagingKey) == nil { return false }
+        return UserDefaults.standard.bool(forKey: AppStore.followScrollPagingKey)
+    }() {
+        didSet { UserDefaults.standard.set(followScrollPagingEnabled, forKey: Self.followScrollPagingKey) }
+    }
+
     @Published var activePressScale: Double = {
         let defaults = UserDefaults.standard
         let stored = defaults.object(forKey: AppStore.activePressScaleKey) as? Double
@@ -761,6 +770,13 @@ final class AppStore: ObservableObject {
         return UserDefaults.standard.bool(forKey: "showFPSOverlay")
     }() {
         didSet { UserDefaults.standard.set(showFPSOverlay, forKey: "showFPSOverlay") }
+    }
+
+    @Published var performanceMode: PerformanceMode = PerformanceMode.current {
+        didSet {
+            guard oldValue != performanceMode else { return }
+            PerformanceMode.persist(performanceMode)
+        }
     }
 
     @Published var gameControllerEnabled: Bool = {
@@ -1361,6 +1377,9 @@ final class AppStore: ObservableObject {
         } else {
             self.isFullscreenMode = UserDefaults.standard.bool(forKey: "isFullscreenMode")
         }
+        if UserDefaults.standard.object(forKey: PerformanceMode.userDefaultsKey) == nil {
+            PerformanceMode.persist(.full)
+        }
         let defaults = UserDefaults.standard
 
         let shouldRememberPage = defaults.object(forKey: Self.rememberPageKey) == nil ? false : defaults.bool(forKey: Self.rememberPageKey)
@@ -1418,6 +1437,9 @@ final class AppStore: ObservableObject {
         }
         if UserDefaults.standard.object(forKey: "enableAnimations") == nil {
             UserDefaults.standard.set(true, forKey: "enableAnimations")
+        }
+        if UserDefaults.standard.object(forKey: AppStore.followScrollPagingKey) == nil {
+            UserDefaults.standard.set(false, forKey: AppStore.followScrollPagingKey)
         }
         if UserDefaults.standard.object(forKey: "iconLabelFontSize") == nil {
             UserDefaults.standard.set(11.0, forKey: "iconLabelFontSize")
@@ -2444,7 +2466,10 @@ final class AppStore: ObservableObject {
     }
 
     private func appInfo(from url: URL, preferredName: String? = nil) -> AppInfo {
-        AppInfo.from(url: url, preferredName: preferredName, customTitle: customTitles[url.path])
+        AppInfo.from(url: url,
+                     preferredName: preferredName,
+                     customTitle: customTitles[url.path],
+                     loadIcon: PerformanceMode.current == .full)
     }
     
     // MARK: - 文件夹管理
@@ -3168,6 +3193,53 @@ final class AppStore: ObservableObject {
     // 触发文件夹更新，通知所有相关视图刷新图标
     private func triggerFolderUpdate() {
         folderUpdateTrigger = UUID()
+        FolderPreviewCache.shared.clear()
+    }
+
+    func notifyFolderContentChanged(_ folder: FolderInfo) {
+        for idx in items.indices {
+            if case .folder(let f) = items[idx], f.id == folder.id {
+                items[idx] = .folder(folder)
+            }
+        }
+        triggerFolderUpdate()
+        triggerGridRefresh()
+        saveAllOrder()
+    }
+
+    private func clearIconCachesForLayoutChange() {
+        FolderPreviewCache.shared.clear()
+        IconStore.shared.clear()
+        purgeIconRenderCaches()
+    }
+
+    private func purgeIconRenderCaches() {
+        var seen = Set<ObjectIdentifier>()
+
+        func purge(_ image: NSImage) {
+            let identifier = ObjectIdentifier(image)
+            guard seen.insert(identifier).inserted else { return }
+            let originalCacheMode = image.cacheMode
+            image.cacheMode = .never
+            image.recache()
+            image.cacheMode = originalCacheMode
+        }
+
+        for app in apps {
+            purge(app.icon)
+        }
+
+        for folder in folders {
+            for app in folder.apps {
+                purge(app.icon)
+            }
+        }
+
+        for item in items {
+            if case let .app(app) = item {
+                purge(app.icon)
+            }
+        }
     }
     
     // 触发网格视图刷新，用于拖拽操作后的界面更新
@@ -3559,6 +3631,45 @@ final class AppStore: ObservableObject {
         return true
     }
 
+    @discardableResult
+    func hideApps(at urls: [URL]) -> Bool {
+        let resolvedPaths = urls.compactMap { url -> String? in
+            let resolved = url.resolvingSymlinksInPath()
+            guard resolved.pathExtension.caseInsensitiveCompare("app") == .orderedSame else { return nil }
+            guard FileManager.default.fileExists(atPath: resolved.path) else { return nil }
+            return resolved.path
+        }
+
+        guard !resolvedPaths.isEmpty else { return false }
+
+        var inserted = false
+        updateHiddenAppPaths { set in
+            for path in resolvedPaths {
+                if !set.contains(path) {
+                    set.insert(path)
+                    inserted = true
+                }
+            }
+        }
+
+        guard inserted else { return false }
+
+        for path in resolvedPaths {
+            removeHiddenAppMetadata(forPath: path)
+        }
+
+        items = filteredItemsRemovingHidden(from: items)
+        folders = sanitizedFolders(folders)
+        applyHiddenFilteringToOpenFolder()
+        compactItemsWithinPages()
+        removeEmptyPages()
+        triggerFolderUpdate()
+        triggerGridRefresh()
+        updateCacheAfterChanges()
+        saveAllOrder()
+        return true
+    }
+
     func unhideApp(path: String) {
         var didRemove = false
         updateHiddenAppPaths { set in
@@ -3715,11 +3826,18 @@ final class AppStore: ObservableObject {
 
         let url = URL(fileURLWithPath: path)
         if FileManager.default.fileExists(atPath: url.path) {
-            return AppInfo.from(url: url, customTitle: customTitles[path])
+            return AppInfo.from(url: url,
+                                customTitle: customTitles[path],
+                                loadIcon: PerformanceMode.current == .full)
         }
 
         let fallbackName = customTitles[path] ?? url.deletingPathExtension().lastPathComponent
-        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        let icon: NSImage
+        if PerformanceMode.current == .full {
+            icon = NSWorkspace.shared.icon(forFile: url.path)
+        } else {
+            icon = AppInfo.transparentPlaceholderIcon
+        }
         return AppInfo(name: fallbackName, icon: icon, url: url)
     }
 
@@ -3728,7 +3846,7 @@ final class AppStore: ObservableObject {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return url.deletingPathExtension().lastPathComponent
         }
-        return AppInfo.from(url: url, customTitle: nil).name
+        return AppInfo.from(url: url, customTitle: nil, loadIcon: PerformanceMode.current == .full).name
     }
 
     @discardableResult
@@ -3747,7 +3865,7 @@ final class AppStore: ObservableObject {
     }
 
     private func applyCustomTitleOverride(for url: URL, title: String?) {
-        let info = AppInfo.from(url: url, customTitle: title)
+        let info = AppInfo.from(url: url, customTitle: title, loadIcon: PerformanceMode.current == .full)
         var changed = false
 
         if let index = apps.firstIndex(where: { $0.url == url }) {

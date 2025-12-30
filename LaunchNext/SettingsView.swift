@@ -27,6 +27,7 @@ struct SettingsView: View {
     @State private var backupRootPath: String = UserDefaults.standard.string(forKey: "backupRootDirectory") ?? ""
     @State private var backupRefreshToken = UUID()
     @State private var selectedBackupIDs: Set<String> = []
+    @State private var showPerformanceRestartPrompt = false
     @State private var capturingShortcutTarget: ShortcutTarget? = nil
     @State private var shortcutCaptureMonitor: Any?
     @State private var pendingShortcut: AppStore.HotKeyConfiguration?
@@ -79,7 +80,7 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(appStore.localized(.appTitle))
                                 .font(.headline.weight(.semibold))
-                            Text("\(appStore.localized(.versionPrefix))\(getVersion())")
+                            Text("\(appStore.localized(.versionPrefix))\(getVersion(fallback: appStore.localized(.versionFallback)))")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -181,7 +182,8 @@ struct SettingsView: View {
 
     private var systemVersionText: String {
         let v = ProcessInfo.processInfo.operatingSystemVersion
-        return "macOS \(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
+        return String(format: appStore.localized(.aboutInfoMacOSValueFormat),
+                      v.majorVersion, v.minorVersion, v.patchVersion)
     }
 
     private var chipText: String {
@@ -191,11 +193,11 @@ struct SettingsView: View {
         if sysctlbyname("machdep.cpu.brand_string", &nameBuffer, &size, nil, 0) == 0 {
             return String(cString: nameBuffer)
         }
-        return "Unknown Chip"
+        return appStore.localized(.aboutInfoUnknownChip)
     }
 
     private var displayResolutionText: String {
-        guard let screen = NSScreen.main else { return "Unknown" }
+        guard let screen = NSScreen.main else { return appStore.localized(.aboutInfoUnknownDisplay) }
         let scale = screen.backingScaleFactor
         let size = screen.frame.size
         let width = Int(size.width * scale)
@@ -207,11 +209,11 @@ struct SettingsView: View {
         if let name = NSScreen.main?.localizedName, !name.isEmpty {
             return name
         }
-        return "Display"
+        return appStore.localized(.aboutInfoDisplayGeneric)
     }
 
-private func getVersion() -> String {
-    Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知"
+private func getVersion(fallback: String) -> String {
+    Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? fallback
 }
 
 private enum SettingsSection: String, CaseIterable, Identifiable {
@@ -520,14 +522,14 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
             HStack(spacing: 12) {
                 updateControlButton(
-                    title: "Choose Backup Folder",
+                    title: appStore.localized(.backupChooseFolderButton),
                     systemImage: "folder"
                 ) {
                     chooseBackupFolder()
                 }
 
                 updateControlButton(
-                    title: "Create Backup",
+                    title: appStore.localized(.backupCreateButton),
                     systemImage: "tray.and.arrow.down",
                     isPrimary: true
                 ) {
@@ -536,7 +538,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 .disabled(backupRootURL == nil)
 
                 updateControlButton(
-                    title: "Delete Selected",
+                    title: appStore.localized(.backupDeleteSelectedButton),
                     systemImage: "trash"
                 ) {
                     deleteSelectedBackups()
@@ -546,19 +548,19 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
             DisclosureGroup(isExpanded: $showCleanupCommand) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("LaunchNext keeps a local change history in its database. The app does not use this history, but it can grow over time.")
+                    Text(appStore.localized(.backupCleanupIntroPrimary))
                         .font(.callout)
                         .foregroundStyle(.secondary)
 
-                    Text("We do not run this inside the app because it is destructive and requires the database to be closed. Doing it manually in Terminal avoids accidental data loss.")
+                    Text(appStore.localized(.backupCleanupIntroSecondary))
                         .font(.callout)
                         .foregroundStyle(.secondary)
 
-                    Text("Important: quit LaunchNext before running this command, or the database may be locked.")
+                    Text(appStore.localized(.backupCleanupWarning))
                         .font(.callout.weight(.semibold))
                         .foregroundStyle(.secondary)
 
-                    Text("Run this command in Terminal to remove history rows and shrink the database.")
+                    Text(appStore.localized(.backupCleanupInstruction))
                         .font(.callout)
                         .foregroundStyle(.secondary)
 
@@ -567,7 +569,9 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         Button {
                             copyCleanupCommand()
                         } label: {
-                            Label(cleanupCommandCopied ? "Copied" : "Copy",
+                            Label(cleanupCommandCopied
+                                  ? appStore.localized(.backupCleanupCopiedLabel)
+                                  : appStore.localized(.backupCleanupCopyButton),
                                   systemImage: cleanupCommandCopied ? "checkmark" : "doc.on.doc")
                         }
                         .buttonStyle(.bordered)
@@ -583,12 +587,12 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                                 .fill(Color(nsColor: .windowBackgroundColor))
                         )
 
-                    Text("Command details: `PRAGMA wal_checkpoint(FULL)` flushes the WAL, `DELETE FROM ACHANGE` removes history rows, and `VACUUM` reclaims space.")
+                    Text(appStore.localized(.backupCleanupCommandDetails))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
             } label: {
-                Label("Clear unused history (Advanced)", systemImage: "wand.and.stars")
+                Label(appStore.localized(.backupCleanupDisclosureTitle), systemImage: "wand.and.stars")
                     .font(.callout.weight(.semibold))
             }
 
@@ -598,13 +602,13 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             } else {
-                Text("No backup folder selected.")
+                Text(appStore.localized(.backupNoFolderSelected))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
 
             if backupEntries.isEmpty {
-                Text("No backups found.")
+                Text(appStore.localized(.backupNoBackupsFound))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
@@ -623,12 +627,12 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Button("Import") {
+                            Button(appStore.localized(.backupImportButton)) {
                                 importDataFolder(from: entry.url)
                             }
                             .buttonStyle(.bordered)
 
-                            Button("Delete") {
+                            Button(appStore.localized(.backupDeleteButton)) {
                                 deleteBackup(entry)
                             }
                             .buttonStyle(.bordered)
@@ -647,7 +651,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         .fill(Color(nsColor: .windowBackgroundColor))
                 )
 
-                Text("Estimated size based on Data.store.")
+                Text(appStore.localized(.backupEstimatedSizeHint))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.top, 6)
@@ -756,7 +760,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "Choose"
+        panel.prompt = appStore.localized(.chooseButton)
         if panel.runModal() == .OK, let url = panel.url {
             backupRootPath = url.path
             UserDefaults.standard.set(backupRootPath, forKey: "backupRootDirectory")
@@ -793,10 +797,10 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         guard !targets.isEmpty else { return }
 
         let alert = NSAlert()
-        alert.messageText = "Delete Backups"
-        alert.informativeText = "This will permanently remove \(targets.count) selected backups."
+        alert.messageText = appStore.localized(.backupDeleteMultipleTitle)
+        alert.informativeText = String(format: appStore.localized(.backupDeleteMultipleMessageFormat), targets.count)
         alert.alertStyle = .warning
-        let deleteButton = alert.addButton(withTitle: "Delete")
+        let deleteButton = alert.addButton(withTitle: appStore.localized(.backupDeleteButton))
         if #available(macOS 11.0, *) {
             deleteButton.hasDestructiveAction = true
         }
@@ -820,10 +824,10 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private func deleteBackup(_ entry: BackupEntry) {
         let alert = NSAlert()
-        alert.messageText = "Delete Backup"
-        alert.informativeText = "This will permanently remove the selected backup."
+        alert.messageText = appStore.localized(.backupDeleteSingleTitle)
+        alert.informativeText = appStore.localized(.backupDeleteSingleMessage)
         alert.alertStyle = .warning
-        let deleteButton = alert.addButton(withTitle: "Delete")
+        let deleteButton = alert.addButton(withTitle: appStore.localized(.backupDeleteButton))
         if #available(macOS 11.0, *) {
             deleteButton.hasDestructiveAction = true
         }
@@ -879,6 +883,12 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+
+            Divider()
+
+            Text(appStore.localized(.modifiedFrom))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -914,12 +924,96 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     // }
 
     private var performanceSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(appStore.localized(.performancePlaceholderTitle))
-                .font(.headline)
-            Text(appStore.localized(.performancePlaceholderSubtitle))
+        let stats = appStore.cacheStatistics
+        let isLeanMode = appStore.performanceMode == .lean
+
+        return VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(appStore.localized(.performanceModeTitle))
+                    .font(.title3.weight(.semibold))
+                Text(appStore.localized(.performanceModeSubtitle))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                performanceModePicker()
+
+                Text(appStore.localized(.performanceModeDescriptionLean))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Text(appStore.localized(.performanceModeDescriptionFull))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Text(appStore.localized(.performanceModeRestartHint))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Text(appStore.localized(.performanceCacheTitle))
+                        .font(.title3.weight(.semibold))
+                    Spacer()
+                    if isLeanMode {
+                        leanModeBadge()
+                    }
+                    cacheStatusBadge(isValid: stats.isCacheValid)
+                }
+
+                Text("\(appStore.localized(.performanceCacheLastUpdateLabel)): \(formattedCacheUpdate(stats.lastUpdate))")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                if isLeanMode {
+                    Text(appStore.localized(.performanceCacheLeanHint))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                    cacheCountRow(title: appStore.localized(.performanceCacheIconLabel),
+                                  valueText: isLeanMode ? appStore.localized(.performanceCacheIconsDisabled) : "\(stats.iconCacheSize)")
+                    cacheCountRow(title: appStore.localized(.performanceCacheAppInfoLabel),
+                                  valueText: "\(stats.appInfoCacheSize)")
+                    cacheCountRow(title: appStore.localized(.performanceCacheGridLabel),
+                                  valueText: "\(stats.gridLayoutCacheSize)")
+                    cacheCountRow(title: appStore.localized(.performanceCacheTotalLabel),
+                                  valueText: "\(stats.totalCacheSize)")
+                }
+
+                Text(appStore.localized(.performanceCacheCountsHint))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                Button {
+                    appStore.clearCache()
+                    IconStore.shared.clear()
+                    FolderPreviewCache.shared.clear()
+                } label: {
+                    Label(appStore.localized(.performanceCacheClearButton), systemImage: "trash")
+                        .font(.footnote.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            Text(appStore.localized(.performanceModeRecommendation))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+        }
+        .onChange(of: appStore.performanceMode) { _ in
+            showPerformanceRestartPrompt = true
+        }
+        .alert(appStore.localized(.performanceModeRestartTitle), isPresented: $showPerformanceRestartPrompt) {
+            Button(appStore.localized(.okButton), role: .cancel) {}
+        } message: {
+            Text(appStore.localized(.performanceModeRestartMessage))
         }
     }
 
@@ -1048,7 +1142,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private func hiddenAppRow(for entry: HiddenAppEntry) -> some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(nsImage: entry.appInfo.icon)
+            Image(nsImage: IconStore.shared.icon(for: entry.appInfo))
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 40, height: 40)
@@ -1144,7 +1238,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 12) {
-                Image(nsImage: entry.appInfo.icon)
+                Image(nsImage: IconStore.shared.icon(for: entry.appInfo))
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: 40, height: 40)
@@ -1213,13 +1307,13 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.allowedContentTypes = [.applicationBundle]
         panel.prompt = appStore.localized(.hiddenAppsAddButton)
         panel.title = appStore.localized(.hiddenAppsAddButton)
 
-        if panel.runModal() == .OK, let url = panel.url {
-            if !appStore.hideApp(at: url) {
+        if panel.runModal() == .OK {
+            if !appStore.hideApps(at: panel.urls) {
                 NSSound.beep()
             }
         }
@@ -1441,14 +1535,66 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     @ViewBuilder
     private var headlineGlass: some View {
-        let label = Text(appStore.localized(.appTitle))
-            .font(.largeTitle.weight(.semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 10)
+        PressableGlassTitle(text: appStore.localized(.appTitle))
+    }
 
-        label
-            .glassEffect(.clear, in: Capsule())
+    private struct PressableGlassTitle: View {
+        let text: String
+
+        @GestureState private var isPressed = false
+        @State private var bounce = false
+
+        private var scale: CGFloat {
+            if isPressed { return 0.97 }
+            if bounce { return 1.01 }
+            return 1.0
+        }
+
+        private var shadowOpacity: Double {
+            isPressed ? 0.18 : 0.0
+        }
+
+        private var shadowRadius: CGFloat {
+            isPressed ? 8 : 0
+        }
+
+        private var shadowOffsetY: CGFloat {
+            isPressed ? 4 : 0
+        }
+
+        var body: some View {
+            let label = Text(text)
+                .font(.largeTitle.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+
+            label
+                .glassEffect(.clear, in: Capsule())
+                .clipShape(Capsule())
+                .shadow(color: Color.black.opacity(shadowOpacity), radius: shadowRadius, x: 0, y: shadowOffsetY)
+                .scaleEffect(scale)
+                .contentShape(Capsule())
+                .gesture(pressGesture)
+                .animation(.easeOut(duration: 0.12), value: isPressed)
+                .animation(.spring(response: 0.26, dampingFraction: 0.62), value: bounce)
+        }
+
+        private var pressGesture: some Gesture {
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    if bounce { bounce = false }
+                }
+                .updating($isPressed) { _, state, _ in
+                    state = true
+                }
+                .onEnded { _ in
+                    bounce = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                        bounce = false
+                    }
+                }
+        }
     }
 
 
@@ -1465,7 +1611,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 VStack(spacing: 12) {
                     headlineGlass
 
-                    Text("Version \(getVersion())")
+                    Text(String(format: appStore.localized(.versionLabelFormat),
+                                getVersion(fallback: appStore.localized(.versionFallback))))
                         .font(.title2.weight(.semibold))
                         .foregroundStyle(.white)
 
@@ -1496,22 +1643,22 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             Spacer()
 
             HStack(spacing: 12) {
-                glassButton(title: "Project Link", systemImage: "arrow.up.right.square") {
+                glassButton(title: appStore.localized(.aboutProjectLink), systemImage: "arrow.up.right.square") {
                     if let url = URL(string: "https://github.com/RoversX/LaunchNext") {
                         NSWorkspace.shared.open(url)
                     }
                 }
-                glassButton(title: "Report a bug", systemImage: "exclamationmark.bubble") {
+                glassButton(title: appStore.localized(.aboutReportBug), systemImage: "exclamationmark.bubble") {
                     if let url = URL(string: "https://github.com/RoversX/LaunchNext/issues") {
                         NSWorkspace.shared.open(url)
                     }
                 }
-                glassButton(title: "Contribute", systemImage: "hands.sparkles") {
+                glassButton(title: appStore.localized(.aboutContribute), systemImage: "hands.sparkles") {
                     if let url = URL(string: "https://github.com/RoversX/LaunchNext") {
                         NSWorkspace.shared.open(url)
                     }
                 }
-                glassButton(title: "Blog", systemImage: "globe") {
+                glassButton(title: appStore.localized(.aboutBlog), systemImage: "globe") {
                     if let url = URL(string: "https://blog.closex.org") {
                         NSWorkspace.shared.open(url)
                     }
@@ -1527,19 +1674,19 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     private var infoCard: some View {
         let cardFill = colorScheme == .light ? Color.white : Color.white.opacity(0.05)
         VStack(alignment: .leading, spacing: 10) {
-            Text("Operation System")
+            Text(appStore.localized(.aboutInfoSystemTitle))
                 .font(.headline.weight(.semibold))
-            infoRow(label: "macOS Version", value: systemVersionText)
+            infoRow(label: appStore.localized(.aboutInfoMacOSLabel), value: systemVersionText)
 
             Divider()
 
-            Text("Processor Information")
+            Text(appStore.localized(.aboutInfoProcessorTitle))
                 .font(.headline.weight(.semibold))
-            infoRow(label: "Chip", value: chipText)
+            infoRow(label: appStore.localized(.aboutInfoChipLabel), value: chipText)
 
             Divider()
 
-            Text("Displays")
+            Text(appStore.localized(.aboutInfoDisplayTitle))
                 .font(.headline.weight(.semibold))
             infoRow(label: displayNameText, value: displayResolutionText)
         }
@@ -1666,7 +1813,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         }
     }
 
-    private func currentMemoryUsageString() -> String {
+    private func currentMemoryUsageValue() -> String {
         var info = task_vm_info_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size) / 4
         let kern = withUnsafeMutablePointer(to: &info) { pointer -> kern_return_t in
@@ -1675,14 +1822,111 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             }
         }
 
-        guard kern == KERN_SUCCESS else { return "Memory: --" }
+        guard kern == KERN_SUCCESS else { return "--" }
 
         let usedBytes = info.phys_footprint
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useMB, .useGB]
         formatter.countStyle = .memory
-        let formatted = formatter.string(fromByteCount: Int64(usedBytes))
-        return "Memory: \(formatted)"
+        return formatter.string(fromByteCount: Int64(usedBytes))
+    }
+
+    private func currentMemoryUsageString() -> String {
+        "Memory: \(currentMemoryUsageValue())"
+    }
+
+    private func formattedCacheUpdate(_ date: Date) -> String {
+        if date == .distantPast {
+            return appStore.localized(.performanceCacheNever)
+        }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    private func performanceModePicker() -> some View {
+        HStack(spacing: 6) {
+            performanceModeButton(mode: .lean, title: appStore.localized(.performanceModeLean))
+            performanceModeButton(mode: .full, title: appStore.localized(.performanceModeFull))
+        }
+        .padding(6)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .quaternarySystemFill))
+        )
+    }
+
+    private func performanceModeButton(mode: PerformanceMode, title: String) -> some View {
+        let isSelected = appStore.performanceMode == mode
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                appStore.performanceMode = mode
+            }
+        } label: {
+            Text(title)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(isSelected ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+    }
+
+    private func cacheStatusBadge(isValid: Bool) -> some View {
+        let title = appStore.localized(isValid ? .performanceCacheStatusValid : .performanceCacheStatusInvalid)
+        let color = isValid ? Color.green : Color.orange
+        return Text(title)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(color.opacity(0.16))
+            )
+    }
+
+    private func leanModeBadge() -> some View {
+        Text(appStore.localized(.performanceModeLean))
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(Color.green)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.green.opacity(0.16))
+            )
+    }
+
+    private func cacheCountRow(title: String, valueText: String) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(valueText)
+                .font(.callout.weight(.semibold).monospacedDigit())
+                .foregroundStyle(.primary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .quaternarySystemFill))
+        )
     }
 
     private var generalSection: some View {
@@ -1831,7 +2075,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     private var dataManagementCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center) {
-                Text("Data Management")
+                Text(appStore.localized(.dataManagementTitle))
                     .font(.headline)
                 Spacer()
                 HStack(spacing: 10) {
@@ -2062,18 +2306,18 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                                                             .antialiased(true)
                                                             .frame(width: 24, height: 24)
                                                             .cornerRadius(5)
-                                                        VStack(alignment: .leading, spacing: 2) {
-                                                            Text(app.name)
-                                                                .font(.callout)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(app.name)
+                                        .font(.callout)
                                                                 .lineLimit(1)
                                                             Text(app.path)
                                                                 .font(.caption2)
                                                                 .foregroundStyle(.secondary)
                                                                 .lineLimit(1)
                                                         }
-                                                        Spacer()
-                                                        Button(role: .destructive) {
-                                                            removeAppFromLayout(app.path)
+                                Spacer()
+                                Button(role: .destructive) {
+                                    removeAppFromLayout(app.path)
                                                         } label: {
                                                             Image(systemName: "trash")
                                                                 .foregroundStyle(Color.red)
@@ -2132,12 +2376,12 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         for item in appStore.items {
             switch item {
             case .app(let app):
-                consider(name: app.name, path: app.url.path, icon: app.icon)
+                consider(name: app.name, path: app.url.path, icon: IconStore.shared.icon(for: app))
             case .missingApp(let placeholder):
                 consider(name: placeholder.displayName, path: placeholder.bundlePath, icon: placeholder.icon)
             case .folder(let folder):
                 for app in folder.apps {
-                    consider(name: app.name, path: app.url.path, icon: app.icon)
+                    consider(name: app.name, path: app.url.path, icon: IconStore.shared.icon(for: app))
                 }
             case .empty:
                 break
@@ -2243,22 +2487,20 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 }
 
                 HStack {
+                    Text(appStore.localized(.followScrollPagingTitle))
+                    Spacer()
+                    Toggle("", isOn: $appStore.followScrollPagingEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+
+                HStack {
                     Text(appStore.localized(.hideDockOption))
                     Spacer()
                     Toggle("", isOn: $appStore.hideDock)
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.sidebarIconSizeTitle))
-                        .font(.subheadline.weight(.semibold))
-                Picker(appStore.localized(.sidebarIconSizeTitle), selection: $appStore.sidebarIconPreset) {
-                    Text(appStore.localized(.sidebarIconSizeLarge)).tag(AppStore.SidebarIconPreset.large)
-                    Text(appStore.localized(.sidebarIconSizeMedium)).tag(AppStore.SidebarIconPreset.medium)
-                }
-                .pickerStyle(.menu)
-            }
 
                 HStack {
                     Text(appStore.localized(.rememberPageTitle))
@@ -2324,6 +2566,17 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         ForEach(AppStore.IconLabelFontWeightOption.allCases) { option in
                             Text(option.displayName).tag(option)
                         }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(appStore.localized(.sidebarIconSizeTitle))
+                        .font(.headline)
+                    Picker("", selection: $appStore.sidebarIconPreset) {
+                        Text(appStore.localized(.sidebarIconSizeLarge)).tag(AppStore.SidebarIconPreset.large)
+                        Text(appStore.localized(.sidebarIconSizeMedium)).tag(AppStore.SidebarIconPreset.medium)
                     }
                     .pickerStyle(.menu)
                     .labelsHidden()
@@ -3143,10 +3396,15 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private var updatesHero: some View {
         let statusText: String = {
-            if case .updateAvailable = appStore.updateState {
-                return "Update available"
+            switch appStore.updateState {
+            case .updateAvailable:
+                return appStore.localized(.updatesHeroUpdateAvailable)
+            case .upToDate:
+                return appStore.localized(.updatesHeroUpToDate)
+            default:
+                return String(format: appStore.localized(.versionLabelFormat),
+                              getVersion(fallback: appStore.localized(.versionFallback)))
             }
-            return "Version \(getVersion())"
         }()
 
         return ZStack(alignment: .center) {
