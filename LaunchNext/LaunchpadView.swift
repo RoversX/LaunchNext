@@ -747,6 +747,9 @@ struct LaunchpadView: View {
                 scrollState.followLastOffset = 0
             }
         }
+        .onChange(of: colorScheme) { _ in
+            appStore.scheduleSystemAppearanceRefresh()
+        }
         .overlay(alignment: .bottomTrailing) {
             if appStore.showFPSOverlay {
                 Text(String(format: "%.0f FPS  %.1f ms", fpsValue, frameTimeMilliseconds))

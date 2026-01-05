@@ -231,6 +231,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
             .store(in: &cancellables)
     }
 
+    
+
     private func bindControllerPreference() {
         appStore.$gameControllerEnabled
             .removeDuplicates()

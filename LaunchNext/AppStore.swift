@@ -504,6 +504,9 @@ final class AppStore: ObservableObject {
         min(max(value, pageIndicatorTopPaddingRange.lowerBound), pageIndicatorTopPaddingRange.upperBound)
     }
 
+    private var appearanceRefreshWorkItem: DispatchWorkItem?
+    private var lastAppearanceEventAt: TimeInterval = 0
+
     // 图标标题显示
     @Published var showLabels: Bool = {
         if UserDefaults.standard.object(forKey: "showLabels") == nil { return true }
@@ -3194,6 +3197,23 @@ final class AppStore: ObservableObject {
     private func triggerFolderUpdate() {
         folderUpdateTrigger = UUID()
         FolderPreviewCache.shared.clear()
+    }
+
+    func scheduleSystemAppearanceRefresh() {
+        guard appearancePreference == .system else { return }
+        let now = CFAbsoluteTimeGetCurrent()
+        if now - lastAppearanceEventAt < 0.2 { return }
+        lastAppearanceEventAt = now
+
+        appearanceRefreshWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.clearIconCachesForLayoutChange()
+            self.triggerFolderUpdate()
+            self.triggerGridRefresh()
+        }
+        appearanceRefreshWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: workItem)
     }
 
     func notifyFolderContentChanged(_ folder: FolderInfo) {
