@@ -97,6 +97,37 @@ final class AppStore: ObservableObject {
         var topPadding: Double
     }
 
+    struct RGBAColor: Codable, Equatable {
+        var red: Double
+        var green: Double
+        var blue: Double
+        var alpha: Double
+
+        init(red: Double, green: Double, blue: Double, alpha: Double) {
+            self.red = red
+            self.green = green
+            self.blue = blue
+            self.alpha = alpha
+        }
+
+        init(_ color: Color) {
+            let nsColor = NSColor(color).usingColorSpace(.sRGB) ?? NSColor(color)
+            var r: CGFloat = 0
+            var g: CGFloat = 0
+            var b: CGFloat = 0
+            var a: CGFloat = 0
+            nsColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+            self.red = Double(min(max(r, 0), 1))
+            self.green = Double(min(max(g, 0), 1))
+            self.blue = Double(min(max(b, 0), 1))
+            self.alpha = Double(min(max(a, 0), 1))
+        }
+
+        var color: Color {
+            Color(.sRGB, red: red, green: green, blue: blue, opacity: alpha)
+        }
+    }
+
     enum BackgroundStyle: String, CaseIterable, Identifiable {
         case blur
         case glass
@@ -173,6 +204,9 @@ final class AppStore: ObservableObject {
     static let activePressScaleKey = "activePressScale"
     static let followScrollPagingKey = "followScrollPagingEnabled"
     static let backgroundStyleKey = "launchpadBackgroundStyle"
+    static let backgroundMaskEnabledKey = "launchpadBackgroundMaskEnabled"
+    static let backgroundMaskLightKey = "launchpadBackgroundMaskLight"
+    static let backgroundMaskDarkKey = "launchpadBackgroundMaskDark"
     static let sidebarIconPresetKey = "sidebarIconPreset"
     static let pageIndicatorPerDisplayEnabledKey = "pageIndicatorPerDisplayEnabled"
     static let pageIndicatorPerDisplayOverridesKey = "pageIndicatorPerDisplayOverrides"
@@ -200,6 +234,31 @@ final class AppStore: ObservableObject {
             return style
         }
         return .glass
+    }
+
+    private static let defaultBackgroundMaskOpacity: Double = 0.1
+    private static let defaultBackgroundMaskColor = RGBAColor(red: 0, green: 0, blue: 0, alpha: defaultBackgroundMaskOpacity)
+
+    private static func loadBackgroundMaskEnabled() -> Bool {
+        if UserDefaults.standard.object(forKey: backgroundMaskEnabledKey) == nil { return false }
+        return UserDefaults.standard.bool(forKey: backgroundMaskEnabledKey)
+    }
+
+    private static func loadBackgroundMaskColor(forKey key: String) -> RGBAColor {
+        guard let data = UserDefaults.standard.data(forKey: key) else {
+            return defaultBackgroundMaskColor
+        }
+        if let decoded = try? JSONDecoder().decode(RGBAColor.self, from: data) {
+            return decoded
+        }
+        UserDefaults.standard.removeObject(forKey: key)
+        return defaultBackgroundMaskColor
+    }
+
+    private static func persistBackgroundMaskColor(_ color: RGBAColor, forKey key: String) {
+        if let data = try? JSONEncoder().encode(color) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
     }
 
     private static let minColumnsPerPage = 4
@@ -374,6 +433,24 @@ final class AppStore: ObservableObject {
         }
     }
 
+    @Published var backgroundMaskEnabled: Bool = AppStore.loadBackgroundMaskEnabled() {
+        didSet {
+            UserDefaults.standard.set(backgroundMaskEnabled, forKey: Self.backgroundMaskEnabledKey)
+        }
+    }
+
+    @Published var backgroundMaskLightColor: RGBAColor = AppStore.loadBackgroundMaskColor(forKey: AppStore.backgroundMaskLightKey) {
+        didSet {
+            AppStore.persistBackgroundMaskColor(backgroundMaskLightColor, forKey: Self.backgroundMaskLightKey)
+        }
+    }
+
+    @Published var backgroundMaskDarkColor: RGBAColor = AppStore.loadBackgroundMaskColor(forKey: AppStore.backgroundMaskDarkKey) {
+        didSet {
+            AppStore.persistBackgroundMaskColor(backgroundMaskDarkColor, forKey: Self.backgroundMaskDarkKey)
+        }
+    }
+
     @Published var sidebarIconPreset: SidebarIconPreset = {
         if let raw = UserDefaults.standard.string(forKey: AppStore.sidebarIconPresetKey),
            let preset = SidebarIconPreset(rawValue: raw) {
@@ -401,6 +478,9 @@ final class AppStore: ObservableObject {
         }
 
         launchpadBackgroundStyle = AppStore.loadBackgroundStyle()
+        backgroundMaskEnabled = AppStore.loadBackgroundMaskEnabled()
+        backgroundMaskLightColor = AppStore.loadBackgroundMaskColor(forKey: Self.backgroundMaskLightKey)
+        backgroundMaskDarkColor = AppStore.loadBackgroundMaskColor(forKey: Self.backgroundMaskDarkKey)
 
         isFullscreenMode = UserDefaults.standard.bool(forKey: "isFullscreenMode")
         showLabels = UserDefaults.standard.object(forKey: "showLabels") as? Bool ?? true
@@ -1486,6 +1566,15 @@ final class AppStore: ObservableObject {
         }
         if UserDefaults.standard.object(forKey: AppStore.followScrollPagingKey) == nil {
             UserDefaults.standard.set(false, forKey: AppStore.followScrollPagingKey)
+        }
+        if defaults.object(forKey: Self.backgroundMaskEnabledKey) == nil {
+            defaults.set(false, forKey: Self.backgroundMaskEnabledKey)
+        }
+        if defaults.object(forKey: Self.backgroundMaskLightKey) == nil {
+            Self.persistBackgroundMaskColor(Self.defaultBackgroundMaskColor, forKey: Self.backgroundMaskLightKey)
+        }
+        if defaults.object(forKey: Self.backgroundMaskDarkKey) == nil {
+            Self.persistBackgroundMaskColor(Self.defaultBackgroundMaskColor, forKey: Self.backgroundMaskDarkKey)
         }
         if UserDefaults.standard.object(forKey: "iconLabelFontSize") == nil {
             UserDefaults.standard.set(11.0, forKey: "iconLabelFontSize")
@@ -3273,6 +3362,12 @@ final class AppStore: ObservableObject {
             return pageIndicatorTopPadding
         }
         return override.topPadding
+    }
+
+    func backgroundMaskColor(for colorScheme: ColorScheme) -> Color? {
+        guard backgroundMaskEnabled else { return nil }
+        let rgba = (colorScheme == .dark) ? backgroundMaskDarkColor : backgroundMaskLightColor
+        return rgba.color
     }
 
     func pageIndicatorOverride(for screenID: String) -> PageIndicatorOverride? {

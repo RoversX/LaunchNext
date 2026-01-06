@@ -80,13 +80,24 @@ private final class FPSMonitor {
 private extension View {
     @ViewBuilder
     func launchpadBackgroundStyle(_ style: AppStore.BackgroundStyle,
-                                  cornerRadius: CGFloat) -> some View {
+                                  cornerRadius: CGFloat,
+                                  maskColor: Color? = nil) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         switch style {
         case .glass:
-            self.liquidGlass(in: shape)
+            let base = self.liquidGlass(in: shape)
+            if let maskColor {
+                base.background(maskColor, in: shape)
+            } else {
+                base
+            }
         case .blur:
-            self.background(.ultraThinMaterial, in: shape)
+            let base = self.background(.ultraThinMaterial, in: shape)
+            if let maskColor {
+                base.background(maskColor, in: shape)
+            } else {
+                base
+            }
         }
     }
 }
@@ -341,9 +352,6 @@ struct LaunchpadView: View {
                                 .foregroundStyle(.placeholder.opacity(0.5))
                         }
                         .buttonStyle(.plain)
-                        .sheet(isPresented: $appStore.isSetting) {
-                            SettingsView(appStore: appStore)
-                        }
                     }
                 }
                 .padding(.top)
@@ -575,7 +583,8 @@ struct LaunchpadView: View {
         }
         .padding()
         .launchpadBackgroundStyle(appStore.launchpadBackgroundStyle,
-                                   cornerRadius: appStore.isFullscreenMode ? 0 : 30)
+                                   cornerRadius: appStore.isFullscreenMode ? 0 : 30,
+                                   maskColor: appStore.backgroundMaskColor(for: colorScheme))
         .background(
             appStore.isFullscreenMode
                 ? Color.black.opacity(backdropOpacity)
@@ -744,6 +753,9 @@ struct LaunchpadView: View {
                 }
             }
         )
+        .sheet(isPresented: $appStore.isSetting) {
+            SettingsView(appStore: appStore)
+        }
         .onChange(of: appStore.followScrollPagingEnabled) { _ in
             if scrollState.followOffset != 0 || scrollState.accumulatedX != 0 || scrollState.isUserSwiping {
                 scrollState.followOffset = 0

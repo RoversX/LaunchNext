@@ -2492,6 +2492,25 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         DispatchQueue.main.async(execute: action)
     }
 
+    private func backgroundMaskColorBinding(isDark: Bool) -> Binding<Color> {
+        Binding(
+            get: {
+                let rgba = isDark ? appStore.backgroundMaskDarkColor : appStore.backgroundMaskLightColor
+                return rgba.color
+            },
+            set: { newValue in
+                let updated = AppStore.RGBAColor(newValue)
+                let current = isDark ? appStore.backgroundMaskDarkColor : appStore.backgroundMaskLightColor
+                guard current != updated else { return }
+                if isDark {
+                    appStore.backgroundMaskDarkColor = updated
+                } else {
+                    appStore.backgroundMaskLightColor = updated
+                }
+            }
+        )
+    }
+
     private struct PressFeedbackRowButtonStyle: ButtonStyle {
         var enabled: Bool
         var pressScale: CGFloat
@@ -2710,6 +2729,21 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     Toggle("", isOn: $appStore.enableActivePressEffect)
                         .labelsHidden()
                         .toggleStyle(.switch)
+                }
+
+                HStack {
+                    Text("Background mask")
+                    Spacer()
+                    Toggle("", isOn: $appStore.backgroundMaskEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+
+                if appStore.backgroundMaskEnabled {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ColorPicker("Light appearance mask", selection: backgroundMaskColorBinding(isDark: false), supportsOpacity: true)
+                        ColorPicker("Dark appearance mask", selection: backgroundMaskColorBinding(isDark: true), supportsOpacity: true)
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -3218,6 +3252,9 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 if appearanceCheckbox.state == .on {
                     keys.insert(AppStore.sidebarIconPresetKey)
                     keys.insert(AppStore.backgroundStyleKey)
+                    keys.insert(AppStore.backgroundMaskEnabledKey)
+                    keys.insert(AppStore.backgroundMaskLightKey)
+                    keys.insert(AppStore.backgroundMaskDarkKey)
                     keys.insert("scrollSensitivity")
                     keys.insert("isFullscreenMode")
                     keys.insert("showLabels")
