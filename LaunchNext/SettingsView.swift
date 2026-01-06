@@ -2394,6 +2394,191 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     private func standardizePath(_ path: String) -> String {
         URL(fileURLWithPath: path).standardized.path
     }
+
+    private struct IndicatorScreenEntry: Identifiable {
+        let id: String
+        let name: String
+        let sizeText: String
+        let isConnected: Bool
+    }
+
+    private var currentIndicatorScreenID: String? {
+        let screen = NSApp.keyWindow?.screen ?? NSScreen.main
+        return screen.map { AppStore.screenIdentifier(for: $0) }
+    }
+
+    private var indicatorScreenEntries: [IndicatorScreenEntry] {
+        let connectedScreens = NSScreen.screens
+        var entries: [IndicatorScreenEntry] = []
+        var connectedIDs = Set<String>()
+
+        for screen in connectedScreens {
+            let id = AppStore.screenIdentifier(for: screen)
+            connectedIDs.insert(id)
+            entries.append(IndicatorScreenEntry(id: id,
+                                                name: screen.localizedName,
+                                                sizeText: screenSizeText(screen),
+                                                isConnected: true))
+        }
+
+        let offlineIDs = appStore.pageIndicatorOverrides.keys
+            .filter { !connectedIDs.contains($0) }
+            .sorted()
+
+        for id in offlineIDs {
+            entries.append(IndicatorScreenEntry(id: id,
+                                                name: "Offline Display",
+                                                sizeText: "ID \(id)",
+                                                isConnected: false))
+        }
+
+        return entries
+    }
+
+    private func screenSizeText(_ screen: NSScreen) -> String {
+        let width = Int(screen.frame.width.rounded())
+        let height = Int(screen.frame.height.rounded())
+        return "\(width)×\(height)"
+    }
+
+    private func indicatorCustomBinding(for screenID: String) -> Binding<Bool> {
+        Binding(
+            get: { appStore.pageIndicatorOverride(for: screenID) != nil },
+            set: { isCustom in
+                scheduleIndicatorOverrideUpdate {
+                    if isCustom {
+                        appStore.applyIndicatorDefaults(to: screenID)
+                    } else {
+                        appStore.setPageIndicatorOverride(nil, for: screenID)
+                    }
+                }
+            }
+        )
+    }
+
+    private func indicatorOffsetBinding(for screenID: String) -> Binding<Double> {
+        Binding(
+            get: { appStore.pageIndicatorOverride(for: screenID)?.offset ?? appStore.pageIndicatorOffset },
+            set: { newValue in
+                scheduleIndicatorOverrideUpdate {
+                    let current = appStore.pageIndicatorOverride(for: screenID)
+                        ?? AppStore.PageIndicatorOverride(offset: appStore.pageIndicatorOffset,
+                                                          topPadding: appStore.pageIndicatorTopPadding)
+                    appStore.setPageIndicatorOverride(AppStore.PageIndicatorOverride(offset: newValue,
+                                                                                    topPadding: current.topPadding),
+                                                      for: screenID)
+                }
+            }
+        )
+    }
+
+    private func indicatorTopPaddingBinding(for screenID: String) -> Binding<Double> {
+        Binding(
+            get: { appStore.pageIndicatorOverride(for: screenID)?.topPadding ?? appStore.pageIndicatorTopPadding },
+            set: { newValue in
+                scheduleIndicatorOverrideUpdate {
+                    let current = appStore.pageIndicatorOverride(for: screenID)
+                        ?? AppStore.PageIndicatorOverride(offset: appStore.pageIndicatorOffset,
+                                                          topPadding: appStore.pageIndicatorTopPadding)
+                    appStore.setPageIndicatorOverride(AppStore.PageIndicatorOverride(offset: current.offset,
+                                                                                    topPadding: newValue),
+                                                      for: screenID)
+                }
+            }
+        )
+    }
+
+    private func scheduleIndicatorOverrideUpdate(_ action: @escaping () -> Void) {
+        DispatchQueue.main.async(execute: action)
+    }
+
+    private struct PressFeedbackRowButtonStyle: ButtonStyle {
+        var enabled: Bool
+        var pressScale: CGFloat
+
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .scaleEffect(scale(for: configuration))
+                .animation(LNAnimations.springFast,
+                           value: configuration.isPressed && enabled)
+        }
+
+        private func scale(for configuration: Configuration) -> CGFloat {
+            guard enabled else { return 1.0 }
+            let clamped = max(min(pressScale, 1.0), 0.5)
+            return configuration.isPressed ? clamped : 1.0
+        }
+    }
+
+    @ViewBuilder
+    private func indicatorOverrideCard(for entry: IndicatorScreenEntry) -> some View {
+        let useCustom = indicatorCustomBinding(for: entry.id)
+        let offsetValue = appStore.pageIndicatorOverride(for: entry.id)?.offset ?? appStore.pageIndicatorOffset
+        let topPaddingValue = appStore.pageIndicatorOverride(for: entry.id)?.topPadding ?? appStore.pageIndicatorTopPadding
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.name)
+                        .font(.subheadline.weight(.semibold))
+                    Text(entry.sizeText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if !entry.isConnected {
+                    Text("Offline")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Picker("", selection: useCustom) {
+                    Text("Default").tag(false)
+                    Text("Custom").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 160)
+            }
+
+            if useCustom.wrappedValue {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Indicator offset")
+                            .font(.caption)
+                        Spacer()
+                        Text(String(format: "%.0f", offsetValue))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: indicatorOffsetBinding(for: entry.id), in: 0...80)
+
+                    HStack {
+                        Text("0").font(.footnote)
+                        Spacer()
+                        Text(String(format: "%.0f", offsetValue)).font(.footnote.monospacedDigit())
+                        Spacer()
+                        Text("80").font(.footnote)
+                    }
+
+                    HStack {
+                        Text("Indicator top padding")
+                            .font(.caption)
+                        Spacer()
+                        Text(String(format: "%.0f", topPaddingValue))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: indicatorTopPaddingBinding(for: entry.id),
+                           in: AppStore.pageIndicatorTopPaddingRange)
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
+        )
+    }
     
     @State private var expandedSource: String? = nil
     
@@ -2830,6 +3015,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         Text("80").font(.footnote)
                     }
                 }
+                .disabled(appStore.pageIndicatorPerDisplayEnabled)
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(appStore.localized(.pageIndicatorTopPaddingLabel))
@@ -2842,6 +3028,47 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         Text(String(format: "%.0f", appStore.pageIndicatorTopPadding)).font(.footnote)
                         Spacer()
                         Text(String(format: "%.0f", AppStore.pageIndicatorTopPaddingRange.upperBound)).font(.footnote)
+                    }
+                }
+                .disabled(appStore.pageIndicatorPerDisplayEnabled)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Button {
+                        appStore.pageIndicatorPerDisplayEnabled.toggle()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text("Per-display indicator position")
+                                .font(.headline)
+                            Spacer()
+                            Toggle("", isOn: $appStore.pageIndicatorPerDisplayEnabled)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .allowsHitTesting(false)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressFeedbackRowButtonStyle(enabled: true, pressScale: 0.98))
+                    Text("Use different values for each display.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    if appStore.pageIndicatorPerDisplayEnabled {
+                        HStack {
+                            Button("Apply defaults to current display") {
+                                if let screenID = currentIndicatorScreenID {
+                                    appStore.applyIndicatorDefaults(to: screenID)
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            Spacer()
+                        }
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(indicatorScreenEntries) { entry in
+                                indicatorOverrideCard(for: entry)
+                            }
+                        }
                     }
                 }
 
@@ -3010,6 +3237,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert("folderDropZoneScale")
                     keys.insert("pageIndicatorOffset")
                     keys.insert(AppStore.pageIndicatorTopPaddingKey)
+                    keys.insert(AppStore.pageIndicatorPerDisplayEnabledKey)
+                    keys.insert(AppStore.pageIndicatorPerDisplayOverridesKey)
                     keys.insert("folderPopoverWidthFactor")
                     keys.insert("folderPopoverHeightFactor")
                     keys.insert(AppStore.hoverMagnificationKey)

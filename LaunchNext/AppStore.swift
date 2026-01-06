@@ -92,6 +92,11 @@ final class AppStore: ObservableObject {
         let notes: String?
     }
 
+    struct PageIndicatorOverride: Codable, Equatable {
+        var offset: Double
+        var topPadding: Double
+    }
+
     enum BackgroundStyle: String, CaseIterable, Identifiable {
         case blur
         case glass
@@ -169,6 +174,8 @@ final class AppStore: ObservableObject {
     static let followScrollPagingKey = "followScrollPagingEnabled"
     static let backgroundStyleKey = "launchpadBackgroundStyle"
     static let sidebarIconPresetKey = "sidebarIconPreset"
+    static let pageIndicatorPerDisplayEnabledKey = "pageIndicatorPerDisplayEnabled"
+    static let pageIndicatorPerDisplayOverridesKey = "pageIndicatorPerDisplayOverrides"
     private static let gameControllerEnabledKey = "gameControllerEnabled"
     private static let soundEffectsEnabledKey = "soundEffectsEnabled"
     private static let soundLaunchpadOpenKey = "soundLaunchpadOpenSound"
@@ -506,6 +513,28 @@ final class AppStore: ObservableObject {
 
     private var appearanceRefreshWorkItem: DispatchWorkItem?
     private var lastAppearanceEventAt: TimeInterval = 0
+
+    static func screenIdentifier(for screen: NSScreen) -> String {
+        if let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
+            return number.stringValue
+        }
+        return screen.localizedName
+    }
+
+    private static func loadPageIndicatorOverrides() -> [String: PageIndicatorOverride] {
+        guard let data = UserDefaults.standard.data(forKey: pageIndicatorPerDisplayOverridesKey) else { return [:] }
+        return (try? JSONDecoder().decode([String: PageIndicatorOverride].self, from: data)) ?? [:]
+    }
+
+    private func persistPageIndicatorOverrides(_ overrides: [String: PageIndicatorOverride]) {
+        if overrides.isEmpty {
+            UserDefaults.standard.removeObject(forKey: Self.pageIndicatorPerDisplayOverridesKey)
+            return
+        }
+        if let data = try? JSONEncoder().encode(overrides) {
+            UserDefaults.standard.set(data, forKey: Self.pageIndicatorPerDisplayOverridesKey)
+        }
+    }
 
     // 图标标题显示
     @Published var showLabels: Bool = {
@@ -850,6 +879,17 @@ final class AppStore: ObservableObject {
             UserDefaults.standard.set(pageIndicatorOffset, forKey: "pageIndicatorOffset")
         }
     }
+
+    @Published var pageIndicatorPerDisplayEnabled: Bool = {
+        if UserDefaults.standard.object(forKey: AppStore.pageIndicatorPerDisplayEnabledKey) == nil { return false }
+        return UserDefaults.standard.bool(forKey: AppStore.pageIndicatorPerDisplayEnabledKey)
+    }() {
+        didSet {
+            UserDefaults.standard.set(pageIndicatorPerDisplayEnabled, forKey: AppStore.pageIndicatorPerDisplayEnabledKey)
+        }
+    }
+
+    @Published private(set) var pageIndicatorOverrides: [String: PageIndicatorOverride] = AppStore.loadPageIndicatorOverrides()
 
     @Published var rememberLastPage: Bool = AppStore.defaultRememberSetting() {
         didSet {
@@ -1423,6 +1463,9 @@ final class AppStore: ObservableObject {
         defaults.set(clampedDropZoneScale, forKey: Self.folderDropZoneScaleKey)
         if defaults.object(forKey: Self.pageIndicatorTopPaddingKey) == nil {
             defaults.set(Self.defaultPageIndicatorTopPadding, forKey: Self.pageIndicatorTopPaddingKey)
+        }
+        if defaults.object(forKey: Self.pageIndicatorPerDisplayEnabledKey) == nil {
+            defaults.set(false, forKey: Self.pageIndicatorPerDisplayEnabledKey)
         }
         let storedTopPadding = defaults.object(forKey: Self.pageIndicatorTopPaddingKey) as? Double ?? Self.defaultPageIndicatorTopPadding
         let clampedTopPadding = Self.clampPageIndicatorTopPadding(storedTopPadding)
@@ -3214,6 +3257,43 @@ final class AppStore: ObservableObject {
         }
         appearanceRefreshWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: workItem)
+    }
+
+    func effectivePageIndicatorOffset(for screenID: String?) -> Double {
+        guard pageIndicatorPerDisplayEnabled, let screenID,
+              let override = pageIndicatorOverrides[screenID] else {
+            return pageIndicatorOffset
+        }
+        return override.offset
+    }
+
+    func effectivePageIndicatorTopPadding(for screenID: String?) -> Double {
+        guard pageIndicatorPerDisplayEnabled, let screenID,
+              let override = pageIndicatorOverrides[screenID] else {
+            return pageIndicatorTopPadding
+        }
+        return override.topPadding
+    }
+
+    func pageIndicatorOverride(for screenID: String) -> PageIndicatorOverride? {
+        pageIndicatorOverrides[screenID]
+    }
+
+    func setPageIndicatorOverride(_ override: PageIndicatorOverride?, for screenID: String) {
+        var updated = pageIndicatorOverrides
+        if let override {
+            updated[screenID] = override
+        } else {
+            updated.removeValue(forKey: screenID)
+        }
+        pageIndicatorOverrides = updated
+        persistPageIndicatorOverrides(updated)
+    }
+
+    func applyIndicatorDefaults(to screenID: String) {
+        let override = PageIndicatorOverride(offset: pageIndicatorOffset,
+                                             topPadding: pageIndicatorTopPadding)
+        setPageIndicatorOverride(override, for: screenID)
     }
 
     func notifyFolderContentChanged(_ folder: FolderInfo) {

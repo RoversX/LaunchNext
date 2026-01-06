@@ -149,6 +149,10 @@ struct LaunchpadView: View {
     @State private var isWindowVisible: Bool = true
 
     private var isFolderOpen: Bool { appStore.openFolder != nil }
+    private var currentScreenID: String? {
+        let screen = NSApp.keyWindow?.screen ?? NSScreen.main
+        return screen.map { AppStore.screenIdentifier(for: $0) }
+    }
     
     private var config: GridConfig {
         GridConfig(isFullscreen: appStore.isFullscreenMode,
@@ -274,6 +278,8 @@ struct LaunchpadView: View {
             let actualTopPadding = config.isFullscreen ? geo.size.height * config.topPadding : 0
             let actualBottomPadding = config.isFullscreen ? geo.size.height * config.bottomPadding : 0
             let actualHorizontalPadding = config.isFullscreen ? geo.size.width * config.horizontalPadding : 0
+            let indicatorTopPadding = appStore.effectivePageIndicatorTopPadding(for: currentScreenID)
+            let indicatorOffset = appStore.effectivePageIndicatorOffset(for: currentScreenID)
             
             VStack {
                 // 在顶部添加动态padding（全屏模式）
@@ -552,8 +558,8 @@ struct LaunchpadView: View {
                                 }
                         }
                     }
-                    .padding(.top, CGFloat(appStore.pageIndicatorTopPadding))
-                    .padding(.bottom, CGFloat(appStore.pageIndicatorOffset))
+                    .padding(.top, CGFloat(indicatorTopPadding))
+                    .padding(.bottom, CGFloat(indicatorOffset))
                     .opacity(isFolderOpen ? 0.1 : 1)
                     .allowsHitTesting(!isFolderOpen)
                 }
