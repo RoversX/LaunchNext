@@ -870,6 +870,9 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             Text(appStore.localized(.showFPSOverlayDisclaimer))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Text(appStore.localized(.showFPSOverlayWarning))
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Divider()
 
