@@ -436,6 +436,71 @@ struct LaunchpadView: View {
                                 .foregroundStyle(.placeholder)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if appStore.useCAGridRenderer {
+                        let caInsets = NSEdgeInsets(top: actualTopPadding,
+                                                    left: 0,
+                                                    bottom: actualBottomPadding,
+                                                    right: 0)
+                        let caItems: [LaunchpadItem] = filteredItems
+                        let externalDragSourceIndex: Int? = draggingItem.flatMap { filteredItems.firstIndex(of: $0) }
+                        let externalDragHoverIndex: Int? = draggingItem != nil ? pendingDropIndex : nil
+                        ZStack(alignment: .topLeading) {
+                            CAGridViewRepresentable(
+                                appStore: appStore,
+                                items: caItems,
+                                iconSize: iconSize,
+                                columnSpacing: config.columnSpacing,
+                                rowSpacing: config.rowSpacing,
+                                contentInsets: caInsets,
+                                pageSpacing: config.pageSpacing,
+                                onOpenApp: nil,
+                                onOpenFolder: { folder in
+                                    withAnimation(LNAnimations.springFast) {
+                                        appStore.openFolder = folder
+                                    }
+                                },
+                                externalDragSourceIndex: externalDragSourceIndex,
+                                externalDragHoverIndex: externalDragHoverIndex,
+                                selectedIndex: isKeyboardNavigationActive ? selectedIndex : nil
+                            )
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .opacity(isFolderOpen ? 0.1 : 1)
+                            .allowsHitTesting(!isFolderOpen)
+
+                            if let draggingItem {
+                                DragPreviewItem(item: draggingItem,
+                                               iconSize: iconSize,
+                                               labelWidth: columnWidth * 0.9,
+                                               scale: dragPreviewScale)
+                                    .position(x: dragPreviewPosition.x, y: dragPreviewPosition.y)
+                                    .zIndex(100)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                        .coordinateSpace(name: "grid")
+                        .onAppear {
+                            captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
+                        }
+                        .onChange(of: appStore.handoffDraggingApp) {
+                            if appStore.openFolder == nil, appStore.handoffDraggingApp != nil {
+                                startHandoffDragIfNeeded(geo: geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
+                            }
+                        }
+                        .onChange(of: appStore.openFolder) {
+                            if appStore.openFolder == nil, appStore.handoffDraggingApp != nil {
+                                startHandoffDragIfNeeded(geo: geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
+                            }
+                        }
+                        .onChange(of: geo.size) {
+                            DispatchQueue.main.async {
+                                captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
+                            }
+                        }
+                        .onChange(of: appStore.gridRefreshTrigger) { _ in
+                            DispatchQueue.main.async {
+                                captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
+                            }
+                        }
                     } else {
                         let hStackOffset = -CGFloat(appStore.currentPage) * effectivePageWidth
                             + (appStore.followScrollPagingEnabled ? scrollState.followOffset : 0)
@@ -591,21 +656,23 @@ struct LaunchpadView: View {
                 : Color.clear
         )
         .ignoresSafeArea()
-        .overlay(
+            .overlay(
             ZStack {
                 // 全窗口滚动捕获层（不拦截点击，仅监听滚动）
-                ScrollEventCatcher { deltaX, deltaY, phase, isMomentum, isPrecise in
-                    guard !appStore.isSetting else { return }
-                    let pageWidth = currentContainerSize.width + config.pageSpacing
-                    handleScroll(deltaX: deltaX,
-                                 deltaY: deltaY,
-                                 phase: phase,
-                                 isMomentum: isMomentum,
-                                 isPrecise: isPrecise,
-                                 pageWidth: pageWidth)
+                if !appStore.useCAGridRenderer {
+                    ScrollEventCatcher { deltaX, deltaY, phase, isMomentum, isPrecise in
+                        guard !appStore.isSetting else { return }
+                        let pageWidth = currentContainerSize.width + config.pageSpacing
+                        handleScroll(deltaX: deltaX,
+                                     deltaY: deltaY,
+                                     phase: phase,
+                                     isMomentum: isMomentum,
+                                     isPrecise: isPrecise,
+                                     pageWidth: pageWidth)
+                    }
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
                 }
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
 
                 // 半透明背景：仅在文件夹打开时插入，使用淡入淡出过渡
                 if isFolderOpen {
@@ -1478,8 +1545,9 @@ extension LaunchpadView {
 
     private func handleControllerCommand(_ command: ControllerCommand) {
         guard appStore.gameControllerEnabled else { return }
-        guard isWindowVisible else { return }
         guard ControllerInputManager.shared.isActive else { return }
+
+        guard isWindowVisible else { return }
         if appStore.isSetting { return }
 
         switch command {
@@ -1492,6 +1560,8 @@ extension LaunchpadView {
             synthesizeKeyDown(keyCode: 36)
         case .cancel:
             synthesizeKeyDown(keyCode: 53)
+        case .menu:
+            break
         }
     }
 

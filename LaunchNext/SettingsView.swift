@@ -387,6 +387,19 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 }
                 .toggleStyle(.switch)
 
+                Toggle(isOn: $appStore.gameControllerMenuTogglesLaunchpad) {
+                    Text(appStore.localized(.gameControllerMenuToggleTitle))
+                        .font(.subheadline.weight(.semibold))
+                }
+                .toggleStyle(.switch)
+                .disabled(!appStore.gameControllerEnabled)
+                .opacity(appStore.gameControllerEnabled ? 1 : 0.5)
+
+                Text(appStore.localized(.gameControllerMenuToggleSubtitle))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .opacity(appStore.gameControllerEnabled ? 1 : 0.6)
+
                 VStack(alignment: .leading, spacing: 6) {
                     Text(gameControllerStatusText)
                         .font(.callout.weight(.medium))
@@ -412,6 +425,9 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     guideRow(icon: "dpad", text: appStore.localized(.gameControllerQuickGuideDirection))
                     guideRow(icon: "a.circle.fill", text: appStore.localized(.gameControllerQuickGuideSelect))
                     guideRow(icon: "b.circle.fill", text: appStore.localized(.gameControllerQuickGuideCancel))
+                    if appStore.gameControllerMenuTogglesLaunchpad {
+                        guideRow(icon: "line.3.horizontal", text: appStore.localized(.gameControllerQuickGuideMenuToggle))
+                    }
                 }
             }
         }
@@ -929,9 +945,10 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     private var performanceSection: some View {
         let stats = appStore.cacheStatistics
         let isLeanMode = appStore.performanceMode == .lean
+        let canUseCAGrid = appStore.performanceMode == .lean
 
-        return VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text(appStore.localized(.performanceModeTitle))
                     .font(.title3.weight(.semibold))
                 Text(appStore.localized(.performanceModeSubtitle))
@@ -940,21 +957,48 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
                 performanceModePicker()
 
-                Text(appStore.localized(.performanceModeDescriptionLean))
-                    .font(.callout)
+                Text(appStore.localized(isLeanMode ? .performanceModeDescriptionLean : .performanceModeDescriptionFull))
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
-                Text(appStore.localized(.performanceModeDescriptionFull))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Text(appStore.localized(.performanceModeRestartHint))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+
+                Divider()
+
+                HStack(alignment: .center, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Text(appStore.localized(.performanceRendererBadge))
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.accentColor.opacity(0.15), in: Capsule())
+                        Text(appStore.localized(.performanceRendererTitle))
+                            .font(.headline)
+                    }
+                    Spacer()
+                    Toggle("", isOn: $appStore.useCAGridRenderer)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .disabled(!canUseCAGrid)
+                }
+                .opacity(canUseCAGrid ? 1 : 0.5)
+
+                if !canUseCAGrid {
+                    Text(appStore.localized(.performanceRendererSubtitle))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                if appStore.useCAGridRenderer {
+                    Text(appStore.localized(.performanceRendererWarning))
+                        .font(.footnote)
+                        .foregroundStyle(Color.accentColor)
+                }
             }
-            .padding(14)
+            .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Text(appStore.localized(.performanceCacheTitle))
                         .font(.title3.weight(.semibold))
@@ -975,7 +1019,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         .foregroundStyle(.secondary)
                 }
 
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                     cacheCountRow(title: appStore.localized(.performanceCacheIconLabel),
                                   valueText: isLeanMode ? appStore.localized(.performanceCacheIconsDisabled) : "\(stats.iconCacheSize)")
                     cacheCountRow(title: appStore.localized(.performanceCacheAppInfoLabel),
@@ -985,10 +1029,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     cacheCountRow(title: appStore.localized(.performanceCacheTotalLabel),
                                   valueText: "\(stats.totalCacheSize)")
                 }
-
-                Text(appStore.localized(.performanceCacheCountsHint))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
 
                 Button {
                     appStore.clearCache()
@@ -1002,13 +1042,9 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 }
                 .buttonStyle(.bordered)
             }
-            .padding(14)
+            .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-
-            Text(appStore.localized(.performanceModeRecommendation))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
         }
         .onChange(of: appStore.performanceMode) { _ in
             showPerformanceRestartPrompt = true
@@ -2685,6 +2721,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }
+                .disabled(appStore.useCAGridRenderer)
+                .opacity(appStore.useCAGridRenderer ? 0.5 : 1)
                 HStack {
                     Text(appStore.localized(.enableAnimations))
                     Spacer()
@@ -2700,6 +2738,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }
+                .disabled(appStore.useCAGridRenderer)
+                .opacity(appStore.useCAGridRenderer ? 0.5 : 1)
 
                 HStack {
                     Text(appStore.localized(.hideDockOption))
@@ -2767,10 +2807,12 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
+                    let durationEnabled = appStore.enableAnimations && !appStore.useCAGridRenderer
                     Text(appStore.localized(.animationDurationLabel))
                         .font(.headline)
                     Slider(value: $appStore.animationDuration, in: 0.1...1.0, step: 0.05)
-                        .disabled(!appStore.enableAnimations)
+                        .disabled(!durationEnabled)
+                        .opacity(durationEnabled ? 1 : 0.5)
                     HStack {
                         Text("0.1s").font(.footnote)
                         Spacer()
@@ -2779,6 +2821,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         Spacer()
                         Text("1.0s").font(.footnote)
                     }
+                    .foregroundStyle(durationEnabled ? .primary : .secondary)
+                    .opacity(durationEnabled ? 1 : 0.6)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -3287,7 +3331,10 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert(AppStore.activePressScaleKey)
                     keys.insert("animationDuration")
                     keys.insert("globalHotKeyConfiguration")
+                    keys.insert(AppStore.useCAGridRendererKey)
                     keys.insert("showFPSOverlay")
+                    keys.insert("gameControllerEnabled")
+                    keys.insert(AppStore.gameControllerMenuToggleKey)
                 }
                 if hiddenCheckbox.state == .on {
                     keys.insert(AppStore.hiddenAppsKey)

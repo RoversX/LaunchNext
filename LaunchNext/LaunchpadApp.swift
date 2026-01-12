@@ -64,6 +64,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
 
         bindAppearancePreference()
         bindControllerPreference()
+        bindControllerMenuToggle()
         bindSystemUIVisibility()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -242,6 +243,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
                     ControllerInputManager.shared.start()
                 } else {
                     ControllerInputManager.shared.stop()
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    private func bindControllerMenuToggle() {
+        ControllerInputManager.shared.commands
+            .receive(on: RunLoop.main)
+            .sink { [weak self] command in
+                guard let self else { return }
+                guard case .menu = command else { return }
+                guard self.appStore.gameControllerEnabled else { return }
+
+                if self.appStore.gameControllerMenuTogglesLaunchpad {
+                    self.toggleWindow()
+                } else if self.windowIsVisible {
+                    self.hideWindow()
                 }
             }
             .store(in: &cancellables)

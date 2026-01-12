@@ -203,6 +203,7 @@ final class AppStore: ObservableObject {
     static let activePressEffectKey = "enableActivePressEffect"
     static let activePressScaleKey = "activePressScale"
     static let followScrollPagingKey = "followScrollPagingEnabled"
+    static let useCAGridRendererKey = "useCAGridRenderer"
     static let backgroundStyleKey = "launchpadBackgroundStyle"
     static let backgroundMaskEnabledKey = "launchpadBackgroundMaskEnabled"
     static let backgroundMaskLightKey = "launchpadBackgroundMaskLight"
@@ -211,6 +212,7 @@ final class AppStore: ObservableObject {
     static let pageIndicatorPerDisplayEnabledKey = "pageIndicatorPerDisplayEnabled"
     static let pageIndicatorPerDisplayOverridesKey = "pageIndicatorPerDisplayOverrides"
     private static let gameControllerEnabledKey = "gameControllerEnabled"
+    static let gameControllerMenuToggleKey = "gameControllerMenuToggleLaunchpad"
     private static let soundEffectsEnabledKey = "soundEffectsEnabled"
     private static let soundLaunchpadOpenKey = "soundLaunchpadOpenSound"
     private static let soundLaunchpadCloseKey = "soundLaunchpadCloseSound"
@@ -275,7 +277,7 @@ final class AppStore: ObservableObject {
     static var columnSpacingRange: ClosedRange<Double> { minColumnSpacing...maxColumnSpacing }
     static var rowSpacingRange: ClosedRange<Double> { minRowSpacing...maxRowSpacing }
     static let hoverMagnificationRange: ClosedRange<Double> = 1.0...1.4
-    private static let defaultHoverMagnificationScale: Double = 1.2
+    private static let defaultHoverMagnificationScale: Double = 1.1
     static let activePressScaleRange: ClosedRange<Double> = 0.85...1.0
     private static let defaultActivePressScale: Double = 0.92
     static let folderPopoverWidthRange: ClosedRange<Double> = 0.6...0.95
@@ -488,6 +490,7 @@ final class AppStore: ObservableObject {
         useLocalizedThirdPartyTitles = UserDefaults.standard.object(forKey: "useLocalizedThirdPartyTitles") as? Bool ?? true
         enableAnimations = UserDefaults.standard.object(forKey: "enableAnimations") as? Bool ?? true
         scrollSensitivity = UserDefaults.standard.object(forKey: "scrollSensitivity") as? Double ?? scrollSensitivity
+        useCAGridRenderer = UserDefaults.standard.object(forKey: Self.useCAGridRendererKey) as? Bool ?? false
 
         // Apply hidden filtering immediately
         pruneHiddenAppsFromAppList()
@@ -769,6 +772,20 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(followScrollPagingEnabled, forKey: Self.followScrollPagingKey) }
     }
 
+    @Published var useCAGridRenderer: Bool = {
+        if UserDefaults.standard.object(forKey: AppStore.useCAGridRendererKey) == nil { return false }
+        let enabled = UserDefaults.standard.bool(forKey: AppStore.useCAGridRendererKey)
+        if PerformanceMode.current == .full { return false }
+        return enabled
+    }() {
+        didSet {
+            if useCAGridRenderer, performanceMode == .full {
+                performanceMode = .lean
+            }
+            UserDefaults.standard.set(useCAGridRenderer, forKey: Self.useCAGridRendererKey)
+        }
+    }
+
     @Published var activePressScale: Double = {
         let defaults = UserDefaults.standard
         let stored = defaults.object(forKey: AppStore.activePressScaleKey) as? Double
@@ -888,6 +905,9 @@ final class AppStore: ObservableObject {
         didSet {
             guard oldValue != performanceMode else { return }
             PerformanceMode.persist(performanceMode)
+            if performanceMode == .full, useCAGridRenderer {
+                useCAGridRenderer = false
+            }
         }
     }
 
@@ -898,6 +918,16 @@ final class AppStore: ObservableObject {
         didSet {
             guard oldValue != gameControllerEnabled else { return }
             UserDefaults.standard.set(gameControllerEnabled, forKey: AppStore.gameControllerEnabledKey)
+        }
+    }
+
+    @Published var gameControllerMenuTogglesLaunchpad: Bool = {
+        if UserDefaults.standard.object(forKey: AppStore.gameControllerMenuToggleKey) == nil { return true }
+        return UserDefaults.standard.bool(forKey: AppStore.gameControllerMenuToggleKey)
+    }() {
+        didSet {
+            guard oldValue != gameControllerMenuTogglesLaunchpad else { return }
+            UserDefaults.standard.set(gameControllerMenuTogglesLaunchpad, forKey: AppStore.gameControllerMenuToggleKey)
         }
     }
 
@@ -1095,6 +1125,7 @@ final class AppStore: ObservableObject {
     // 触发器
     @Published var folderUpdateTrigger: UUID = UUID()
     @Published var gridRefreshTrigger: UUID = UUID()
+    @Published var iconCacheRefreshTrigger: UUID = UUID()
     
     var modelContext: ModelContext?
 
@@ -1521,6 +1552,7 @@ final class AppStore: ObservableObject {
         let storedColumns = defaults.object(forKey: Self.gridColumnsKey) as? Int ?? 7
         let clampedColumns = Self.clampColumns(storedColumns)
         self.gridColumnsPerPage = clampedColumns
+
         defaults.set(clampedColumns, forKey: Self.gridColumnsKey)
 
         let storedRows = defaults.object(forKey: Self.gridRowsKey) as? Int ?? 5
@@ -1566,6 +1598,12 @@ final class AppStore: ObservableObject {
         }
         if UserDefaults.standard.object(forKey: AppStore.followScrollPagingKey) == nil {
             UserDefaults.standard.set(false, forKey: AppStore.followScrollPagingKey)
+        }
+        if defaults.object(forKey: Self.gameControllerMenuToggleKey) == nil {
+            defaults.set(true, forKey: Self.gameControllerMenuToggleKey)
+        }
+        if defaults.object(forKey: Self.useCAGridRendererKey) == nil {
+            defaults.set(false, forKey: Self.useCAGridRendererKey)
         }
         if defaults.object(forKey: Self.backgroundMaskEnabledKey) == nil {
             defaults.set(false, forKey: Self.backgroundMaskEnabledKey)
@@ -2909,11 +2947,13 @@ final class AppStore: ObservableObject {
             // 拖拽到新页面，延迟压缩以确保应用位置稳定
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 self.compactItemsWithinPages()
+                self.removeEmptyPages()
                 self.triggerGridRefresh()
             }
         } else {
             // 拖拽到现有页面，立即压缩
             compactItemsWithinPages()
+            removeEmptyPages()
         }
         
         // 触发网格视图刷新，确保界面立即更新
@@ -3343,6 +3383,7 @@ final class AppStore: ObservableObject {
             self.clearIconCachesForLayoutChange()
             self.triggerFolderUpdate()
             self.triggerGridRefresh()
+            self.iconCacheRefreshTrigger = UUID()
         }
         appearanceRefreshWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: workItem)

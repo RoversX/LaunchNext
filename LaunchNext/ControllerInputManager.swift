@@ -15,6 +15,7 @@ enum ControllerCommand {
     case stop(Direction)
     case select
     case cancel
+    case menu
 }
 
 final class ControllerInputManager: ObservableObject {
@@ -164,7 +165,7 @@ final class ControllerInputManager: ObservableObject {
         if #available(macOS 11.3, *) {
             gamepad.buttonMenu.valueChangedHandler = { [weak self] _, _, pressed in
                 guard pressed else { return }
-                self?.emit(.cancel)
+                self?.emit(.menu)
             }
         }
     }
@@ -185,7 +186,7 @@ final class ControllerInputManager: ObservableObject {
         if #available(macOS 11.3, *) {
             microGamepad.buttonMenu.valueChangedHandler = { [weak self] _, _, pressed in
                 guard pressed else { return }
-                self?.emit(.cancel)
+                self?.emit(.menu)
             }
         }
     }
