@@ -217,6 +217,9 @@ enum LocalizationKey: String {
     case hiddenAppsHint
     case hiddenAppsRemoveButton
     case hiddenAppsSearchPlaceholder
+    case notHiddenAppsTitle
+    case notHiddenAppsHint
+    case notHiddenAppsSearchPlaceholder
     case performancePlaceholderTitle
     case performancePlaceholderSubtitle
     case performanceModeTitle
@@ -2191,6 +2194,9 @@ final class LocalizationManager {
             .hiddenAppsHint: "Hidden apps disappear from the grid. Remove them here to restore.",
             .hiddenAppsRemoveButton: "Unhide",
             .hiddenAppsSearchPlaceholder: "Filter hidden apps",
+            .notHiddenAppsTitle: "Not hidden apps",
+            .notHiddenAppsHint: "Select an application to hide it from LaunchNext.",
+            .notHiddenAppsSearchPlaceholder: "Filter not hidden apps",
             .accessibilityPlaceholderTitle: "Accessibility controls",
             .accessibilityPlaceholderSubtitle: "Accessibility settings are planned; nothing here yet.",
             .performancePlaceholderTitle: "Performance dashboard",
@@ -3233,6 +3239,9 @@ final class LocalizationManager {
             .hiddenAppsHint: "Скрытые приложения не отображаются в сетке. Здесь можно вернуть их обратно.",
             .hiddenAppsRemoveButton: "Показать",
             .hiddenAppsSearchPlaceholder: "Поиск среди скрытых приложений",
+            .notHiddenAppsTitle: "Не скрытые приложения",
+            .notHiddenAppsHint: "Выберите приложение, чтобы скрыть его из LaunchNext.",
+            .notHiddenAppsSearchPlaceholder: "Поиск среди не скрытых приложений",
             .accessibilityPlaceholderTitle: "Параметры доступности",
             .accessibilityPlaceholderSubtitle: "Настройки доступности ещё в разработке.",
             .performancePlaceholderTitle: "Панель производительности",

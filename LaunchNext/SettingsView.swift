@@ -16,7 +16,16 @@ struct SettingsView: View {
     @State private var showResetConfirm = false
     @State private var selectedSection: SettingsSection = .general
     @State private var titleSearch: String = ""
+    @State private var hasHiddenAppEntries: Bool = false
+    @State private var hasNotHiddenAppEntries: Bool = false
     @State private var hiddenSearch: String = ""
+    @State private var notHiddenSearch: String = ""
+    @State private var hasHiddenAppEntriesSearchResult: Bool = false
+    @State private var hasNotHiddenAppEntriesSearchResult: Bool = false
+    @State private var cachedHiddenAppEntries: [AppEntry] = []
+    @State private var cachedNotHiddenAppEntries: [AppEntry] = []
+    @State private var showHiddenApps = true
+    @State private var showNotHiddenApps = false
     @State private var editingDrafts: [String: String] = [:]
     @State private var editingEntries: Set<String> = []
     @State private var iconImportError: String? = nil
@@ -1097,66 +1106,117 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     }
 
     private var hiddenAppsSection: some View {
-        let entries = hiddenAppEntries
-        return VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Button {
-                    presentHiddenAppPicker()
-                } label: {
-                    Label(appStore.localized(.hiddenAppsAddButton), systemImage: "eye.slash")
+        return LazyVStack(alignment: .leading, spacing: 16) {
+            DisclosureGroup(isExpanded: $showHiddenApps) {
+                LazyVStack(alignment: .leading, spacing: 16){
+                    if hasHiddenAppEntries {
+                        Text(appStore.localized(.hiddenAppsHint))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        
+                        TextField("", text: $hiddenSearch, prompt: Text(appStore.localized(.hiddenAppsSearchPlaceholder)))
+                            .textFieldStyle(.roundedBorder)
+                        
+                        if hasHiddenAppEntriesSearchResult {
+                            LazyVStack(spacing: 12) {
+                                ForEach(cachedHiddenAppEntries) { entry in
+                                    hiddenAppRow(for: entry)
+                                }
+                            }
+                        } else {
+                            Text(appStore.localized(.customTitleNoResults))
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
+                        }
+                    } else {
+                        hiddenAppsEmptyState
+                    }
                 }
-                Spacer()
+            } label: {
+                Label(appStore.localized(.settingsSectionHiddenApps), systemImage: "eye.slash")
+                    .font(.headline)
             }
-
-            if entries.isEmpty {
-                hiddenAppsEmptyState
-            } else {
-                Text(appStore.localized(.hiddenAppsHint))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                TextField("", text: $hiddenSearch, prompt: Text(appStore.localized(.hiddenAppsSearchPlaceholder)))
-                    .textFieldStyle(.roundedBorder)
-
-                let filtered = filteredHiddenAppEntries
-                if filtered.isEmpty {
-                    Text(appStore.localized(.customTitleNoResults))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
-                } else {
-                    VStack(spacing: 12) {
-                        ForEach(filtered) { entry in
-                            hiddenAppRow(for: entry)
+                
+            DisclosureGroup(isExpanded: $showNotHiddenApps) {
+                LazyVStack(alignment: .leading, spacing: 16){
+                    if hasNotHiddenAppEntries{
+                        Spacer()
+                        Text(appStore.localized(.notHiddenAppsHint))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        
+                        TextField("", text: $notHiddenSearch, prompt: Text(appStore.localized(.notHiddenAppsSearchPlaceholder)))
+                            .textFieldStyle(.roundedBorder)
+                        
+                        if hasNotHiddenAppEntriesSearchResult{
+                            LazyVStack(spacing: 12) {
+                                ForEach(cachedNotHiddenAppEntries){ entry in
+                                    notHiddenAppRow(for: entry)
+                                }
+                            }
+                        } else {
+                            Text(appStore.localized(.customTitleNoResults))
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
                         }
                     }
                 }
+            } label: {
+                Label(appStore.localized(.notHiddenAppsTitle), systemImage: "eye")
+                    .font(.headline)
             }
+                
         }
+        .onAppear(perform: updateCachedAllAppEntries)
+        .onChange(of: hiddenSearch.count, initial: false, updateCachedHiddenAppEntries)
+        .onChange(of: notHiddenSearch.count, initial: false, updateCachedNotHiddenAppEntries)
+        .onChange(of: appStore.apps, initial: false, updateCachedAllAppEntries)
     }
 
-    private var hiddenAppEntries: [HiddenAppEntry] {
+    private var hiddenAppEntries: [AppEntry] {
         appStore.hiddenAppPaths
             .map { path in
                 let info = appStore.appInfoForCustomTitle(path: path)
                 let defaultName = appStore.defaultDisplayName(for: path)
-                return HiddenAppEntry(id: path, appInfo: info, defaultName: defaultName)
+                return AppEntry(id: path, appInfo: info, defaultName: defaultName)
             }
             .sorted { lhs, rhs in
                 lhs.appInfo.name.localizedCaseInsensitiveCompare(rhs.appInfo.name) == .orderedAscending
             }
     }
-
-    private var filteredHiddenAppEntries: [HiddenAppEntry] {
-        let base = hiddenAppEntries
-        let trimmed = hiddenSearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return base }
-        let query = trimmed.lowercased()
+    
+    private var notHiddenAppEntries: [AppEntry] {
+        appStore.apps
+            .map { info in
+                let path = info.url.path
+                let defaultName = appStore.defaultDisplayName(for: path)
+                return AppEntry(id: path, appInfo: info, defaultName: defaultName)
+            }
+            .sorted { lhs, rhs in
+                lhs.appInfo.name.localizedCaseInsensitiveCompare(rhs.appInfo.name) == .orderedAscending
+            }
+    }
+    
+    private func matches(_ entry: AppEntry, query: String) -> Bool {
+        let options: String.CompareOptions = [
+            .caseInsensitive,
+            .diacriticInsensitive,
+            .widthInsensitive
+        ]
+            
+        return entry.appInfo.name.range(of: query, options: options) != nil
+            || entry.defaultName.range(of: query, options: options) != nil
+            || entry.id.range(of: query, options: options) != nil
+    }
+    
+    
+    private func filter(_ base: [AppEntry], by rawQuery: String) -> [AppEntry] {
+        let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return base }
         return base.filter { entry in
-            if entry.appInfo.name.lowercased().contains(query) { return true }
-            if entry.defaultName.lowercased().contains(query) { return true }
-            if entry.id.lowercased().contains(query) { return true }
-            return false
+            matches(entry, query: query)
         }
     }
 
@@ -1164,22 +1224,13 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         VStack(alignment: .leading, spacing: 12) {
             Text(appStore.localized(.hiddenAppsEmptyTitle))
                 .font(.headline)
-            Text(appStore.localized(.hiddenAppsEmptySubtitle))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-            Button {
-                presentHiddenAppPicker()
-            } label: {
-                Label(appStore.localized(.hiddenAppsAddButton), systemImage: "eye.slash")
-            }
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .liquidGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private func hiddenAppRow(for entry: HiddenAppEntry) -> some View {
+    private func hiddenAppRow(for entry: AppEntry) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Image(nsImage: IconStore.shared.icon(for: entry.appInfo))
                 .resizable()
@@ -1212,11 +1263,68 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+    
+    private func notHiddenAppRow(for entry: AppEntry) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(nsImage: IconStore.shared.icon(for: entry.appInfo))
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 40, height: 40)
+                .cornerRadius(10)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(entry.appInfo.name)
+                    .font(.callout.weight(.semibold))
+                Text(entry.defaultName)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Text(entry.id)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            
+            Spacer()
+            
+            Button {
+                appStore.hideApp(atPath: entry.id)
+            } label: {
+                Text(appStore.localized(.hiddenAppsAddButton))
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(14)
+        .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
-    private struct HiddenAppEntry: Identifiable {
+    private struct AppEntry: Identifiable {
         let id: String
         let appInfo: AppInfo
         let defaultName: String
+    }
+    
+    private func updateCachedHiddenAppEntries() {
+        cachedHiddenAppEntries.removeAll()
+        let hiddenAppEntries = hiddenAppEntries
+        hasHiddenAppEntries = !hiddenAppEntries.isEmpty
+        let filteredHiddenAppEntries = filter(hiddenAppEntries, by: hiddenSearch)
+        hasHiddenAppEntriesSearchResult = !filteredHiddenAppEntries.isEmpty
+        cachedHiddenAppEntries.append(contentsOf: filteredHiddenAppEntries)
+    }
+    
+    private func updateCachedNotHiddenAppEntries() {
+        cachedNotHiddenAppEntries.removeAll()
+        let notHiddenAppEntries = notHiddenAppEntries
+        hasNotHiddenAppEntries = !notHiddenAppEntries.isEmpty
+        let filteredNotHiddenAppEntries = filter(notHiddenAppEntries, by: notHiddenSearch)
+        hasNotHiddenAppEntriesSearchResult = !filteredNotHiddenAppEntries.isEmpty
+        cachedNotHiddenAppEntries.append(contentsOf: filteredNotHiddenAppEntries)
+    }
+    
+    private func updateCachedAllAppEntries() {
+        updateCachedHiddenAppEntries()
+        updateCachedNotHiddenAppEntries()
     }
 
     private var customTitleEntries: [CustomTitleEntry] {
@@ -1341,21 +1449,31 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .frame(maxWidth: .infinity, alignment: .leading)
     }
-
-    private func presentHiddenAppPicker() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = [.applicationBundle]
-        panel.prompt = appStore.localized(.hiddenAppsAddButton)
-        panel.title = appStore.localized(.hiddenAppsAddButton)
-
-        if panel.runModal() == .OK {
-            if !appStore.hideApps(at: panel.urls) {
-                NSSound.beep()
+    
+    private func findApps(in rootURL: URL) -> [URL] {
+        var result: [URL] = []
+        let fm = FileManager.default
+        let keys: [URLResourceKey] = [.isDirectoryKey, .isPackageKey, .contentTypeKey]
+        
+        guard let enumerator = fm.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: keys,
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return []
+        }
+        
+        for case let url as URL in enumerator {
+            if let type = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType,
+               type.conforms(to: .applicationBundle) {
+                result.append(url)
+                (enumerator as? FileManager.DirectoryEnumerator)?.skipDescendants()
+            } else if url.pathExtension.lowercased() == "app" {
+                result.append(url)
+                (enumerator as? FileManager.DirectoryEnumerator)?.skipDescendants()
             }
         }
+        return result
     }
 
     private func presentCustomTitlePicker() {
