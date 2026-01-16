@@ -208,6 +208,7 @@ final class AppStore: ObservableObject {
     static let backgroundMaskEnabledKey = "launchpadBackgroundMaskEnabled"
     static let backgroundMaskLightKey = "launchpadBackgroundMaskLight"
     static let backgroundMaskDarkKey = "launchpadBackgroundMaskDark"
+    static let folderPreviewHighResKey = "folderPreviewHighRes"
     static let sidebarIconPresetKey = "sidebarIconPreset"
     static let pageIndicatorPerDisplayEnabledKey = "pageIndicatorPerDisplayEnabled"
     static let pageIndicatorPerDisplayOverridesKey = "pageIndicatorPerDisplayOverrides"
@@ -627,6 +628,19 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(showLabels, forKey: "showLabels") }
     }
 
+    @Published var enableHighResFolderPreviews: Bool = {
+        if UserDefaults.standard.object(forKey: AppStore.folderPreviewHighResKey) == nil { return true }
+        return UserDefaults.standard.bool(forKey: AppStore.folderPreviewHighResKey)
+    }() {
+        didSet {
+            guard enableHighResFolderPreviews != oldValue else { return }
+            UserDefaults.standard.set(enableHighResFolderPreviews, forKey: AppStore.folderPreviewHighResKey)
+            clearIconCachesForLayoutChange()
+            triggerFolderUpdate()
+            triggerGridRefresh()
+        }
+    }
+
     @Published var hideDock: Bool = {
         if UserDefaults.standard.object(forKey: "hideDock") == nil { return false }
         return UserDefaults.standard.bool(forKey: "hideDock")
@@ -773,7 +787,7 @@ final class AppStore: ObservableObject {
     }
 
     @Published var useCAGridRenderer: Bool = {
-        if UserDefaults.standard.object(forKey: AppStore.useCAGridRendererKey) == nil { return false }
+        if UserDefaults.standard.object(forKey: AppStore.useCAGridRendererKey) == nil { return true }
         let enabled = UserDefaults.standard.bool(forKey: AppStore.useCAGridRendererKey)
         if PerformanceMode.current == .full { return false }
         return enabled
@@ -1603,7 +1617,7 @@ final class AppStore: ObservableObject {
             defaults.set(true, forKey: Self.gameControllerMenuToggleKey)
         }
         if defaults.object(forKey: Self.useCAGridRendererKey) == nil {
-            defaults.set(false, forKey: Self.useCAGridRendererKey)
+            defaults.set(true, forKey: Self.useCAGridRendererKey)
         }
         if defaults.object(forKey: Self.backgroundMaskEnabledKey) == nil {
             defaults.set(false, forKey: Self.backgroundMaskEnabledKey)

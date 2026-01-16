@@ -2774,8 +2774,21 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         .toggleStyle(.switch)
                 }
 
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(appStore.localized(.folderPreviewHighResTitle))
+                        Spacer()
+                        Toggle("", isOn: $appStore.enableHighResFolderPreviews)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                    }
+                    Text(appStore.localized(.folderPreviewHighResHint))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 HStack {
-                    Text("Background mask")
+                    Text(appStore.localized(.backgroundMaskTitle))
                     Spacer()
                     Toggle("", isOn: $appStore.backgroundMaskEnabled)
                         .labelsHidden()
@@ -2784,8 +2797,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
                 if appStore.backgroundMaskEnabled {
                     VStack(alignment: .leading, spacing: 8) {
-                        ColorPicker("Light appearance mask", selection: backgroundMaskColorBinding(isDark: false), supportsOpacity: true)
-                        ColorPicker("Dark appearance mask", selection: backgroundMaskColorBinding(isDark: true), supportsOpacity: true)
+                        ColorPicker(appStore.localized(.backgroundMaskLightLabel), selection: backgroundMaskColorBinding(isDark: false), supportsOpacity: true)
+                        ColorPicker(appStore.localized(.backgroundMaskDarkLabel), selection: backgroundMaskColorBinding(isDark: true), supportsOpacity: true)
                     }
                 }
 
@@ -3319,6 +3332,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert("gridColumnSpacing")
                     keys.insert("gridRowSpacing")
                     keys.insert("folderDropZoneScale")
+                    keys.insert(AppStore.folderPreviewHighResKey)
                     keys.insert("pageIndicatorOffset")
                     keys.insert(AppStore.pageIndicatorTopPaddingKey)
                     keys.insert(AppStore.pageIndicatorPerDisplayEnabledKey)

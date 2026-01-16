@@ -38,6 +38,8 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         view.showLabels = appStore.showLabels
         view.isLayoutLocked = appStore.isLayoutLocked
         view.folderDropZoneScale = CGFloat(appStore.folderDropZoneScale)
+        let preferredScale = nsViewScale(for: view)
+        view.folderPreviewScale = appStore.enableHighResFolderPreviews ? preferredScale : 1
         view.enableIconPreload = false
         view.scrollSensitivity = appStore.scrollSensitivity
         view.hoverMagnificationEnabled = appStore.enableHoverMagnification
@@ -178,7 +180,8 @@ struct CAGridViewRepresentable: NSViewRepresentable {
                             nsView.labelFontWeight != nsFontWeight(for: appStore.iconLabelFontWeight) ||
                             nsView.showLabels != appStore.showLabels ||
                             nsView.isLayoutLocked != appStore.isLayoutLocked ||
-                            nsView.folderDropZoneScale != CGFloat(appStore.folderDropZoneScale)
+                            nsView.folderDropZoneScale != CGFloat(appStore.folderDropZoneScale) ||
+                            nsView.folderPreviewScale != (appStore.enableHighResFolderPreviews ? nsViewScale(for: nsView) : 1)
 
         if configChanged {
             nsView.columns = appStore.gridColumnsPerPage
@@ -193,6 +196,8 @@ struct CAGridViewRepresentable: NSViewRepresentable {
             nsView.showLabels = appStore.showLabels
             nsView.isLayoutLocked = appStore.isLayoutLocked
             nsView.folderDropZoneScale = CGFloat(appStore.folderDropZoneScale)
+            let preferredScale = nsViewScale(for: nsView)
+            nsView.folderPreviewScale = appStore.enableHighResFolderPreviews ? preferredScale : 1
         }
         nsView.scrollSensitivity = appStore.scrollSensitivity
         nsView.enableIconPreload = false
@@ -273,6 +278,13 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         case .semibold: return .semibold
         case .bold: return .bold
         }
+    }
+
+    private func nsViewScale(for view: NSView) -> CGFloat {
+        if let scale = view.window?.backingScaleFactor {
+            return scale
+        }
+        return NSScreen.main?.backingScaleFactor ?? 1
     }
 
     class Coordinator {

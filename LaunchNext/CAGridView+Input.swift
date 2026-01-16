@@ -433,7 +433,7 @@ extension CAGridView {
                 iconLayer.contents = cgImage
             }
         } else if case .folder(let folder) = item {
-            let icon = folder.icon(of: actualIconSize)
+            let icon = folder.icon(of: actualIconSize, scale: folderPreviewScale)
             let renderSize = NSSize(width: actualIconSize * scale, height: actualIconSize * scale)
             let renderedImage = NSImage(size: renderSize)
             renderedImage.lockFocus()

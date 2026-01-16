@@ -157,8 +157,9 @@ extension CAGridView {
         case .folder(let folder):
             // 异步加载文件夹图标
             let folderIconSize = iconSize
+            let previewScale = folderPreviewScale
             DispatchQueue.global(qos: .userInitiated).async { [weak layer] in
-                let icon = folder.icon(of: folderIconSize)
+                let icon = folder.icon(of: folderIconSize, scale: previewScale)
                 if let cgImage = icon.cgImage(forProposedRect: nil, context: nil, hints: nil) {
                     DispatchQueue.main.async {
                         CATransaction.begin()

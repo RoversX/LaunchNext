@@ -38,6 +38,7 @@ final class CAGridView: NSView, CALayerDelegate {
     var showLabels: Bool = true { didSet { updateLabelVisibility() } }
     var isLayoutLocked: Bool = false
     var folderDropZoneScale: CGFloat = CGFloat(AppStore.defaultFolderDropZoneScale)
+    var folderPreviewScale: CGFloat = 1
     var contentInsets: NSEdgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) { didSet { updateLayout() } }
     var pageSpacing: CGFloat = 0 { didSet { updateLayout() } }
 
