@@ -2689,6 +2689,7 @@ final class AppStore: ObservableObject {
         self.items = filteredItemsRemovingHidden(from: newItems)
         // 单页内自动补位：将该页内的空槽移到页尾
         compactItemsWithinPages()
+        removeEmptyPages()
 
         // 触发文件夹更新，通知所有相关视图刷新图标
         DispatchQueue.main.async { [weak self] in
@@ -2725,6 +2726,7 @@ final class AppStore: ObservableObject {
             items[pos] = .empty(UUID().uuidString)
             // 单页内自动补位
             compactItemsWithinPages()
+            removeEmptyPages()
         } else {
             // 若未找到则回退到重建
             rebuildItems()
