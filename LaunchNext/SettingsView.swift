@@ -40,6 +40,11 @@ struct SettingsView: View {
     @State private var capturingShortcutTarget: ShortcutTarget? = nil
     @State private var shortcutCaptureMonitor: Any?
     @State private var pendingShortcut: AppStore.HotKeyConfiguration?
+    @State private var cachedAllAppEntries: [AppEntry] = []
+    @State private var allAppsSearch: String = ""
+    @State private var hasAllAppEntries:Bool = false
+    @State private var hasAllAppEntriesSearchResult: Bool = false
+    @State private var showOnlyEditedTittleApps: Bool = false
 
     // Sidebar sizing presets
     private var sidebarIconFrame: CGFloat {
@@ -1065,46 +1070,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         }
     }
 
-    private var titlesSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Button {
-                    presentCustomTitlePicker()
-                } label: {
-                    Label(appStore.localized(.customTitleAddButton), systemImage: "plus")
-                }
-                Spacer()
-            }
-
-            let allEntries = customTitleEntries
-            let filtered = filteredCustomTitleEntries
-
-            if allEntries.isEmpty {
-                customTitleEmptyState
-            } else {
-                Text(appStore.localized(.customTitleHint))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                TextField("", text: $titleSearch, prompt: Text(appStore.localized(.renameSearchPlaceholder)))
-                    .textFieldStyle(.roundedBorder)
-
-                if filtered.isEmpty {
-                    Text(appStore.localized(.customTitleNoResults))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
-                } else {
-                    VStack(spacing: 12) {
-                        ForEach(filtered) { entry in
-                            customTitleRow(for: entry)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     private var hiddenAppsSection: some View {
         return LazyVStack(alignment: .leading, spacing: 16) {
             DisclosureGroup(isExpanded: $showHiddenApps) {
@@ -1169,10 +1134,10 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             }
                 
         }
-        .onAppear(perform: updateCachedAllAppEntries)
+        .onAppear(perform: updateCachedHiddenAndNotHiddenAppEntries)
         .onChange(of: hiddenSearch.count, initial: false, updateCachedHiddenAppEntries)
         .onChange(of: notHiddenSearch.count, initial: false, updateCachedNotHiddenAppEntries)
-        .onChange(of: appStore.apps, initial: false, updateCachedAllAppEntries)
+        .onChange(of: appStore.apps, initial: false, updateCachedHiddenAndNotHiddenAppEntries)
     }
 
     private var hiddenAppEntries: [AppEntry] {
@@ -1210,7 +1175,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             || entry.defaultName.range(of: query, options: options) != nil
             || entry.id.range(of: query, options: options) != nil
     }
-    
     
     private func filter(_ base: [AppEntry], by rawQuery: String) -> [AppEntry] {
         let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1306,7 +1270,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     
     private func updateCachedHiddenAppEntries() {
         cachedHiddenAppEntries.removeAll()
-        let hiddenAppEntries = hiddenAppEntries
         hasHiddenAppEntries = !hiddenAppEntries.isEmpty
         let filteredHiddenAppEntries = filter(hiddenAppEntries, by: hiddenSearch)
         hasHiddenAppEntriesSearchResult = !filteredHiddenAppEntries.isEmpty
@@ -1315,65 +1278,103 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     
     private func updateCachedNotHiddenAppEntries() {
         cachedNotHiddenAppEntries.removeAll()
-        let notHiddenAppEntries = notHiddenAppEntries
         hasNotHiddenAppEntries = !notHiddenAppEntries.isEmpty
         let filteredNotHiddenAppEntries = filter(notHiddenAppEntries, by: notHiddenSearch)
         hasNotHiddenAppEntriesSearchResult = !filteredNotHiddenAppEntries.isEmpty
         cachedNotHiddenAppEntries.append(contentsOf: filteredNotHiddenAppEntries)
     }
     
-    private func updateCachedAllAppEntries() {
+    private func updateCachedHiddenAndNotHiddenAppEntries() {
         updateCachedHiddenAppEntries()
         updateCachedNotHiddenAppEntries()
     }
+    
+    private var titlesSection: some View {
+        LazyVStack(alignment: .leading, spacing: 16){
+            Text(appStore.localized(.customTitleHint))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            
+            HStack(){
+                Text(appStore.localized(.customTitleOnly))
+                    .font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Toggle("", isOn: $showOnlyEditedTittleApps)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .disabled(appStore.customTitles.isEmpty)
+                    .onChange(of: appStore.customTitles.isEmpty, initial: true) { _, isEmply in
+                        if isEmply {
+                            showOnlyEditedTittleApps = false
+                        }
+                    }
+            }
 
-    private var customTitleEntries: [CustomTitleEntry] {
+            if hasAllAppEntries{
+                TextField("", text: $allAppsSearch, prompt: Text(appStore.localized(.renameSearchPlaceholder)))
+                    .textFieldStyle(.roundedBorder)
+                
+                if hasAllAppEntriesSearchResult{
+                    LazyVStack(spacing: 12) {
+                        ForEach(cachedAllAppEntries){ entry in
+                            customTitleRow(for: entry)
+                        }
+                    }
+                } else {
+                    Text(appStore.localized(.customTitleNoResults))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
+                }
+            }
+        }
+        .onAppear(perform: updateCachedAllAppEntries)
+        .onChange(of: allAppsSearch, initial: false, updateCachedAllAppEntries)
+        .onChange(of: showOnlyEditedTittleApps, initial: false, updateCachedAllAppEntries)
+        .onChange(of: appStore.customTitles, initial: false, updateCachedAllAppEntries)
+        .onChange(of: appStore.apps, initial: false, updateCachedAllAppEntries)
+    }
+    
+    private var customTitleEntries: [AppEntry] {
         appStore.customTitles
             .map { (path, _) in
                 let info = appStore.appInfoForCustomTitle(path: path)
                 let defaultName = appStore.defaultDisplayName(for: path)
-                return CustomTitleEntry(id: path, appInfo: info, defaultName: defaultName)
+                return AppEntry(id: path, appInfo: info, defaultName: defaultName)
             }
             .sorted { lhs, rhs in
                 lhs.appInfo.name.localizedCaseInsensitiveCompare(rhs.appInfo.name) == .orderedAscending
             }
     }
-
-    private var filteredCustomTitleEntries: [CustomTitleEntry] {
-        let base = customTitleEntries
-        let trimmed = titleSearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return base }
-        let query = trimmed.lowercased()
-        return base.filter { entry in
-            let custom = entry.appInfo.name.lowercased()
-            if custom.contains(query) { return true }
-            if entry.defaultName.lowercased().contains(query) { return true }
-            if entry.id.lowercased().contains(query) { return true }
-            return false
+    
+    private var allAppEntries: [AppEntry] {
+        var allEntries: [AppEntry] = []
+        allEntries.append(contentsOf: notHiddenAppEntries)
+        allEntries.append(contentsOf: hiddenAppEntries)
+        allEntries.sort { lhs, rhs in
+            lhs.appInfo.name.localizedCaseInsensitiveCompare(rhs.appInfo.name) == .orderedAscending
         }
+        return allEntries
     }
-
-    private var customTitleEmptyState: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(appStore.localized(.customTitleEmptyTitle))
-                .font(.headline)
-            Text(appStore.localized(.customTitleEmptySubtitle))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-            Button {
-                presentCustomTitlePicker()
-            } label: {
-                Label(appStore.localized(.customTitleAddButton), systemImage: "plus")
-            }
+    
+    private func updateCachedAllAppEntries() {
+        cachedAllAppEntries.removeAll()
+        
+        if (showOnlyEditedTittleApps){
+            hasAllAppEntries = !customTitleEntries.isEmpty
+            let filteredCustomTitleEntries = filter(customTitleEntries, by: allAppsSearch)
+            hasAllAppEntriesSearchResult = !filteredCustomTitleEntries.isEmpty
+            cachedAllAppEntries.append(contentsOf: filteredCustomTitleEntries)
+        } else {
+            hasAllAppEntries = !allAppEntries.isEmpty
+            let filteredAllAppEntries = filter(allAppEntries, by: allAppsSearch)
+            hasAllAppEntriesSearchResult = !filteredAllAppEntries.isEmpty
+            cachedAllAppEntries.append(contentsOf: filteredAllAppEntries)
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     @ViewBuilder
-    private func customTitleRow(for entry: CustomTitleEntry) -> some View {
+    private func customTitleRow(for entry: AppEntry) -> some View {
         let isEditing = editingEntries.contains(entry.id)
         let currentDraft = editingDrafts[entry.id] ?? appStore.customTitles[entry.id] ?? entry.appInfo.name
         let trimmedDraft = currentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1401,14 +1402,13 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
                 Spacer()
 
-                HStack(spacing: 10) {
+                VStack(alignment: .trailing, spacing: 10) {
                     if isEditing {
                         Button(appStore.localized(.customTitleSave)) {
                             saveCustomTitle(entry)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(trimmedDraft.isEmpty || trimmedDraft == originalValue)
-
                         Button(appStore.localized(.customTitleCancel)) {
                             cancelEditing(entry)
                         }
@@ -1418,10 +1418,11 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                             Button(role: .destructive) {
                                 removeCustomTitle(entry)
                             } label: {
-                                Text(appStore.localized(.customTitleDelete))
+                                Text(appStore.localized(.customTitleReset))
                             }
                             .buttonStyle(.bordered)
                         }
+
                     } else {
                         Button(appStore.localized(.customTitleEdit)) {
                             beginEditing(entry)
@@ -1432,7 +1433,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                             Button(role: .destructive) {
                                 removeCustomTitle(entry)
                             } label: {
-                                Text(appStore.localized(.customTitleDelete))
+                                Text(appStore.localized(.customTitleReset))
                             }
                             .buttonStyle(.bordered)
                         }
@@ -1448,32 +1449,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         .padding(14)
         .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-    
-    private func findApps(in rootURL: URL) -> [URL] {
-        var result: [URL] = []
-        let fm = FileManager.default
-        let keys: [URLResourceKey] = [.isDirectoryKey, .isPackageKey, .contentTypeKey]
-        
-        guard let enumerator = fm.enumerator(
-            at: rootURL,
-            includingPropertiesForKeys: keys,
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else {
-            return []
-        }
-        
-        for case let url as URL in enumerator {
-            if let type = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType,
-               type.conforms(to: .applicationBundle) {
-                result.append(url)
-                (enumerator as? FileManager.DirectoryEnumerator)?.skipDescendants()
-            } else if url.pathExtension.lowercased() == "app" {
-                result.append(url)
-                (enumerator as? FileManager.DirectoryEnumerator)?.skipDescendants()
-            }
-        }
-        return result
     }
 
     private func presentCustomTitlePicker() {
@@ -1577,23 +1552,23 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         )
     }
 
-    private struct CustomTitleEntry: Identifiable {
-        let id: String
-        let appInfo: AppInfo
-        let defaultName: String
-    }
+//    private struct CustomTitleEntry: Identifiable {
+//        let id: String
+//        let appInfo: AppInfo
+//        let defaultName: String
+//    }
 
-    private func beginEditing(_ entry: CustomTitleEntry) {
+    private func beginEditing(_ entry: AppEntry) {
         editingEntries.insert(entry.id)
         editingDrafts[entry.id] = appStore.customTitles[entry.id] ?? entry.appInfo.name
     }
 
-    private func cancelEditing(_ entry: CustomTitleEntry) {
+    private func cancelEditing(_ entry: AppEntry) {
         editingEntries.remove(entry.id)
         editingDrafts.removeValue(forKey: entry.id)
     }
 
-    private func saveCustomTitle(_ entry: CustomTitleEntry) {
+    private func saveCustomTitle(_ entry: AppEntry) {
         let draft = (editingDrafts[entry.id] ?? appStore.customTitles[entry.id] ?? entry.appInfo.name)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !draft.isEmpty else { return }
@@ -1608,7 +1583,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         editingDrafts.removeValue(forKey: entry.id)
     }
 
-    private func removeCustomTitle(_ entry: CustomTitleEntry) {
+    private func removeCustomTitle(_ entry: AppEntry) {
         appStore.clearCustomTitle(for: entry.appInfo)
         editingEntries.remove(entry.id)
         editingDrafts.removeValue(forKey: entry.id)
