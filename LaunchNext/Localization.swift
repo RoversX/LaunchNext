@@ -222,6 +222,9 @@ enum LocalizationKey: String {
     case hiddenAppsHint
     case hiddenAppsRemoveButton
     case hiddenAppsSearchPlaceholder
+    case notHiddenAppsTitle
+    case notHiddenAppsHint
+    case notHiddenAppsSearchPlaceholder
     case performancePlaceholderTitle
     case performancePlaceholderSubtitle
     case performanceModeTitle
@@ -267,7 +270,7 @@ enum LocalizationKey: String {
     case customTitleEdit
     case customTitleSave
     case customTitleCancel
-    case customTitleDelete
+    case customTitleOnly
     case loadingApplications
     case showFPSOverlay
     case showFPSOverlayDisclaimer
@@ -351,7 +354,7 @@ final class LocalizationManager {
                 .customTitleEdit: "Edit",
                 .customTitleSave: "Save",
                 .customTitleCancel: "Cancel",
-                .customTitleDelete: "Remove",
+                .customTitleOnly: "Show only application with edited titles.",
                 .loadingApplications: "Loading applications…",
                 .showFPSOverlay: "Show FPS overlay",
                 .showFPSOverlayDisclaimer: "Approximate measurement; may not reflect actual frame pacing.",
@@ -530,7 +533,6 @@ final class LocalizationManager {
             .customTitleEdit: "Editar",
             .customTitleSave: "Salvar",
             .customTitleCancel: "Cancelar",
-            .customTitleDelete: "Remover",
             .loadingApplications: "Carregando apps…",
             .showFPSOverlay: "Mostrar overlay de FPS",
             .showFPSOverlayDisclaimer: "Valor aproximado; pode não refletir o ritmo real de quadros.",
@@ -732,7 +734,6 @@ final class LocalizationManager {
                 .customTitleEdit: "Sửa",
                 .customTitleSave: "Lưu",
                 .customTitleCancel: "Huỷ",
-                .customTitleDelete: "Xoá",
                 .loadingApplications: "Đang tải ứng dụng…",
                 .showFPSOverlay: "Hiển thị lớp phủ FPS",
                 .showFPSOverlayDisclaimer: "Chỉ là số đo xấp xỉ; có thể không khớp với nhịp khung hình thực tế.",
@@ -867,7 +868,6 @@ final class LocalizationManager {
                 .customTitleEdit: "编辑",
                 .customTitleSave: "保存",
                 .customTitleCancel: "取消",
-                .customTitleDelete: "删除",
                 .loadingApplications: "正在加载应用…",
                 .showFPSOverlay: "显示 FPS",
                 .showFPSOverlayDisclaimer: "当前数值仅供参考，可能与实际帧率存在差异。",
@@ -1045,7 +1045,6 @@ final class LocalizationManager {
                 .customTitleEdit: "編集",
                 .customTitleSave: "保存",
                 .customTitleCancel: "キャンセル",
-                .customTitleDelete: "削除",
                 .loadingApplications: "アプリを読み込み中…",
                 .showFPSOverlay: "FPS オーバーレイを表示",
                 .showFPSOverlayDisclaimer: "簡易的な計測値であり、実際のフレームタイミングとは異なる場合があります。",
@@ -1190,7 +1189,6 @@ final class LocalizationManager {
                 .customTitleEdit: "편집",
                 .customTitleSave: "저장",
                 .customTitleCancel: "취소",
-                .customTitleDelete: "삭제",
                 .loadingApplications: "앱을 불러오는 중…",
                 .showFPSOverlay: "FPS 오버레이 표시",
                 .showFPSOverlayDisclaimer: "대략적인 수치로 실제 프레임 속도와 다를 수 있어요.",
@@ -1335,7 +1333,6 @@ final class LocalizationManager {
                 .customTitleEdit: "Modifier",
                 .customTitleSave: "Enregistrer",
                 .customTitleCancel: "Annuler",
-                .customTitleDelete: "Supprimer",
                 .loadingApplications: "Chargement des applications…",
                 .showFPSOverlay: "Afficher le nombre d'image par seconde",
                 .showFPSOverlayDisclaimer: "Valeur indicative qui peut ne pas refléter précisément le rafraîchissement réel.",
@@ -1476,7 +1473,6 @@ final class LocalizationManager {
                 .customTitleEdit: "Editar",
                 .customTitleSave: "Guardar",
                 .customTitleCancel: "Cancelar",
-                .customTitleDelete: "Eliminar",
                 .loadingApplications: "Cargando aplicaciones…",
                 .showFPSOverlay: "Mostrar overlay de FPS",
                 .showFPSOverlayDisclaimer: "Medición aproximada; puede no coincidir con la cadencia real de cuadros.",
@@ -1617,7 +1613,6 @@ final class LocalizationManager {
                 .customTitleEdit: "Modifica",
                 .customTitleSave: "Salva",
                 .customTitleCancel: "Annulla",
-                .customTitleDelete: "Rimuovi",
                 .loadingApplications: "Caricamento applicazioni…",
                 .showFPSOverlay: "Mostra overlay FPS",
                 .showFPSOverlayDisclaimer: "Valore approssimativo; potrebbe non riflettere il frame pacing reale.",
@@ -1773,7 +1768,6 @@ final class LocalizationManager {
                 .customTitleEdit: "Upravit",
                 .customTitleSave: "Uložit",
                 .customTitleCancel: "Zrušit",
-                .customTitleDelete: "Odstranit",
                 .loadingApplications: "Načítání aplikací…",
                 .showFPSOverlay: "Zobrazit překrytí FPS",
                 .showFPSOverlayDisclaimer: "Přibližné měření; nemusí odpovídat skutečné plynulosti snímků.",
@@ -1915,7 +1909,6 @@ final class LocalizationManager {
                 .customTitleEdit: "Bearbeiten",
                 .customTitleSave: "Speichern",
                 .customTitleCancel: "Abbrechen",
-                .customTitleDelete: "Entfernen",
                 .loadingApplications: "Apps werden geladen…",
                 .showFPSOverlay: "FPS-Overlay anzeigen",
                 .showFPSOverlayDisclaimer: "Nur ein Näherungswert, kann vom tatsächlichen Frame-Pacing abweichen.",
@@ -2057,7 +2050,7 @@ final class LocalizationManager {
                 .customTitleEdit: "Редактировать",
                 .customTitleSave: "Сохранить",
                 .customTitleCancel: "Отмена",
-                .customTitleDelete: "Удалить",
+                .customTitleOnly: "Показать только приложения с отредактированными названиями",
                 .loadingApplications: "Загрузка приложений…",
                 .showFPSOverlay: "Показывать FPS",
                 .showFPSOverlayDisclaimer: "Показатель приблизительный и может отличаться от фактической частоты кадров.",
@@ -2256,6 +2249,9 @@ final class LocalizationManager {
             .hiddenAppsHint: "Hidden apps disappear from the grid. Remove them here to restore.",
             .hiddenAppsRemoveButton: "Unhide",
             .hiddenAppsSearchPlaceholder: "Filter hidden apps",
+            .notHiddenAppsTitle: "Not hidden apps",
+            .notHiddenAppsHint: "Select an application to hide it from LaunchNext.",
+            .notHiddenAppsSearchPlaceholder: "Filter not hidden apps",
             .accessibilityPlaceholderTitle: "Accessibility controls",
             .accessibilityPlaceholderSubtitle: "Accessibility settings are planned; nothing here yet.",
             .performancePlaceholderTitle: "Performance dashboard",
@@ -3298,6 +3294,9 @@ final class LocalizationManager {
             .hiddenAppsHint: "Скрытые приложения не отображаются в сетке. Здесь можно вернуть их обратно.",
             .hiddenAppsRemoveButton: "Показать",
             .hiddenAppsSearchPlaceholder: "Поиск среди скрытых приложений",
+            .notHiddenAppsTitle: "Не скрытые приложения",
+            .notHiddenAppsHint: "Выберите приложение, чтобы скрыть его из LaunchNext.",
+            .notHiddenAppsSearchPlaceholder: "Поиск среди не скрытых приложений",
             .accessibilityPlaceholderTitle: "Параметры доступности",
             .accessibilityPlaceholderSubtitle: "Настройки доступности ещё в разработке.",
             .performancePlaceholderTitle: "Панель производительности",
@@ -3850,7 +3849,6 @@ final class LocalizationManager {
             .customTitleEdit: "संपादित करें",
             .customTitleSave: "सहेजें",
             .customTitleCancel: "रद्द करें",
-            .customTitleDelete: "हटाएँ",
             .loadingApplications: "ऐप लोड हो रहे हैं…",
             .showFPSOverlay: "FPS दिखाएँ",
             .showFPSOverlayDisclaimer: "अनुमानित मान; वास्तविक फ्रेम दर से भिन्न हो सकता है।",
