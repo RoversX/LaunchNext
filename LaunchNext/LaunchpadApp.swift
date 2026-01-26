@@ -19,7 +19,19 @@ class BorderlessWindow: NSWindow {
 @main
 struct LaunchpadApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    var body: some Scene { Settings {} }
+    var body: some Scene {
+        Settings{
+            EmptyView()
+        }
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings") {
+                    AppDelegate.shared?.openSettings()
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+        }
+    }
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureRecognizerDelegate {
@@ -74,7 +86,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
 
         if appStore.isFullscreenMode { updateWindowMode(isFullscreen: true) }
     }
-
+    
+    private var isLaunchpadWindowVisibleNow: Bool {
+        guard windowIsVisible, !isAnimatingWindow, let w = window else { return false }
+        if !w.isVisible { return false }
+        if !w.occlusionState.contains(.visible) { return false }
+        return true
+    }
+    
+    func openSettings() {
+        guard isLaunchpadWindowVisibleNow else { return }
+        self.appStore.isSetting = true
+    }
+    
     // MARK: - Global Hotkey
 
     func updateGlobalHotKey(configuration: AppStore.HotKeyConfiguration?) {
