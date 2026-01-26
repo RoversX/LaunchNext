@@ -20,12 +20,17 @@ struct SettingsView: View {
     @State private var hasNotHiddenAppEntries: Bool = false
     @State private var hiddenSearch: String = ""
     @State private var notHiddenSearch: String = ""
+    @State private var hiddenSearchDebounceID: Int = 0
+    @State private var notHiddenSearchDebounceID: Int = 0
     @State private var hasHiddenAppEntriesSearchResult: Bool = false
     @State private var hasNotHiddenAppEntriesSearchResult: Bool = false
     @State private var cachedHiddenAppEntries: [AppEntry] = []
     @State private var cachedNotHiddenAppEntries: [AppEntry] = []
     @State private var showHiddenApps = true
     @State private var showNotHiddenApps = false
+    @State private var hiddenVisibleLimit: Int = 10
+    @State private var notHiddenVisibleLimit: Int = 10
+    private let listPageSize = 10
     @State private var editingDrafts: [String: String] = [:]
     @State private var editingEntries: Set<String> = []
     @State private var iconImportError: String? = nil
@@ -41,10 +46,12 @@ struct SettingsView: View {
     @State private var shortcutCaptureMonitor: Any?
     @State private var pendingShortcut: AppStore.HotKeyConfiguration?
     @State private var cachedAllAppEntries: [AppEntry] = []
+    @State private var allAppsVisibleLimit: Int = 10
     @State private var allAppsSearch: String = ""
+    @State private var allAppsSearchDebounceID: Int = 0
     @State private var hasAllAppEntries:Bool = false
     @State private var hasAllAppEntriesSearchResult: Bool = false
-    @State private var showOnlyEditedTittleApps: Bool = false
+    @State private var showOnlyEditedTittleApps: Bool = true
 
     // Sidebar sizing presets
     private var sidebarIconFrame: CGFloat {
@@ -1072,6 +1079,15 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private var hiddenAppsSection: some View {
         return LazyVStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Button {
+                    presentHiddenAppPicker()
+                } label: {
+                    Label(appStore.localized(.hiddenAppsAddButton), systemImage: "eye.slash")
+                }
+                Spacer()
+            }
+
             DisclosureGroup(isExpanded: $showHiddenApps) {
                 LazyVStack(alignment: .leading, spacing: 16){
                     if hasHiddenAppEntries {
@@ -1081,11 +1097,19 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         
                         TextField("", text: $hiddenSearch, prompt: Text(appStore.localized(.hiddenAppsSearchPlaceholder)))
                             .textFieldStyle(.roundedBorder)
+                            .padding(3)
                         
                         if hasHiddenAppEntriesSearchResult {
                             LazyVStack(spacing: 12) {
-                                ForEach(cachedHiddenAppEntries) { entry in
+                                ForEach(cachedHiddenAppEntries.prefix(hiddenVisibleLimit)) { entry in
                                     hiddenAppRow(for: entry)
+                                }
+                                if cachedHiddenAppEntries.count > hiddenVisibleLimit {
+                                    Button(appStore.localized(.loadMore)) {
+                                        hiddenVisibleLimit = min(hiddenVisibleLimit + listPageSize,
+                                                                 cachedHiddenAppEntries.count)
+                                    }
+                                    .buttonStyle(.bordered)
                                 }
                             }
                         } else {
@@ -1113,11 +1137,19 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         
                         TextField("", text: $notHiddenSearch, prompt: Text(appStore.localized(.notHiddenAppsSearchPlaceholder)))
                             .textFieldStyle(.roundedBorder)
+                            .padding(3)
                         
                         if hasNotHiddenAppEntriesSearchResult{
                             LazyVStack(spacing: 12) {
-                                ForEach(cachedNotHiddenAppEntries){ entry in
+                                ForEach(cachedNotHiddenAppEntries.prefix(notHiddenVisibleLimit)) { entry in
                                     notHiddenAppRow(for: entry)
+                                }
+                                if cachedNotHiddenAppEntries.count > notHiddenVisibleLimit {
+                                    Button(appStore.localized(.loadMore)) {
+                                        notHiddenVisibleLimit = min(notHiddenVisibleLimit + listPageSize,
+                                                                    cachedNotHiddenAppEntries.count)
+                                    }
+                                    .buttonStyle(.bordered)
                                 }
                             }
                         } else {
@@ -1135,8 +1167,22 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 
         }
         .onAppear(perform: updateCachedHiddenAndNotHiddenAppEntries)
-        .onChange(of: hiddenSearch.count, initial: false, updateCachedHiddenAppEntries)
-        .onChange(of: notHiddenSearch.count, initial: false, updateCachedNotHiddenAppEntries)
+        .onChange(of: hiddenSearch, initial: false) { _, _ in
+            hiddenVisibleLimit = listPageSize
+            scheduleHiddenSearchUpdate()
+        }
+        .onChange(of: notHiddenSearch, initial: false) { _, _ in
+            notHiddenVisibleLimit = listPageSize
+            if showNotHiddenApps {
+                scheduleNotHiddenSearchUpdate()
+            }
+        }
+        .onChange(of: showNotHiddenApps, initial: false) { _, isExpanded in
+            if isExpanded {
+                notHiddenVisibleLimit = listPageSize
+                updateCachedNotHiddenAppEntries()
+            }
+        }
         .onChange(of: appStore.apps, initial: false, updateCachedHiddenAndNotHiddenAppEntries)
     }
 
@@ -1277,6 +1323,13 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     }
     
     private func updateCachedNotHiddenAppEntries() {
+        guard showNotHiddenApps else {
+            cachedNotHiddenAppEntries.removeAll()
+            hasNotHiddenAppEntries = false
+            hasNotHiddenAppEntriesSearchResult = false
+            return
+        }
+
         cachedNotHiddenAppEntries.removeAll()
         hasNotHiddenAppEntries = !notHiddenAppEntries.isEmpty
         let filteredNotHiddenAppEntries = filter(notHiddenAppEntries, by: notHiddenSearch)
@@ -1288,9 +1341,38 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         updateCachedHiddenAppEntries()
         updateCachedNotHiddenAppEntries()
     }
+
+    private func scheduleHiddenSearchUpdate() {
+        hiddenSearchDebounceID += 1
+        let token = hiddenSearchDebounceID
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            if hiddenSearchDebounceID == token {
+                updateCachedHiddenAppEntries()
+            }
+        }
+    }
+
+    private func scheduleNotHiddenSearchUpdate() {
+        notHiddenSearchDebounceID += 1
+        let token = notHiddenSearchDebounceID
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            if notHiddenSearchDebounceID == token {
+                updateCachedNotHiddenAppEntries()
+            }
+        }
+    }
     
     private var titlesSection: some View {
         LazyVStack(alignment: .leading, spacing: 16){
+            HStack {
+                Button {
+                    presentCustomTitlePicker()
+                } label: {
+                    Label(appStore.localized(.customTitleAddFromFolder), systemImage: "plus")
+                }
+                Spacer()
+            }
+
             Text(appStore.localized(.customTitleHint))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -1313,11 +1395,22 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             if hasAllAppEntries{
                 TextField("", text: $allAppsSearch, prompt: Text(appStore.localized(.renameSearchPlaceholder)))
                     .textFieldStyle(.roundedBorder)
+                    .padding(3)
                 
                 if hasAllAppEntriesSearchResult{
+                    let visibleEntries: [AppEntry] = showOnlyEditedTittleApps
+                        ? cachedAllAppEntries
+                        : Array(cachedAllAppEntries.prefix(allAppsVisibleLimit))
                     LazyVStack(spacing: 12) {
-                        ForEach(cachedAllAppEntries){ entry in
+                        ForEach(visibleEntries){ entry in
                             customTitleRow(for: entry)
+                        }
+                        if !showOnlyEditedTittleApps && cachedAllAppEntries.count > allAppsVisibleLimit {
+                            Button(appStore.localized(.loadMore)) {
+                                allAppsVisibleLimit = min(allAppsVisibleLimit + listPageSize,
+                                                          cachedAllAppEntries.count)
+                            }
+                            .buttonStyle(.bordered)
                         }
                     }
                 } else {
@@ -1329,8 +1422,14 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             }
         }
         .onAppear(perform: updateCachedAllAppEntries)
-        .onChange(of: allAppsSearch, initial: false, updateCachedAllAppEntries)
-        .onChange(of: showOnlyEditedTittleApps, initial: false, updateCachedAllAppEntries)
+        .onChange(of: allAppsSearch, initial: false) { _, _ in
+            allAppsVisibleLimit = listPageSize
+            scheduleAllAppsSearchUpdate()
+        }
+        .onChange(of: showOnlyEditedTittleApps, initial: false) { _, _ in
+            allAppsVisibleLimit = listPageSize
+            updateCachedAllAppEntries()
+        }
         .onChange(of: appStore.customTitles, initial: false, updateCachedAllAppEntries)
         .onChange(of: appStore.apps, initial: false, updateCachedAllAppEntries)
     }
@@ -1370,6 +1469,16 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             let filteredAllAppEntries = filter(allAppEntries, by: allAppsSearch)
             hasAllAppEntriesSearchResult = !filteredAllAppEntries.isEmpty
             cachedAllAppEntries.append(contentsOf: filteredAllAppEntries)
+        }
+    }
+
+    private func scheduleAllAppsSearchUpdate() {
+        allAppsSearchDebounceID += 1
+        let token = allAppsSearchDebounceID
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            if allAppsSearchDebounceID == token {
+                updateCachedAllAppEntries()
+            }
         }
     }
 
@@ -1451,6 +1560,22 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private func presentHiddenAppPicker() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.prompt = appStore.localized(.hiddenAppsAddButton)
+        panel.title = appStore.localized(.hiddenAppsAddButton)
+
+        if panel.runModal() == .OK {
+            if !appStore.hideApps(at: panel.urls) {
+                NSSound.beep()
+            }
+        }
+    }
+
     private func presentCustomTitlePicker() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
@@ -1465,6 +1590,10 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             let path = info.url.path
             editingEntries.insert(path)
             editingDrafts[path] = appStore.customTitles[path] ?? info.name
+            if !showOnlyEditedTittleApps {
+                showOnlyEditedTittleApps = true
+                allAppsSearch = ""
+            }
         }
     }
 
