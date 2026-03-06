@@ -1054,7 +1054,7 @@ struct LaunchpadView: View {
     }
 
     private func launchApp(_ app: AppInfo) {
-        AppDelegate.shared?.hideWindow()
+        AppDelegate.shared?.hideWindow(force: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             NSWorkspace.shared.open(app.url)
         }
@@ -2113,7 +2113,7 @@ extension LaunchpadView {
         }
 
         if code == 53 { // esc
-            AppDelegate.shared?.hideWindow()
+            AppDelegate.shared?.hideWindow(force: true)
             return nil
         }
 

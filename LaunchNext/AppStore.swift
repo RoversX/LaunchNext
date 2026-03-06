@@ -716,6 +716,16 @@ final class AppStore: ObservableObject {
             UserDefaults.standard.set(hideDock, forKey: "hideDock")
         }
     }
+
+    @Published var kioskMode: Bool = {
+        if UserDefaults.standard.object(forKey: "kioskMode") == nil { return false }
+        return UserDefaults.standard.bool(forKey: "kioskMode")
+    }() {
+        didSet {
+            guard kioskMode != oldValue else { return }
+            UserDefaults.standard.set(kioskMode, forKey: "kioskMode")
+        }
+    }
     
     @Published var scrollSensitivity: Double {
         didSet {
