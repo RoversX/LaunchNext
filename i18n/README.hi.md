@@ -114,12 +114,17 @@ sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
    cd LaunchNext/LaunchNext
    ```
 
-2. **Xcode में खोलें**
+2. **अपडेटर बिल्ड करें**
+   ```bash
+   swift build --package-path UpdaterScripts/SwiftUpdater --configuration release --arch arm64 --arch x86_64 --product SwiftUpdater
+   ```
+
+3. **Xcode में खोलें**
    ```bash
    open LaunchNext.xcodeproj
    ```
 
-3. **बिल्ड और रन करें**
+4. **बिल्ड और रन करें**
    - अपना लक्ष्य डिवाइस चुनें
    - बिल्ड और रन करने के लिए `⌘+R` दबाएं
    - या केवल बिल्ड करने के लिए `⌘+B`

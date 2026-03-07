@@ -112,12 +112,17 @@ Liest direkt aus der System-Launchpad-Datenbank:
    cd LaunchNext/LaunchNext
    ```
 
-2. **In Xcode öffnen**
+2. **Updater bauen**
+   ```bash
+   swift build --package-path UpdaterScripts/SwiftUpdater --configuration release --arch arm64 --arch x86_64 --product SwiftUpdater
+   ```
+
+3. **In Xcode öffnen**
    ```bash
    open LaunchNext.xcodeproj
    ```
 
-3. **Bauen und ausführen**
+4. **Bauen und ausführen**
    - Wählen Sie Ihr Zielgerät
    - Drücken Sie `⌘+R` zum Bauen und Ausführen
    - Oder `⌘+B` nur zum Bauen

@@ -112,12 +112,17 @@ sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
    cd LaunchNext/LaunchNext
    ```
 
-2. **在 Xcode 中打开**
+2. **构建更新器**
+   ```bash
+   swift build --package-path UpdaterScripts/SwiftUpdater --configuration release --arch arm64 --arch x86_64 --product SwiftUpdater
+   ```
+
+3. **在 Xcode 中打开**
    ```bash
    open LaunchNext.xcodeproj
    ```
 
-3. **构建和运行**
+4. **构建和运行**
    - 选择目标设备
    - 按 `⌘+R` 构建并运行
    - 或按 `⌘+B` 仅构建
