@@ -13,6 +13,12 @@ struct SettingsView: View {
         case launchpad
         // case aiOverlay
     }
+    private enum LayoutModePreviewScope: String, CaseIterable, Identifiable {
+        case classic = "Fullscreen"
+        case new = "Compact"
+
+        var id: String { rawValue }
+    }
     @State private var showResetConfirm = false
     @State private var selectedSection: SettingsSection = .general
     @State private var titleSearch: String = ""
@@ -57,6 +63,7 @@ struct SettingsView: View {
     @State private var showCLIFullPathCommand = false
     @State private var copiedCLICommand: String? = nil
     @State private var cliCommandActionMessage: String? = nil
+    @State private var layoutModePreviewScope: LayoutModePreviewScope = .classic
 
     // Sidebar sizing presets
     private var sidebarIconFrame: CGFloat {
@@ -242,6 +249,57 @@ private func getVersion(fallback: String) -> String {
     Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? fallback
 }
 
+private func layoutModeScopeControl(width: CGFloat = 130) -> some View {
+    let outerShape = Capsule(style: .continuous)
+
+    return HStack(spacing: 3) {
+        ForEach(LayoutModePreviewScope.allCases) { scope in
+            Button {
+                withAnimation(.easeInOut(duration: 0.12)) {
+                    layoutModePreviewScope = scope
+                }
+            } label: {
+                Text(scope.rawValue)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(layoutModePreviewScope == scope ? Color.primary : Color.secondary.opacity(0.9))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                    .frame(maxWidth: .infinity, minHeight: 18)
+                    .background {
+                        if layoutModePreviewScope == scope {
+                            Capsule(style: .continuous)
+                                .fill(
+                                    colorScheme == .dark
+                                    ? Color.white.opacity(0.12)
+                                    : Color.white.opacity(0.34)
+                                )
+                                .liquidGlass(in: Capsule(style: .continuous))
+                                .overlay(
+                                    Capsule(style: .continuous)
+                                        .stroke(Color.white.opacity(colorScheme == .dark ? 0.10 : 0.30), lineWidth: 0.5)
+                                )
+                        }
+                    }
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+    }
+    .padding(2)
+    .frame(width: width, height: 24)
+    .background {
+        outerShape
+            .fill(Color.white.opacity(colorScheme == .dark ? 0.03 : 0.10))
+            .liquidGlass(in: outerShape)
+    }
+    .overlay {
+        outerShape
+            .stroke(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.16), lineWidth: 0.6)
+    }
+}
+
 private enum SettingsSection: String, CaseIterable, Identifiable {
     case general
     case appearance
@@ -360,12 +418,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         .font(.title3.bold())
 
                     ScrollView(showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 24) {
-                            content(for: section)
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.top, 12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        scrollContent(for: section)
                     }
                     .scrollDisabled(section == .about || section == .general)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -376,6 +429,22 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
             }
             .background(.ultraThinMaterial)
+        }
+    }
+
+    @ViewBuilder
+    private func scrollContent(for section: SettingsSection) -> some View {
+        if section == .appearance {
+            appearanceSection
+            .padding(.top, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: 24) {
+                content(for: section)
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -3347,468 +3416,512 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     }
 
     private var appearanceSection: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Text(appStore.localized(.classicMode))
-                    Spacer()
-                    Toggle("", isOn: $appStore.isFullscreenMode)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
+        LazyVStack(alignment: .leading, spacing: 0) {
+            appearancePrimarySection
+            Divider()
+                .padding(.vertical, 24)
+            appearanceSecondarySection
+            appearanceTertiarySection
+                .padding(.top, 16)
+            appearanceQuaternarySection
+                .padding(.top, 16)
+        }
+    }
 
-                HStack {
-                    Text(appStore.localized(.showLabels))
-                    Spacer()
-                    Toggle("", isOn: $appStore.showLabels)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-
-                HStack {
-                    Text(appStore.localized(.useLocalizedThirdPartyTitles))
-                    Spacer()
-                    Toggle("", isOn: $appStore.useLocalizedThirdPartyTitles)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-
-                HStack {
-                    Text(appStore.localized(.predictDrop))
-                    Spacer()
-                    Toggle("", isOn: $appStore.enableDropPrediction)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-                .disabled(appStore.useCAGridRenderer)
-                .opacity(appStore.useCAGridRenderer ? 0.5 : 1)
-                HStack {
-                    Text(appStore.localized(.enableAnimations))
-                    Spacer()
-                    Toggle("", isOn: $appStore.enableAnimations)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-
-                HStack {
-                    Text(appStore.localized(.followScrollPagingTitle))
-                    Spacer()
-                    Toggle("", isOn: $appStore.followScrollPagingEnabled)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-                .disabled(appStore.useCAGridRenderer)
-                .opacity(appStore.useCAGridRenderer ? 0.5 : 1)
-
-                HStack {
-                    Text(appStore.localized(.reverseWheelPagingTitle))
-                    Spacer()
-                    Toggle("", isOn: $appStore.reverseWheelPagingDirection)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-
-                HStack {
-                    Text(appStore.localized(.hideDockOption))
-                    Spacer()
-                    Toggle("", isOn: $appStore.hideDock)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-
-                HStack {
-                    Text(appStore.localized(.rememberPageTitle))
-                    Spacer()
-                    Toggle("", isOn: $appStore.rememberLastPage)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-
-
-                HStack {
-                    Text(appStore.localized(.hoverMagnification))
-                    Spacer()
-                    Toggle("", isOn: $appStore.enableHoverMagnification)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-
-                HStack {
-                    Text(appStore.localized(.activePressEffect))
-                    Spacer()
-                    Toggle("", isOn: $appStore.enableActivePressEffect)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(appStore.localized(.folderPreviewHighResTitle))
-                        Spacer()
-                        Toggle("", isOn: $appStore.enableHighResFolderPreviews)
-                            .labelsHidden()
-                            .toggleStyle(.switch)
-                    }
-                    Text(appStore.localized(.folderPreviewHighResHint))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack {
-                    Text(appStore.localized(.windowOpenAnimationTitle))
-                    Spacer()
-                    Toggle("", isOn: $appStore.enableWindowOpenAnimation)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-
-                HStack {
-                    Text(appStore.localized(.backgroundMaskTitle))
-                    Spacer()
-                    Toggle("", isOn: $appStore.backgroundMaskEnabled)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-
-                if appStore.backgroundMaskEnabled {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ColorPicker(appStore.localized(.backgroundMaskLightLabel), selection: backgroundMaskColorBinding(isDark: false), supportsOpacity: true)
-                        ColorPicker(appStore.localized(.backgroundMaskDarkLabel), selection: backgroundMaskColorBinding(isDark: true), supportsOpacity: true)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.backgroundStyleTitle))
-                        .font(.headline)
-                    Picker("", selection: $appStore.launchpadBackgroundStyle) {
-                        ForEach(AppStore.BackgroundStyle.allCases) { style in
-                            Text(appStore.localized(style.localizationKey)).tag(style)
-                        }
-                    }
-                    .pickerStyle(.segmented)
+    private var appearancePrimarySection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text(appStore.localized(.classicMode))
+                Spacer()
+                Toggle("", isOn: $appStore.isFullscreenMode)
                     .labelsHidden()
-                }
-
+                    .toggleStyle(.switch)
             }
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    let durationEnabled = appStore.enableAnimations && !appStore.useCAGridRenderer
-                    Text(appStore.localized(.animationDurationLabel))
-                        .font(.headline)
-                    Slider(value: $appStore.animationDuration, in: 0.1...1.0, step: 0.05)
-                        .disabled(!durationEnabled)
-                        .opacity(durationEnabled ? 1 : 0.5)
-                    HStack {
-                        Text("0.1s").font(.footnote)
-                        Spacer()
-                        Text(String(format: "%.2fs", appStore.animationDuration))
-                            .font(.footnote)
-                        Spacer()
-                        Text("1.0s").font(.footnote)
-                    }
-                    .foregroundStyle(durationEnabled ? .primary : .secondary)
-                    .opacity(durationEnabled ? 1 : 0.6)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.iconLabelFontWeight))
-                        .font(.headline)
-                    Picker("", selection: $appStore.iconLabelFontWeight) {
-                        ForEach(AppStore.IconLabelFontWeightOption.allCases) { option in
-                            Text(option.displayName).tag(option)
-                        }
-                    }
-                    .pickerStyle(.menu)
+            HStack {
+                Text(appStore.localized(.showLabels))
+                Spacer()
+                Toggle("", isOn: $appStore.showLabels)
                     .labelsHidden()
-                }
+                    .toggleStyle(.switch)
+            }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.sidebarIconSizeTitle))
-                        .font(.headline)
-                    Picker("", selection: $appStore.sidebarIconPreset) {
-                        Text(appStore.localized(.sidebarIconSizeLarge)).tag(AppStore.SidebarIconPreset.large)
-                        Text(appStore.localized(.sidebarIconSizeMedium)).tag(AppStore.SidebarIconPreset.medium)
-                    }
-                    .pickerStyle(.menu)
+            HStack {
+                Text(appStore.localized(.useLocalizedThirdPartyTitles))
+                Spacer()
+                Toggle("", isOn: $appStore.useLocalizedThirdPartyTitles)
                     .labelsHidden()
-                }
+                    .toggleStyle(.switch)
+            }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.iconSize))
-                        .font(.headline)
-                    Slider(value: $appStore.iconScale, in: 0.8...1.1)
-                    HStack {
-                        Text(appStore.localized(.smaller)).font(.footnote)
-                        Spacer()
-                        Text(appStore.localized(.larger)).font(.footnote)
-                    }
-                }
+            HStack {
+                Text(appStore.localized(.predictDrop))
+                Spacer()
+                Toggle("", isOn: $appStore.enableDropPrediction)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+            .disabled(appStore.useCAGridRenderer)
+            .opacity(appStore.useCAGridRenderer ? 0.5 : 1)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(appStore.localized(.folderWindowWidth))
-                            .font(.headline)
-                        Spacer()
-                        Text(String(format: "%.0f%%", appStore.folderPopoverWidthFactor * 100))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    Slider(value: $appStore.folderPopoverWidthFactor,
-                           in: AppStore.folderPopoverWidthRange)
-                        .disabled(appStore.isFullscreenMode)
-                    HStack {
-                        Text(String(format: "%.0f%%", AppStore.folderPopoverWidthRange.lowerBound * 100))
-                            .font(.footnote)
-                        Spacer()
-                        Text(String(format: "%.0f%%", AppStore.folderPopoverWidthRange.upperBound * 100))
-                            .font(.footnote)
-                    }
-                }
+            HStack {
+                Text(appStore.localized(.enableAnimations))
+                Spacer()
+                Toggle("", isOn: $appStore.enableAnimations)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(appStore.localized(.folderWindowHeight))
-                            .font(.headline)
-                        Spacer()
-                        Text(String(format: "%.0f%%", appStore.folderPopoverHeightFactor * 100))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    Slider(value: $appStore.folderPopoverHeightFactor,
-                           in: AppStore.folderPopoverHeightRange)
-                        .disabled(appStore.isFullscreenMode)
-                    HStack {
-                        Text(String(format: "%.0f%%", AppStore.folderPopoverHeightRange.lowerBound * 100))
-                            .font(.footnote)
-                        Spacer()
-                        Text(String(format: "%.0f%%", AppStore.folderPopoverHeightRange.upperBound * 100))
-                            .font(.footnote)
-                    }
-                }
+            HStack {
+                Text(appStore.localized(.followScrollPagingTitle))
+                Spacer()
+                Toggle("", isOn: $appStore.followScrollPagingEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+            .disabled(appStore.useCAGridRenderer)
+            .opacity(appStore.useCAGridRenderer ? 0.5 : 1)
 
-                Text(appStore.localized(.folderWindowSizeHint))
+            HStack {
+                Text(appStore.localized(.reverseWheelPagingTitle))
+                Spacer()
+                Toggle("", isOn: $appStore.reverseWheelPagingDirection)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            HStack {
+                Text(appStore.localized(.hideDockOption))
+                Spacer()
+                Toggle("", isOn: $appStore.hideDock)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            HStack {
+                Text(appStore.localized(.rememberPageTitle))
+                Spacer()
+                Toggle("", isOn: $appStore.rememberLastPage)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            HStack {
+                Text(appStore.localized(.hoverMagnification))
+                Spacer()
+                Toggle("", isOn: $appStore.enableHoverMagnification)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            HStack {
+                Text(appStore.localized(.activePressEffect))
+                Spacer()
+                Toggle("", isOn: $appStore.enableActivePressEffect)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(appStore.localized(.folderPreviewHighResTitle))
+                    Spacer()
+                    Toggle("", isOn: $appStore.enableHighResFolderPreviews)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+                Text(appStore.localized(.folderPreviewHighResHint))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            }
 
+            HStack {
+                Text(appStore.localized(.windowOpenAnimationTitle))
+                Spacer()
+                Toggle("", isOn: $appStore.enableWindowOpenAnimation)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            HStack {
+                Text(appStore.localized(.backgroundMaskTitle))
+                Spacer()
+                Toggle("", isOn: $appStore.backgroundMaskEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            if appStore.backgroundMaskEnabled {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.hoverMagnificationScale))
-                        .font(.headline)
-                    Slider(value: $appStore.hoverMagnificationScale,
-                           in: AppStore.hoverMagnificationRange)
-                        .disabled(!appStore.enableHoverMagnification)
-                    HStack {
-                        Text(String(format: "%.2fx", AppStore.hoverMagnificationRange.lowerBound))
-                            .font(.footnote)
-                        Spacer()
-                        Text(String(format: "%.2fx", appStore.hoverMagnificationScale))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(String(format: "%.2fx", AppStore.hoverMagnificationRange.upperBound))
-                            .font(.footnote)
+                    ColorPicker(appStore.localized(.backgroundMaskLightLabel), selection: backgroundMaskColorBinding(isDark: false), supportsOpacity: true)
+                    ColorPicker(appStore.localized(.backgroundMaskDarkLabel), selection: backgroundMaskColorBinding(isDark: true), supportsOpacity: true)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(appStore.localized(.backgroundStyleTitle))
+                    .font(.headline)
+                Picker("", selection: $appStore.launchpadBackgroundStyle) {
+                    ForEach(AppStore.BackgroundStyle.allCases) { style in
+                        Text(appStore.localized(style.localizationKey)).tag(style)
                     }
                 }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.activePressScale))
-                        .font(.headline)
-                    Slider(value: $appStore.activePressScale,
-                           in: AppStore.activePressScaleRange)
-                        .disabled(!appStore.enableActivePressEffect)
-                    HStack {
-                        Text(String(format: "%.2fx", AppStore.activePressScaleRange.lowerBound))
-                            .font(.footnote)
-                        Spacer()
-                        Text(String(format: "%.2fx", appStore.activePressScale))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(String(format: "%.2fx", AppStore.activePressScaleRange.upperBound))
-                            .font(.footnote)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(appStore.localized(.iconsPerRow))
-                            .font(.headline)
-                        Spacer()
-                        Stepper(value: $appStore.gridColumnsPerPage, in: AppStore.gridColumnRange) {
-                            Text("\(appStore.gridColumnsPerPage)")
-                                .font(.callout.monospacedDigit())
-                        }
-                        .controlSize(.small)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(appStore.localized(.rowsPerPage))
-                            .font(.headline)
-                        Spacer()
-                        Stepper(value: $appStore.gridRowsPerPage, in: AppStore.gridRowRange) {
-                            Text("\(appStore.gridRowsPerPage)")
-                                .font(.callout.monospacedDigit())
-                        }
-                        .controlSize(.small)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(appStore.localized(.iconHorizontalSpacing))
-                            .font(.headline)
-                        Spacer()
-                        Text("\(Int(appStore.iconColumnSpacing)) pt")
-                            .font(.callout.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                    Slider(value: $appStore.iconColumnSpacing,
-                           in: AppStore.columnSpacingRange,
-                           step: 1)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(appStore.localized(.iconVerticalSpacing))
-                            .font(.headline)
-                        Spacer()
-                        Text("\(Int(appStore.iconRowSpacing)) pt")
-                            .font(.callout.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                    Slider(value: $appStore.iconRowSpacing,
-                           in: AppStore.rowSpacingRange,
-                           step: 1)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(appStore.localized(.gridSizeChangeWarning))
-                    Text(appStore.localized(.pageIndicatorHint))
-                        .foregroundStyle(.tertiary)
-                }
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .padding(.top, 2)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.labelFontSize))
-                        .font(.headline)
-                    Slider(value: $appStore.iconLabelFontSize, in: 9...16, step: 0.5)
-                    HStack {
-                        Text("9pt").font(.footnote)
-                        Spacer()
-                        Text("16pt").font(.footnote)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.scrollSensitivity))
-                        .font(.headline)
-                    Slider(value: $appStore.scrollSensitivity, in: 0.01...0.99)
-                    HStack {
-                        Text(appStore.localized(.low)).font(.footnote)
-                        Spacer()
-                        Text(appStore.localized(.high)).font(.footnote)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(String(format: appStore.localized(.folderDropZoneSizeWithDefault), AppStore.defaultFolderDropZoneScale))
-                    Slider(value: $appStore.folderDropZoneScale,
-                           in: AppStore.folderDropZoneScaleRange,
-                           step: 0.05)
-                    HStack {
-                        Text(String(format: "%.1fx", AppStore.folderDropZoneScaleRange.lowerBound))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(String(format: "%.2fx", appStore.folderDropZoneScale))
-                            .font(.footnote.monospacedDigit())
-                        Spacer()
-                        Text(String(format: "%.1fx", AppStore.folderDropZoneScaleRange.upperBound))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    Text(appStore.localized(.folderDropZoneSizeHint))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.pageIndicatorOffsetLabel))
-                        .font(.headline)
-                    Slider(value: $appStore.pageIndicatorOffset, in: 0...80)
-                    HStack {
-                        Text("0").font(.footnote)
-                        Spacer()
-                        Text(String(format: "%.0f", appStore.pageIndicatorOffset)).font(.footnote)
-                        Spacer()
-                        Text("80").font(.footnote)
-                    }
-                }
-                .disabled(appStore.pageIndicatorPerDisplayEnabled)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.pageIndicatorTopPaddingLabel))
-                        .font(.headline)
-                    Slider(value: $appStore.pageIndicatorTopPadding,
-                           in: AppStore.pageIndicatorTopPaddingRange)
-                    HStack {
-                        Text(String(format: "%.0f", AppStore.pageIndicatorTopPaddingRange.lowerBound)).font(.footnote)
-                        Spacer()
-                        Text(String(format: "%.0f", appStore.pageIndicatorTopPadding)).font(.footnote)
-                        Spacer()
-                        Text(String(format: "%.0f", AppStore.pageIndicatorTopPaddingRange.upperBound)).font(.footnote)
-                    }
-                }
-                .disabled(appStore.pageIndicatorPerDisplayEnabled)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Button {
-                        appStore.pageIndicatorPerDisplayEnabled.toggle()
-                    } label: {
-                        HStack(spacing: 8) {
-                            Text("Per-display indicator position")
-                                .font(.headline)
-                            Spacer()
-                            Toggle("", isOn: $appStore.pageIndicatorPerDisplayEnabled)
-                                .labelsHidden()
-                                .toggleStyle(.switch)
-                                .allowsHitTesting(false)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressFeedbackRowButtonStyle(enabled: true, pressScale: 0.98))
-                    Text("Use different values for each display.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
-                    if appStore.pageIndicatorPerDisplayEnabled {
-                        HStack {
-                            Button("Apply defaults to current display") {
-                                if let screenID = currentIndicatorScreenID {
-                                    appStore.applyIndicatorDefaults(to: screenID)
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            Spacer()
-                        }
-
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(indicatorScreenEntries) { entry in
-                                indicatorOverrideCard(for: entry)
-                            }
-                        }
-                    }
-                }
-
+                .pickerStyle(.segmented)
+                .labelsHidden()
             }
         }
+    }
+
+    private var appearanceSecondarySection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                let durationEnabled = appStore.enableAnimations && !appStore.useCAGridRenderer
+                Text(appStore.localized(.animationDurationLabel))
+                    .font(.headline)
+                Slider(value: $appStore.animationDuration, in: 0.1...1.0, step: 0.05)
+                    .disabled(!durationEnabled)
+                    .opacity(durationEnabled ? 1 : 0.5)
+                HStack {
+                    Text("0.1s").font(.footnote)
+                    Spacer()
+                    Text(String(format: "%.2fs", appStore.animationDuration))
+                        .font(.footnote)
+                    Spacer()
+                    Text("1.0s").font(.footnote)
+                }
+                .foregroundStyle(durationEnabled ? .primary : .secondary)
+                .opacity(durationEnabled ? 1 : 0.6)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(appStore.localized(.iconLabelFontWeight))
+                    .font(.headline)
+                Picker("", selection: $appStore.iconLabelFontWeight) {
+                    ForEach(AppStore.IconLabelFontWeightOption.allCases) { option in
+                        Text(option.displayName).tag(option)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(appStore.localized(.sidebarIconSizeTitle))
+                    .font(.headline)
+                Picker("", selection: $appStore.sidebarIconPreset) {
+                    Text(appStore.localized(.sidebarIconSizeLarge)).tag(AppStore.SidebarIconPreset.large)
+                    Text(appStore.localized(.sidebarIconSizeMedium)).tag(AppStore.SidebarIconPreset.medium)
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
+                    Text(appStore.localized(.iconSize))
+                        .font(.headline)
+                    Spacer()
+                    layoutModeScopeControl()
+                }
+                Slider(value: $appStore.iconScale, in: 0.8...1.1)
+                HStack {
+                    Text(appStore.localized(.smaller)).font(.footnote)
+                    Spacer()
+                    Text(appStore.localized(.larger)).font(.footnote)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.folderWindowWidth))
+                        .font(.headline)
+                    Spacer()
+                    Text(String(format: "%.0f%%", appStore.folderPopoverWidthFactor * 100))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: $appStore.folderPopoverWidthFactor,
+                       in: AppStore.folderPopoverWidthRange)
+                    .disabled(appStore.isFullscreenMode)
+                HStack {
+                    Text(String(format: "%.0f%%", AppStore.folderPopoverWidthRange.lowerBound * 100))
+                        .font(.footnote)
+                    Spacer()
+                    Text(String(format: "%.0f%%", AppStore.folderPopoverWidthRange.upperBound * 100))
+                        .font(.footnote)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.folderWindowHeight))
+                        .font(.headline)
+                    Spacer()
+                    Text(String(format: "%.0f%%", appStore.folderPopoverHeightFactor * 100))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: $appStore.folderPopoverHeightFactor,
+                       in: AppStore.folderPopoverHeightRange)
+                    .disabled(appStore.isFullscreenMode)
+                HStack {
+                    Text(String(format: "%.0f%%", AppStore.folderPopoverHeightRange.lowerBound * 100))
+                        .font(.footnote)
+                    Spacer()
+                    Text(String(format: "%.0f%%", AppStore.folderPopoverHeightRange.upperBound * 100))
+                        .font(.footnote)
+                }
+            }
+
+            Text(appStore.localized(.folderWindowSizeHint))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var appearanceTertiarySection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(appStore.localized(.hoverMagnificationScale))
+                    .font(.headline)
+                Slider(value: $appStore.hoverMagnificationScale,
+                       in: AppStore.hoverMagnificationRange)
+                    .disabled(!appStore.enableHoverMagnification)
+                HStack {
+                    Text(String(format: "%.2fx", AppStore.hoverMagnificationRange.lowerBound))
+                        .font(.footnote)
+                    Spacer()
+                    Text(String(format: "%.2fx", appStore.hoverMagnificationScale))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(String(format: "%.2fx", AppStore.hoverMagnificationRange.upperBound))
+                        .font(.footnote)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(appStore.localized(.activePressScale))
+                    .font(.headline)
+                Slider(value: $appStore.activePressScale,
+                       in: AppStore.activePressScaleRange)
+                    .disabled(!appStore.enableActivePressEffect)
+                HStack {
+                    Text(String(format: "%.2fx", AppStore.activePressScaleRange.lowerBound))
+                        .font(.footnote)
+                    Spacer()
+                    Text(String(format: "%.2fx", appStore.activePressScale))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(String(format: "%.2fx", AppStore.activePressScaleRange.upperBound))
+                        .font(.footnote)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.iconsPerRow))
+                        .font(.headline)
+                    Spacer()
+                    Stepper(value: $appStore.gridColumnsPerPage, in: AppStore.gridColumnRange) {
+                        Text("\(appStore.gridColumnsPerPage)")
+                            .font(.callout.monospacedDigit())
+                    }
+                    .controlSize(.small)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.rowsPerPage))
+                        .font(.headline)
+                    Spacer()
+                    Stepper(value: $appStore.gridRowsPerPage, in: AppStore.gridRowRange) {
+                        Text("\(appStore.gridRowsPerPage)")
+                            .font(.callout.monospacedDigit())
+                    }
+                    .controlSize(.small)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.iconHorizontalSpacing))
+                        .font(.headline)
+                    Spacer()
+                    Text("\(Int(appStore.iconColumnSpacing)) pt")
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: $appStore.iconColumnSpacing,
+                       in: AppStore.columnSpacingRange,
+                       step: 1)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.iconVerticalSpacing))
+                        .font(.headline)
+                    Spacer()
+                    Text("\(Int(appStore.iconRowSpacing)) pt")
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: $appStore.iconRowSpacing,
+                       in: AppStore.rowSpacingRange,
+                       step: 1)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(appStore.localized(.gridSizeChangeWarning))
+                Text(appStore.localized(.pageIndicatorHint))
+                    .foregroundStyle(.tertiary)
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .padding(.top, 2)
+        }
+    }
+
+    private var appearanceQuaternarySection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.labelFontSize))
+                        .font(.headline)
+                    Spacer()
+                    layoutModeScopeControl()
+                }
+                Slider(value: $appStore.iconLabelFontSize, in: 9...16, step: 0.5)
+                HStack {
+                    Text("9pt").font(.footnote)
+                    Spacer()
+                    Text("16pt").font(.footnote)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(appStore.localized(.scrollSensitivity))
+                    .font(.headline)
+                Slider(value: $appStore.scrollSensitivity, in: 0.01...0.99)
+                HStack {
+                    Text(appStore.localized(.low)).font(.footnote)
+                    Spacer()
+                    Text(appStore.localized(.high)).font(.footnote)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(String(format: appStore.localized(.folderDropZoneSizeWithDefault), AppStore.defaultFolderDropZoneScale))
+                    Spacer()
+                    layoutModeScopeControl()
+                }
+                Slider(value: $appStore.folderDropZoneScale,
+                       in: AppStore.folderDropZoneScaleRange,
+                       step: 0.05)
+                HStack {
+                    Text(String(format: "%.1fx", AppStore.folderDropZoneScaleRange.lowerBound))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(String(format: "%.2fx", appStore.folderDropZoneScale))
+                        .font(.footnote.monospacedDigit())
+                    Spacer()
+                    Text(String(format: "%.1fx", AppStore.folderDropZoneScaleRange.upperBound))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Text(appStore.localized(.folderDropZoneSizeHint))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.pageIndicatorOffsetLabel))
+                        .font(.headline)
+                    Spacer()
+                    if !appStore.pageIndicatorPerDisplayEnabled {
+                        layoutModeScopeControl()
+                    }
+                }
+                Slider(value: $appStore.pageIndicatorOffset, in: 0...80)
+                HStack {
+                    Text("0").font(.footnote)
+                    Spacer()
+                    Text(String(format: "%.0f", appStore.pageIndicatorOffset)).font(.footnote)
+                    Spacer()
+                    Text("80").font(.footnote)
+                }
+            }
+            .disabled(appStore.pageIndicatorPerDisplayEnabled)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.pageIndicatorTopPaddingLabel))
+                        .font(.headline)
+                    Spacer()
+                    if !appStore.pageIndicatorPerDisplayEnabled {
+                        layoutModeScopeControl()
+                    }
+                }
+                Slider(value: $appStore.pageIndicatorTopPadding,
+                       in: AppStore.pageIndicatorTopPaddingRange)
+                HStack {
+                    Text(String(format: "%.0f", AppStore.pageIndicatorTopPaddingRange.lowerBound)).font(.footnote)
+                    Spacer()
+                    Text(String(format: "%.0f", appStore.pageIndicatorTopPadding)).font(.footnote)
+                    Spacer()
+                    Text(String(format: "%.0f", AppStore.pageIndicatorTopPaddingRange.upperBound)).font(.footnote)
+                }
+            }
+            .disabled(appStore.pageIndicatorPerDisplayEnabled)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Button {
+                    appStore.pageIndicatorPerDisplayEnabled.toggle()
+                } label: {
+                    HStack(spacing: 8) {
+                        Text("Per-display indicator position")
+                            .font(.headline)
+                        Spacer()
+                        layoutModeScopeControl(width: 116)
+                        Toggle("", isOn: $appStore.pageIndicatorPerDisplayEnabled)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .allowsHitTesting(false)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PressFeedbackRowButtonStyle(enabled: true, pressScale: 0.98))
+                Text("Use different values for each display.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                if appStore.pageIndicatorPerDisplayEnabled {
+                    HStack {
+                        Button("Apply defaults to current display") {
+                            if let screenID = currentIndicatorScreenID {
+                                appStore.applyIndicatorDefaults(to: screenID)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        Spacer()
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(indicatorScreenEntries) { entry in
+                            indicatorOverrideCard(for: entry)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.bottom, 20)
     }
 
     // MARK: - Export / Import Application Support Data
