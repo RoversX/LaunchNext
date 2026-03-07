@@ -112,12 +112,17 @@ sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
    cd LaunchNext/LaunchNext
    ```
 
-2. **Xcode で開く**
+2. **アップデーターをビルド**
+   ```bash
+   swift build --package-path UpdaterScripts/SwiftUpdater --configuration release --arch arm64 --arch x86_64 --product SwiftUpdater
+   ```
+
+3. **Xcode で開く**
    ```bash
    open LaunchNext.xcodeproj
    ```
 
-3. **ビルドして実行**
+4. **ビルドして実行**
    - ターゲットデバイスを選択
    - `⌘+R` でビルドして実行
    - または `⌘+B` でビルドのみ

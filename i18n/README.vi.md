@@ -114,12 +114,17 @@ Dữ liệu ứng dụng được lưu trữ an toàn tại:
    cd LaunchNext/LaunchNext
    ```
 
-2. **Mở trong Xcode**
+2. **Xây dựng trình cập nhật**
+   ```bash
+   swift build --package-path UpdaterScripts/SwiftUpdater --configuration release --arch arm64 --arch x86_64 --product SwiftUpdater
+   ```
+
+3. **Mở trong Xcode**
    ```bash
    open LaunchNext.xcodeproj
    ```
 
-3. **Xây dựng và chạy**
+4. **Xây dựng và chạy**
    - Chọn thiết bị đích
    - Nhấn `⌘+R` để xây dựng và chạy
    - Hoặc `⌘+B` chỉ để xây dựng

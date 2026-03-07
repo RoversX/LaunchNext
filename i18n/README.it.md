@@ -69,12 +69,17 @@ Legge direttamente dal database Launchpad di sistema:
    cd LaunchNext
    ```
 
-2. **Apri in Xcode**
+2. **Compila l'aggiornatore**
+   ```bash
+   swift build --package-path UpdaterScripts/SwiftUpdater --configuration release --arch arm64 --arch x86_64 --product SwiftUpdater
+   ```
+
+3. **Apri in Xcode**
    ```bash
    open LaunchNext.xcodeproj
    ```
 
-3. **Compila ed esegui**
+4. **Compila ed esegui**
    - Seleziona il tuo dispositivo target
    - Premi `⌘+R` per compilare ed eseguire
    - O `⌘+B` per solo compilare

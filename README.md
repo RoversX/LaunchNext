@@ -69,12 +69,17 @@ Reads directly from the system Launchpad database:
    cd LaunchNext
    ```
 
-2. **Open in Xcode**
+2. **Build the updater**
+   ```bash
+   swift build --package-path UpdaterScripts/SwiftUpdater --configuration release --arch arm64 --arch x86_64 --product SwiftUpdater
+   ```
+
+3. **Open in Xcode**
    ```bash
    open LaunchNext.xcodeproj
    ```
 
-3. **Build and run**
+4. **Build and run**
    - Select your target device
    - Press `⌘+R` to build and run
    - Or `⌘+B` to build only

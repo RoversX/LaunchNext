@@ -69,12 +69,17 @@ Data aplikace jsou bezpečně uložena v:
    cd LaunchNext
    ```
 
-2. **Otevřít v Xcode**
+2. **Sestavit aktualizátor**
+   ```bash
+   swift build --package-path UpdaterScripts/SwiftUpdater --configuration release --arch arm64 --arch x86_64 --product SwiftUpdater
+   ```
+
+3. **Otevřít v Xcode**
    ```bash
    open LaunchNext.xcodeproj
    ```
 
-3. **Sestavit a spustit**
+4. **Sestavit a spustit**
    - Vyberte vaše cílové zařízení
    - Stiskněte `⌘+R` pro sestavení a spuštění
    - Nebo `⌘+B` pouze pro sestavení

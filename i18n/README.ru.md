@@ -112,12 +112,17 @@ sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
    cd LaunchNext/LaunchNext
    ```
 
-2. **Открыть в Xcode**
+2. **Собрать обновлятор**
+   ```bash
+   swift build --package-path UpdaterScripts/SwiftUpdater --configuration release --arch arm64 --arch x86_64 --product SwiftUpdater
+   ```
+
+3. **Открыть в Xcode**
    ```bash
    open LaunchNext.xcodeproj
    ```
 
-3. **Собрать и запустить**
+4. **Собрать и запустить**
    - Выберите целевое устройство
    - Нажмите `⌘+R` для сборки и запуска
    - Или `⌘+B` только для сборки

@@ -112,12 +112,17 @@ Lit directement depuis la base de données système Launchpad :
    cd LaunchNext/LaunchNext
    ```
 
-2. **Ouvrir dans Xcode**
+2. **Compiler le metteur à jour**
+   ```bash
+   swift build --package-path UpdaterScripts/SwiftUpdater --configuration release --arch arm64 --arch x86_64 --product SwiftUpdater
+   ```
+
+3. **Ouvrir dans Xcode**
    ```bash
    open LaunchNext.xcodeproj
    ```
 
-3. **Compiler et exécuter**
+4. **Compiler et exécuter**
    - Sélectionner votre périphérique cible
    - Appuyer sur `⌘+R` pour compiler et exécuter
    - Ou `⌘+B` pour compiler seulement
