@@ -100,7 +100,7 @@ sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
 ## インストール
 
 ### システム要件
-- macOS 26 (Tahoe) 以降
+- macOS 15 (Sequoia) 以降
 - Apple Silicon または Intel プロセッサ
 - Xcode 26（ソースからビルドする場合）
 
@@ -163,7 +163,7 @@ xcodebuild -project LaunchNext.xcodeproj -scheme LaunchNext -configuration Relea
 ### よくある問題
 
 **Q: アプリが起動しませんか？**
-A: macOS 26+ であることを確認し、システム権限をチェックしてください。
+A: macOS 15+ であることを確認し、システム権限をチェックしてください。
 
 **Q: インポートボタンが見つかりませんか？**
 A: SettingsView.swift にインポート機能が含まれていることを確認してください。

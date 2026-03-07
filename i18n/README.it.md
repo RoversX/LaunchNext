@@ -57,7 +57,7 @@ Legge direttamente dal database Launchpad di sistema:
 ## Installazione
 
 ### Requisiti
-- macOS 26 (Tahoe) o successivo
+- macOS 15 (Sequoia) o successivo
 - Processore Apple Silicon o Intel
 - Xcode 26 (per compilare dal codice sorgente)
 
@@ -132,7 +132,7 @@ xcodebuild -project LaunchNext.xcodeproj -scheme LaunchNext -configuration Relea
 ### Problemi Comuni
 
 **D: L'app non si avvia?**
-R: Assicurati di avere macOS 26.0+ e controlla i permessi di sistema.
+R: Assicurati di avere macOS 15.0+ e controlla i permessi di sistema.
 
 ## Contribuire
 
