@@ -102,7 +102,7 @@ Dữ liệu ứng dụng được lưu trữ an toàn tại:
 ## Cài đặt
 
 ### Yêu cầu
-- macOS 26 (Tahoe) trở lên
+- macOS 15 (Sequoia) trở lên
 - Bộ xử lý Apple Silicon hoặc Intel
 - Xcode 26 (để xây dựng từ mã nguồn)
 
@@ -227,7 +227,7 @@ LaunchNext/
 ### Vấn đề thường gặp
 
 **Q: Ứng dụng không khởi động?**
-A: Đảm bảo macOS 26.0+ và kiểm tra quyền hệ thống.
+A: Đảm bảo macOS 15.0+ và kiểm tra quyền hệ thống.
 
 **Q: Thiếu nút nhập?**
 A: Xác minh SettingsView.swift bao gồm chức năng nhập.

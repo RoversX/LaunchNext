@@ -100,7 +100,7 @@ Lit directement depuis la base de données système Launchpad :
 ## Installation
 
 ### Configuration requise
-- macOS 26 (Tahoe) ou version ultérieure
+- macOS 15 (Sequoia) ou version ultérieure
 - Processeur Apple Silicon ou Intel
 - Xcode 26 (pour compiler depuis les sources)
 
@@ -163,7 +163,7 @@ xcodebuild -project LaunchNext.xcodeproj -scheme LaunchNext -configuration Relea
 ### Problèmes courants
 
 **Q: L'application ne démarre pas ?**
-R: Assurez-vous d'avoir macOS 26+ et vérifiez les permissions système.
+R: Assurez-vous d'avoir macOS 15+ et vérifiez les permissions système.
 
 **Q: Le bouton d'import est manquant ?**
 R: Vérifiez que SettingsView.swift inclut la fonctionnalité d'import.
