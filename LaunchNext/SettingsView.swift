@@ -13,11 +13,23 @@ struct SettingsView: View {
         case launchpad
         // case aiOverlay
     }
-    private enum LayoutModePreviewScope: String, CaseIterable, Identifiable {
-        case fullscreen = "Fullscreen"
-        case compact = "Compact"
+    private enum LayoutModePreviewScope: CaseIterable, Identifiable {
+        case fullscreen
+        case compact
 
-        var id: String { rawValue }
+        var id: String {
+            switch self {
+            case .fullscreen: return "fullscreen"
+            case .compact: return "compact"
+            }
+        }
+
+        var localizationKey: LocalizationKey {
+            switch self {
+            case .fullscreen: return .layoutModeScopeFullscreen
+            case .compact: return .layoutModeScopeCompact
+            }
+        }
 
         var appStoreMode: AppStore.AppearanceLayoutMode {
             switch self {
@@ -326,7 +338,7 @@ private func layoutModeScopeControl(width: CGFloat = 130) -> some View {
                     layoutModePreviewScope = scope
                 }
             } label: {
-                Text(scope.rawValue)
+                Text(appStore.localized(scope.localizationKey))
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(layoutModePreviewScope == scope ? Color.primary : Color.secondary.opacity(0.9))
                     .lineLimit(1)
@@ -3192,8 +3204,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
         for id in offlineIDs {
             entries.append(IndicatorScreenEntry(id: id,
-                                                name: "Offline Display",
-                                                sizeText: "ID \(id)",
+                                                name: appStore.localized(.indicatorOfflineDisplay),
+                                                sizeText: String(format: appStore.localized(.indicatorScreenIDFormat), id),
                                                 isConnected: false))
         }
 
@@ -3321,13 +3333,13 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 }
                 Spacer()
                 if !entry.isConnected {
-                    Text("Offline")
+                    Text(appStore.localized(.indicatorOfflineBadge))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Picker("", selection: useCustom) {
-                    Text("Default").tag(false)
-                    Text("Custom").tag(true)
+                    Text(appStore.localized(.defaultOption)).tag(false)
+                    Text(appStore.localized(.customOption)).tag(true)
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 160)
@@ -3336,7 +3348,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             if useCustom.wrappedValue {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text("Indicator offset")
+                        Text(appStore.localized(.pageIndicatorOffsetLabel))
                             .font(.caption)
                         Spacer()
                         Text(String(format: "%.0f", offsetValue))
@@ -3354,7 +3366,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     }
 
                     HStack {
-                        Text("Indicator top padding")
+                        Text(appStore.localized(.pageIndicatorTopPaddingLabel))
                             .font(.caption)
                         Spacer()
                         Text(String(format: "%.0f", topPaddingValue))
@@ -3966,7 +3978,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     perDisplayBinding.wrappedValue.toggle()
                 } label: {
                     HStack(spacing: 8) {
-                        Text("Per-display indicator position")
+                        Text(appStore.localized(.perDisplayIndicatorPositionTitle))
                             .font(.headline)
                         Spacer()
                         layoutModeScopeControl(width: 116)
@@ -3979,13 +3991,13 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(PressFeedbackRowButtonStyle(enabled: true, pressScale: 0.98))
-                Text("Use different values for each display.")
+                Text(appStore.localized(.perDisplayIndicatorPositionDescription))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
                 if selectedScopePerDisplayEnabled {
                     HStack {
-                        Button("Apply defaults to current display") {
+                        Button(appStore.localized(.applyDefaultsToCurrentDisplay)) {
                             if let screenID = currentIndicatorScreenID {
                                 appStore.applyIndicatorDefaults(to: screenID, mode: selectedAppearanceLayoutMode)
                             }
