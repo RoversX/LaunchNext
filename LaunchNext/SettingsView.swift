@@ -364,7 +364,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                             content(for: section)
                             Spacer(minLength: 0)
                         }
-                        .padding(.vertical, 12)
+                        .padding(.top, 12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .scrollDisabled(section == .about || section == .general)
@@ -372,7 +372,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     .scrollBounceBehavior(.basedOnSize)
                 }
                 .padding(.horizontal, 24)
-                .padding(.vertical, 16)
+                .padding(.top, 16)
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
             }
             .background(.ultraThinMaterial)
@@ -3455,6 +3455,14 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 }
 
                 HStack {
+                    Text(appStore.localized(.windowOpenAnimationTitle))
+                    Spacer()
+                    Toggle("", isOn: $appStore.enableWindowOpenAnimation)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+
+                HStack {
                     Text(appStore.localized(.backgroundMaskTitle))
                     Spacer()
                     Toggle("", isOn: $appStore.backgroundMaskEnabled)
@@ -3954,6 +3962,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert("showLabels")
                     keys.insert("hideDock")
                     keys.insert("enableAnimations")
+                    keys.insert(AppStore.windowOpenAnimationKey)
                     keys.insert("useLocalizedThirdPartyTitles")
                     keys.insert("enableDropPrediction")
                     keys.insert(AppStore.reverseWheelPagingKey)

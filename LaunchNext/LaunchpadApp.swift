@@ -1384,7 +1384,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
         SoundManager.shared.play(.launchpadOpen)
         NotificationCenter.default.post(name: .launchpadWindowShown, object: nil)
 
-        animateWindow(to: 1) {
+        let finalizeShow: () -> Void = {
             self.windowIsVisible = true
             self.updateSystemUIVisibility()
             // Ensure focus after animation completes
@@ -1392,6 +1392,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
                 self.window?.makeKey()
                 self.window?.makeMain()
             }
+        }
+
+        if appStore.enableWindowOpenAnimation {
+            animateWindow(to: 1) {
+                finalizeShow()
+            }
+        } else {
+            window.alphaValue = 1
+            window.contentView?.alphaValue = 1
+            finalizeShow()
         }
     }
 
@@ -1431,7 +1441,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
             SoundManager.shared.play(.launchpadClose)
         }
 
-        animateWindow(to: 0) {
+        if appStore.enableWindowOpenAnimation {
+            animateWindow(to: 0) {
+                finalize()
+            }
+        } else {
             finalize()
         }
     }

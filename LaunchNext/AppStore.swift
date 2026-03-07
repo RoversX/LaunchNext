@@ -224,6 +224,7 @@ final class AppStore: ObservableObject {
     static let followScrollPagingKey = "followScrollPagingEnabled"
     static let reverseWheelPagingKey = "reverseWheelPagingDirection"
     static let useCAGridRendererKey = "useCAGridRenderer"
+    static let windowOpenAnimationKey = "windowOpenAnimationEnabled"
     static let developmentEnableCLICodeKey = "developmentEnableCLICode"
     private static let cliShimMarker = "# LaunchNext CLI shim"
     private static let cliPathSnippetHeader = "# >>> LaunchNext CLI >>>"
@@ -982,6 +983,13 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(animationDuration, forKey: "animationDuration") }
     }
 
+    @Published var enableWindowOpenAnimation: Bool = {
+        if UserDefaults.standard.object(forKey: AppStore.windowOpenAnimationKey) == nil { return true }
+        return UserDefaults.standard.bool(forKey: AppStore.windowOpenAnimationKey)
+    }() {
+        didSet { UserDefaults.standard.set(enableWindowOpenAnimation, forKey: Self.windowOpenAnimationKey) }
+    }
+
     @Published var useLocalizedThirdPartyTitles: Bool = {
         if UserDefaults.standard.object(forKey: "useLocalizedThirdPartyTitles") == nil { return true }
         return UserDefaults.standard.bool(forKey: "useLocalizedThirdPartyTitles")
@@ -1730,6 +1738,9 @@ final class AppStore: ObservableObject {
         if UserDefaults.standard.object(forKey: "animationDuration") == nil {
             UserDefaults.standard.set(0.3, forKey: "animationDuration")
         }
+        if defaults.object(forKey: Self.windowOpenAnimationKey) == nil {
+            defaults.set(true, forKey: Self.windowOpenAnimationKey)
+        }
         if UserDefaults.standard.object(forKey: "showFPSOverlay") == nil {
             UserDefaults.standard.set(false, forKey: "showFPSOverlay")
         }
@@ -1739,6 +1750,7 @@ final class AppStore: ObservableObject {
 
         let storedDuration = UserDefaults.standard.double(forKey: "animationDuration")
         self.animationDuration = storedDuration == 0 ? 0.3 : storedDuration
+        self.enableWindowOpenAnimation = defaults.object(forKey: Self.windowOpenAnimationKey) as? Bool ?? true
         self.enableAnimations = UserDefaults.standard.object(forKey: "enableAnimations") as? Bool ?? true
         self.customIconFileURL = AppStore.customIconFileURL
 
