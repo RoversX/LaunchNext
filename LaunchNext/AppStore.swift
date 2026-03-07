@@ -97,6 +97,43 @@ final class AppStore: ObservableObject {
         var topPadding: Double
     }
 
+    enum AppearanceLayoutMode: String, CaseIterable, Codable, Identifiable {
+        case fullscreen
+        case compact
+
+        var id: String { rawValue }
+    }
+
+    struct ModeScopedAppearanceSettings: Codable, Equatable {
+        var iconScale: Double
+        var iconLabelFontSize: Double
+        var folderDropZoneScale: Double
+        var pageIndicatorOffset: Double
+        var pageIndicatorTopPadding: Double
+        var pageIndicatorPerDisplayEnabled: Bool
+        var pageIndicatorOverrides: [String: PageIndicatorOverride]
+    }
+
+    struct DualModeAppearanceSettings: Codable, Equatable {
+        var fullscreen: ModeScopedAppearanceSettings
+        var compact: ModeScopedAppearanceSettings
+
+        subscript(mode: AppearanceLayoutMode) -> ModeScopedAppearanceSettings {
+            get {
+                switch mode {
+                case .fullscreen: return fullscreen
+                case .compact: return compact
+                }
+            }
+            set {
+                switch mode {
+                case .fullscreen: fullscreen = newValue
+                case .compact: compact = newValue
+                }
+            }
+        }
+    }
+
     struct RGBAColor: Codable, Equatable {
         var red: Double
         var green: Double
@@ -238,6 +275,7 @@ final class AppStore: ObservableObject {
     static let uninstallToolAppPathKey = "uninstallToolAppPath"
     static let pageIndicatorPerDisplayEnabledKey = "pageIndicatorPerDisplayEnabled"
     static let pageIndicatorPerDisplayOverridesKey = "pageIndicatorPerDisplayOverrides"
+    static let dualModeAppearanceSettingsKey = "dualModeAppearanceSettings"
     private static let gameControllerEnabledKey = "gameControllerEnabled"
     static let gameControllerMenuToggleKey = "gameControllerMenuToggleLaunchpad"
     private static let soundEffectsEnabledKey = "soundEffectsEnabled"
@@ -557,6 +595,16 @@ final class AppStore: ObservableObject {
         }
         pageIndicatorOverrides = Self.loadPageIndicatorOverrides()
 
+        if let storedDualModeAppearance = Self.loadDualModeAppearanceSettings(from: UserDefaults.standard) {
+            dualModeAppearanceSettings = storedDualModeAppearance
+        } else {
+            let legacy = Self.legacyAppearanceSettings(from: UserDefaults.standard)
+            dualModeAppearanceSettings = DualModeAppearanceSettings(fullscreen: legacy, compact: legacy)
+            persistDualModeAppearanceSettings()
+        }
+        syncActiveAppearanceProxies(from: currentAppearanceLayoutMode)
+        persistLegacyAppearanceProxyValues()
+
         globalHotKey = Self.loadHotKeyConfiguration()
 
         // Apply hidden filtering immediately
@@ -618,6 +666,8 @@ final class AppStore: ObservableObject {
     @Published var isFullscreenMode: Bool = false {
         didSet {
             UserDefaults.standard.set(isFullscreenMode, forKey: "isFullscreenMode")
+            syncActiveAppearanceProxies(from: currentAppearanceLayoutMode)
+            persistLegacyAppearanceProxyValues()
             DispatchQueue.main.async { [weak self] in
                 if let appDelegate = AppDelegate.shared {
                     appDelegate.updateWindowMode(isFullscreen: self?.isFullscreenMode ?? false)
@@ -664,6 +714,23 @@ final class AppStore: ObservableObject {
 
     private var appearanceRefreshWorkItem: DispatchWorkItem?
     private var lastAppearanceEventAt: TimeInterval = 0
+    private var isApplyingScopedAppearanceState = false
+    @Published private var dualModeAppearanceSettings: DualModeAppearanceSettings = DualModeAppearanceSettings(
+        fullscreen: ModeScopedAppearanceSettings(iconScale: 0.95,
+                                                 iconLabelFontSize: 11.0,
+                                                 folderDropZoneScale: AppStore.defaultFolderDropZoneScale,
+                                                 pageIndicatorOffset: 27.0,
+                                                 pageIndicatorTopPadding: AppStore.defaultPageIndicatorTopPadding,
+                                                 pageIndicatorPerDisplayEnabled: false,
+                                                 pageIndicatorOverrides: [:]),
+        compact: ModeScopedAppearanceSettings(iconScale: 0.95,
+                                              iconLabelFontSize: 11.0,
+                                              folderDropZoneScale: AppStore.defaultFolderDropZoneScale,
+                                              pageIndicatorOffset: 27.0,
+                                              pageIndicatorTopPadding: AppStore.defaultPageIndicatorTopPadding,
+                                              pageIndicatorPerDisplayEnabled: false,
+                                              pageIndicatorOverrides: [:])
+    )
 
     static func screenIdentifier(for screen: NSScreen) -> String {
         if let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
@@ -685,6 +752,196 @@ final class AppStore: ObservableObject {
         if let data = try? JSONEncoder().encode(overrides) {
             UserDefaults.standard.set(data, forKey: Self.pageIndicatorPerDisplayOverridesKey)
         }
+    }
+
+    private static func legacyAppearanceSettings(from defaults: UserDefaults) -> ModeScopedAppearanceSettings {
+        let iconScale = defaults.object(forKey: "iconScale") as? Double ?? 0.95
+        let iconLabelFontSize = defaults.object(forKey: "iconLabelFontSize") as? Double ?? 11.0
+        let dropZoneScale = clampFolderDropZoneScale(defaults.object(forKey: Self.folderDropZoneScaleKey) as? Double ?? Self.defaultFolderDropZoneScale)
+        let indicatorOffset = defaults.object(forKey: "pageIndicatorOffset") as? Double ?? 27.0
+        let indicatorTopPadding = clampPageIndicatorTopPadding(defaults.object(forKey: Self.pageIndicatorTopPaddingKey) as? Double ?? Self.defaultPageIndicatorTopPadding)
+        let perDisplayEnabled = defaults.object(forKey: Self.pageIndicatorPerDisplayEnabledKey) as? Bool ?? false
+        let overrides = (try? JSONDecoder().decode([String: PageIndicatorOverride].self,
+                                                   from: defaults.data(forKey: Self.pageIndicatorPerDisplayOverridesKey) ?? Data())) ?? [:]
+        return ModeScopedAppearanceSettings(iconScale: iconScale,
+                                            iconLabelFontSize: iconLabelFontSize,
+                                            folderDropZoneScale: dropZoneScale,
+                                            pageIndicatorOffset: indicatorOffset,
+                                            pageIndicatorTopPadding: indicatorTopPadding,
+                                            pageIndicatorPerDisplayEnabled: perDisplayEnabled,
+                                            pageIndicatorOverrides: overrides)
+    }
+
+    private static func normalizedAppearanceSettings(_ settings: ModeScopedAppearanceSettings) -> ModeScopedAppearanceSettings {
+        ModeScopedAppearanceSettings(iconScale: settings.iconScale,
+                                     iconLabelFontSize: settings.iconLabelFontSize,
+                                     folderDropZoneScale: clampFolderDropZoneScale(settings.folderDropZoneScale),
+                                     pageIndicatorOffset: settings.pageIndicatorOffset,
+                                     pageIndicatorTopPadding: clampPageIndicatorTopPadding(settings.pageIndicatorTopPadding),
+                                     pageIndicatorPerDisplayEnabled: settings.pageIndicatorPerDisplayEnabled,
+                                     pageIndicatorOverrides: settings.pageIndicatorOverrides)
+    }
+
+    private static func normalizedDualModeAppearanceSettings(_ settings: DualModeAppearanceSettings) -> DualModeAppearanceSettings {
+        DualModeAppearanceSettings(fullscreen: normalizedAppearanceSettings(settings.fullscreen),
+                                   compact: normalizedAppearanceSettings(settings.compact))
+    }
+
+    private static func loadDualModeAppearanceSettings(from defaults: UserDefaults) -> DualModeAppearanceSettings? {
+        guard let data = defaults.data(forKey: dualModeAppearanceSettingsKey),
+              let decoded = try? JSONDecoder().decode(DualModeAppearanceSettings.self, from: data) else {
+            return nil
+        }
+        return normalizedDualModeAppearanceSettings(decoded)
+    }
+
+    private func persistDualModeAppearanceSettings() {
+        let normalized = Self.normalizedDualModeAppearanceSettings(dualModeAppearanceSettings)
+        dualModeAppearanceSettings = normalized
+        if let data = try? JSONEncoder().encode(normalized) {
+            UserDefaults.standard.set(data, forKey: Self.dualModeAppearanceSettingsKey)
+        }
+    }
+
+    private var currentAppearanceLayoutMode: AppearanceLayoutMode {
+        isFullscreenMode ? .fullscreen : .compact
+    }
+
+    private func updateScopedAppearanceSettings(for mode: AppearanceLayoutMode,
+                                                _ update: (inout ModeScopedAppearanceSettings) -> Void) {
+        var settings = dualModeAppearanceSettings
+        var scoped = settings[mode]
+        update(&scoped)
+        settings[mode] = Self.normalizedAppearanceSettings(scoped)
+        dualModeAppearanceSettings = settings
+        persistDualModeAppearanceSettings()
+    }
+
+    private func syncActiveAppearanceProxies(from mode: AppearanceLayoutMode) {
+        let settings = dualModeAppearanceSettings[mode]
+        isApplyingScopedAppearanceState = true
+        defer { isApplyingScopedAppearanceState = false }
+        iconScale = settings.iconScale
+        iconLabelFontSize = settings.iconLabelFontSize
+        folderDropZoneScale = settings.folderDropZoneScale
+        pageIndicatorOffset = settings.pageIndicatorOffset
+        pageIndicatorTopPadding = settings.pageIndicatorTopPadding
+        pageIndicatorPerDisplayEnabled = settings.pageIndicatorPerDisplayEnabled
+        pageIndicatorOverrides = settings.pageIndicatorOverrides
+    }
+
+    private func persistLegacyAppearanceProxyValues() {
+        let defaults = UserDefaults.standard
+        defaults.set(iconScale, forKey: "iconScale")
+        defaults.set(iconLabelFontSize, forKey: "iconLabelFontSize")
+        defaults.set(folderDropZoneScale, forKey: Self.folderDropZoneScaleKey)
+        defaults.set(pageIndicatorOffset, forKey: "pageIndicatorOffset")
+        defaults.set(pageIndicatorTopPadding, forKey: Self.pageIndicatorTopPaddingKey)
+        defaults.set(pageIndicatorPerDisplayEnabled, forKey: Self.pageIndicatorPerDisplayEnabledKey)
+        persistPageIndicatorOverrides(pageIndicatorOverrides)
+    }
+
+    func scopedIconScale(for mode: AppearanceLayoutMode) -> Double {
+        dualModeAppearanceSettings[mode].iconScale
+    }
+
+    func setScopedIconScale(_ value: Double, for mode: AppearanceLayoutMode) {
+        if mode == currentAppearanceLayoutMode {
+            iconScale = value
+        } else {
+            updateScopedAppearanceSettings(for: mode) { $0.iconScale = value }
+        }
+    }
+
+    func scopedIconLabelFontSize(for mode: AppearanceLayoutMode) -> Double {
+        dualModeAppearanceSettings[mode].iconLabelFontSize
+    }
+
+    func setScopedIconLabelFontSize(_ value: Double, for mode: AppearanceLayoutMode) {
+        if mode == currentAppearanceLayoutMode {
+            iconLabelFontSize = value
+        } else {
+            updateScopedAppearanceSettings(for: mode) { $0.iconLabelFontSize = value }
+        }
+    }
+
+    func scopedFolderDropZoneScale(for mode: AppearanceLayoutMode) -> Double {
+        dualModeAppearanceSettings[mode].folderDropZoneScale
+    }
+
+    func setScopedFolderDropZoneScale(_ value: Double, for mode: AppearanceLayoutMode) {
+        let clamped = Self.clampFolderDropZoneScale(value)
+        if mode == currentAppearanceLayoutMode {
+            folderDropZoneScale = clamped
+        } else {
+            updateScopedAppearanceSettings(for: mode) { $0.folderDropZoneScale = clamped }
+        }
+    }
+
+    func scopedPageIndicatorOffset(for mode: AppearanceLayoutMode) -> Double {
+        dualModeAppearanceSettings[mode].pageIndicatorOffset
+    }
+
+    func setScopedPageIndicatorOffset(_ value: Double, for mode: AppearanceLayoutMode) {
+        if mode == currentAppearanceLayoutMode {
+            pageIndicatorOffset = value
+        } else {
+            updateScopedAppearanceSettings(for: mode) { $0.pageIndicatorOffset = value }
+        }
+    }
+
+    func scopedPageIndicatorTopPadding(for mode: AppearanceLayoutMode) -> Double {
+        dualModeAppearanceSettings[mode].pageIndicatorTopPadding
+    }
+
+    func setScopedPageIndicatorTopPadding(_ value: Double, for mode: AppearanceLayoutMode) {
+        let clamped = Self.clampPageIndicatorTopPadding(value)
+        if mode == currentAppearanceLayoutMode {
+            pageIndicatorTopPadding = clamped
+        } else {
+            updateScopedAppearanceSettings(for: mode) { $0.pageIndicatorTopPadding = clamped }
+        }
+    }
+
+    func scopedPageIndicatorPerDisplayEnabled(for mode: AppearanceLayoutMode) -> Bool {
+        dualModeAppearanceSettings[mode].pageIndicatorPerDisplayEnabled
+    }
+
+    func setScopedPageIndicatorPerDisplayEnabled(_ enabled: Bool, for mode: AppearanceLayoutMode) {
+        if mode == currentAppearanceLayoutMode {
+            pageIndicatorPerDisplayEnabled = enabled
+        } else {
+            updateScopedAppearanceSettings(for: mode) { $0.pageIndicatorPerDisplayEnabled = enabled }
+        }
+    }
+
+    func scopedPageIndicatorOverrides(for mode: AppearanceLayoutMode) -> [String: PageIndicatorOverride] {
+        dualModeAppearanceSettings[mode].pageIndicatorOverrides
+    }
+
+    func scopedPageIndicatorOverride(for screenID: String, mode: AppearanceLayoutMode) -> PageIndicatorOverride? {
+        dualModeAppearanceSettings[mode].pageIndicatorOverrides[screenID]
+    }
+
+    func setScopedPageIndicatorOverride(_ override: PageIndicatorOverride?, for screenID: String, mode: AppearanceLayoutMode) {
+        if mode == currentAppearanceLayoutMode {
+            setPageIndicatorOverride(override, for: screenID)
+            return
+        }
+        updateScopedAppearanceSettings(for: mode) { settings in
+            if let override {
+                settings.pageIndicatorOverrides[screenID] = override
+            } else {
+                settings.pageIndicatorOverrides.removeValue(forKey: screenID)
+            }
+        }
+    }
+
+    func applyIndicatorDefaults(to screenID: String, mode: AppearanceLayoutMode) {
+        let settings = dualModeAppearanceSettings[mode]
+        let override = PageIndicatorOverride(offset: settings.pageIndicatorOffset,
+                                             topPadding: settings.pageIndicatorTopPadding)
+        setScopedPageIndicatorOverride(override, for: screenID, mode: mode)
     }
 
     // 图标标题显示
@@ -791,6 +1048,8 @@ final class AppStore: ObservableObject {
                 return
             }
             UserDefaults.standard.set(folderDropZoneScale, forKey: Self.folderDropZoneScaleKey)
+            guard !isApplyingScopedAppearanceState else { return }
+            updateScopedAppearanceSettings(for: currentAppearanceLayoutMode) { $0.folderDropZoneScale = folderDropZoneScale }
         }
     }
 
@@ -802,6 +1061,8 @@ final class AppStore: ObservableObject {
                 return
             }
             UserDefaults.standard.set(pageIndicatorTopPadding, forKey: Self.pageIndicatorTopPaddingKey)
+            guard !isApplyingScopedAppearanceState else { return }
+            updateScopedAppearanceSettings(for: currentAppearanceLayoutMode) { $0.pageIndicatorTopPadding = pageIndicatorTopPadding }
         }
     }
 
@@ -900,6 +1161,8 @@ final class AppStore: ObservableObject {
     }() {
         didSet {
             UserDefaults.standard.set(iconLabelFontSize, forKey: "iconLabelFontSize")
+            guard !isApplyingScopedAppearanceState else { return }
+            updateScopedAppearanceSettings(for: currentAppearanceLayoutMode) { $0.iconLabelFontSize = iconLabelFontSize }
             triggerGridRefresh()
         }
     }
@@ -1096,6 +1359,8 @@ final class AppStore: ObservableObject {
     }() {
         didSet {
             UserDefaults.standard.set(pageIndicatorOffset, forKey: "pageIndicatorOffset")
+            guard !isApplyingScopedAppearanceState else { return }
+            updateScopedAppearanceSettings(for: currentAppearanceLayoutMode) { $0.pageIndicatorOffset = pageIndicatorOffset }
         }
     }
 
@@ -1105,10 +1370,18 @@ final class AppStore: ObservableObject {
     }() {
         didSet {
             UserDefaults.standard.set(pageIndicatorPerDisplayEnabled, forKey: AppStore.pageIndicatorPerDisplayEnabledKey)
+            guard !isApplyingScopedAppearanceState else { return }
+            updateScopedAppearanceSettings(for: currentAppearanceLayoutMode) { $0.pageIndicatorPerDisplayEnabled = pageIndicatorPerDisplayEnabled }
         }
     }
 
-    @Published private(set) var pageIndicatorOverrides: [String: PageIndicatorOverride] = AppStore.loadPageIndicatorOverrides()
+    @Published private(set) var pageIndicatorOverrides: [String: PageIndicatorOverride] = AppStore.loadPageIndicatorOverrides() {
+        didSet {
+            persistPageIndicatorOverrides(pageIndicatorOverrides)
+            guard !isApplyingScopedAppearanceState else { return }
+            updateScopedAppearanceSettings(for: currentAppearanceLayoutMode) { $0.pageIndicatorOverrides = pageIndicatorOverrides }
+        }
+    }
 
     @Published var rememberLastPage: Bool = AppStore.defaultRememberSetting() {
         didSet {
@@ -1748,6 +2021,17 @@ final class AppStore: ObservableObject {
             defaults.set(27.0, forKey: "pageIndicatorOffset")
         }
 
+        if let storedDualModeAppearance = Self.loadDualModeAppearanceSettings(from: defaults) {
+            self.dualModeAppearanceSettings = storedDualModeAppearance
+        } else {
+            let legacy = Self.legacyAppearanceSettings(from: defaults)
+            let migrated = DualModeAppearanceSettings(fullscreen: legacy, compact: legacy)
+            self.dualModeAppearanceSettings = migrated
+            if let data = try? JSONEncoder().encode(migrated) {
+                defaults.set(data, forKey: Self.dualModeAppearanceSettingsKey)
+            }
+        }
+
         let storedDuration = UserDefaults.standard.double(forKey: "animationDuration")
         self.animationDuration = storedDuration == 0 ? 0.3 : storedDuration
         self.enableWindowOpenAnimation = defaults.object(forKey: Self.windowOpenAnimationKey) as? Bool ?? true
@@ -1764,6 +2048,8 @@ final class AppStore: ObservableObject {
             self.currentAppIcon = fallbackIcon
         }
         applyCurrentAppIcon()
+        syncActiveAppearanceProxies(from: currentAppearanceLayoutMode)
+        persistLegacyAppearanceProxyValues()
 
         let sanitizedSources = sanitizedCustomPaths(from: customAppSourcePaths)
         if sanitizedSources != customAppSourcePaths {
@@ -2057,6 +2343,8 @@ final class AppStore: ObservableObject {
     @Published var iconScale: Double = 0.95 {
         didSet {
             UserDefaults.standard.set(iconScale, forKey: "iconScale")
+            guard !isApplyingScopedAppearanceState else { return }
+            updateScopedAppearanceSettings(for: currentAppearanceLayoutMode) { $0.iconScale = iconScale }
             iconScaleWorkItem?.cancel()
             let work = DispatchWorkItem { [weak self] in self?.triggerGridRefresh() }
             iconScaleWorkItem = work
@@ -4621,7 +4909,11 @@ final class AppStore: ObservableObject {
         if let url = uninstallToolAppURL {
             icon = NSWorkspace.shared.icon(forFile: url.path)
         } else {
-            icon = NSWorkspace.shared.icon(forFileType: "app")
+            if let appType = UTType(filenameExtension: "app") {
+                icon = NSWorkspace.shared.icon(for: appType)
+            } else {
+                icon = NSWorkspace.shared.icon(forFile: "/Applications")
+            }
         }
         let rendered = (icon.copy() as? NSImage) ?? icon
         rendered.size = NSSize(width: 64, height: 64)

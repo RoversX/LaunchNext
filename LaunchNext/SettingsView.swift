@@ -14,10 +14,17 @@ struct SettingsView: View {
         // case aiOverlay
     }
     private enum LayoutModePreviewScope: String, CaseIterable, Identifiable {
-        case classic = "Fullscreen"
-        case new = "Compact"
+        case fullscreen = "Fullscreen"
+        case compact = "Compact"
 
         var id: String { rawValue }
+
+        var appStoreMode: AppStore.AppearanceLayoutMode {
+            switch self {
+            case .fullscreen: return .fullscreen
+            case .compact: return .compact
+            }
+        }
     }
     @State private var showResetConfirm = false
     @State private var selectedSection: SettingsSection = .general
@@ -63,7 +70,7 @@ struct SettingsView: View {
     @State private var showCLIFullPathCommand = false
     @State private var copiedCLICommand: String? = nil
     @State private var cliCommandActionMessage: String? = nil
-    @State private var layoutModePreviewScope: LayoutModePreviewScope = .classic
+    @State private var layoutModePreviewScope: LayoutModePreviewScope = .fullscreen
 
     // Sidebar sizing presets
     private var sidebarIconFrame: CGFloat {
@@ -211,6 +218,10 @@ struct SettingsView: View {
         .onDisappear {
             stopShortcutCapture(cancel: false)
         }
+        .onChange(of: appStore.isFullscreenMode) { _ in
+            guard selectedSection == .appearance else { return }
+            syncLayoutModePreviewScopeToRuntime()
+        }
     }
 
     private var systemVersionText: String {
@@ -247,6 +258,62 @@ struct SettingsView: View {
 
 private func getVersion(fallback: String) -> String {
     Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? fallback
+}
+
+private var selectedAppearanceLayoutMode: AppStore.AppearanceLayoutMode {
+    layoutModePreviewScope.appStoreMode
+}
+
+private var selectedScopePerDisplayEnabled: Bool {
+    appStore.scopedPageIndicatorPerDisplayEnabled(for: selectedAppearanceLayoutMode)
+}
+
+private func syncLayoutModePreviewScopeToRuntime() {
+    let target: LayoutModePreviewScope = appStore.isFullscreenMode ? .fullscreen : .compact
+    guard layoutModePreviewScope != target else { return }
+    layoutModePreviewScope = target
+}
+
+private func scopedIconScaleBinding() -> Binding<Double> {
+    Binding(
+        get: { appStore.scopedIconScale(for: selectedAppearanceLayoutMode) },
+        set: { appStore.setScopedIconScale($0, for: selectedAppearanceLayoutMode) }
+    )
+}
+
+private func scopedIconLabelFontSizeBinding() -> Binding<Double> {
+    Binding(
+        get: { appStore.scopedIconLabelFontSize(for: selectedAppearanceLayoutMode) },
+        set: { appStore.setScopedIconLabelFontSize($0, for: selectedAppearanceLayoutMode) }
+    )
+}
+
+private func scopedFolderDropZoneScaleBinding() -> Binding<Double> {
+    Binding(
+        get: { appStore.scopedFolderDropZoneScale(for: selectedAppearanceLayoutMode) },
+        set: { appStore.setScopedFolderDropZoneScale($0, for: selectedAppearanceLayoutMode) }
+    )
+}
+
+private func scopedPageIndicatorOffsetBinding() -> Binding<Double> {
+    Binding(
+        get: { appStore.scopedPageIndicatorOffset(for: selectedAppearanceLayoutMode) },
+        set: { appStore.setScopedPageIndicatorOffset($0, for: selectedAppearanceLayoutMode) }
+    )
+}
+
+private func scopedPageIndicatorTopPaddingBinding() -> Binding<Double> {
+    Binding(
+        get: { appStore.scopedPageIndicatorTopPadding(for: selectedAppearanceLayoutMode) },
+        set: { appStore.setScopedPageIndicatorTopPadding($0, for: selectedAppearanceLayoutMode) }
+    )
+}
+
+private func scopedPerDisplayIndicatorBinding() -> Binding<Bool> {
+    Binding(
+        get: { appStore.scopedPageIndicatorPerDisplayEnabled(for: selectedAppearanceLayoutMode) },
+        set: { appStore.setScopedPageIndicatorPerDisplayEnabled($0, for: selectedAppearanceLayoutMode) }
+    )
 }
 
 private func layoutModeScopeControl(width: CGFloat = 130) -> some View {
@@ -900,7 +967,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             try exportDataFolder(to: destParent)
             backupRefreshToken = UUID()
         } catch {
-            // ignore for now
+            showBackupExportError(error)
         }
     }
 
@@ -3119,7 +3186,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                                                 isConnected: true))
         }
 
-        let offlineIDs = appStore.pageIndicatorOverrides.keys
+        let offlineIDs = appStore.scopedPageIndicatorOverrides(for: selectedAppearanceLayoutMode).keys
             .filter { !connectedIDs.contains($0) }
             .sorted()
 
@@ -3141,13 +3208,13 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private func indicatorCustomBinding(for screenID: String) -> Binding<Bool> {
         Binding(
-            get: { appStore.pageIndicatorOverride(for: screenID) != nil },
+            get: { appStore.scopedPageIndicatorOverride(for: screenID, mode: selectedAppearanceLayoutMode) != nil },
             set: { isCustom in
                 scheduleIndicatorOverrideUpdate {
                     if isCustom {
-                        appStore.applyIndicatorDefaults(to: screenID)
+                        appStore.applyIndicatorDefaults(to: screenID, mode: selectedAppearanceLayoutMode)
                     } else {
-                        appStore.setPageIndicatorOverride(nil, for: screenID)
+                        appStore.setScopedPageIndicatorOverride(nil, for: screenID, mode: selectedAppearanceLayoutMode)
                     }
                 }
             }
@@ -3156,15 +3223,19 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private func indicatorOffsetBinding(for screenID: String) -> Binding<Double> {
         Binding(
-            get: { appStore.pageIndicatorOverride(for: screenID)?.offset ?? appStore.pageIndicatorOffset },
+            get: {
+                appStore.scopedPageIndicatorOverride(for: screenID, mode: selectedAppearanceLayoutMode)?.offset
+                ?? appStore.scopedPageIndicatorOffset(for: selectedAppearanceLayoutMode)
+            },
             set: { newValue in
                 scheduleIndicatorOverrideUpdate {
-                    let current = appStore.pageIndicatorOverride(for: screenID)
-                        ?? AppStore.PageIndicatorOverride(offset: appStore.pageIndicatorOffset,
-                                                          topPadding: appStore.pageIndicatorTopPadding)
-                    appStore.setPageIndicatorOverride(AppStore.PageIndicatorOverride(offset: newValue,
-                                                                                    topPadding: current.topPadding),
-                                                      for: screenID)
+                    let current = appStore.scopedPageIndicatorOverride(for: screenID, mode: selectedAppearanceLayoutMode)
+                        ?? AppStore.PageIndicatorOverride(offset: appStore.scopedPageIndicatorOffset(for: selectedAppearanceLayoutMode),
+                                                          topPadding: appStore.scopedPageIndicatorTopPadding(for: selectedAppearanceLayoutMode))
+                    appStore.setScopedPageIndicatorOverride(AppStore.PageIndicatorOverride(offset: newValue,
+                                                                                           topPadding: current.topPadding),
+                                                            for: screenID,
+                                                            mode: selectedAppearanceLayoutMode)
                 }
             }
         )
@@ -3172,15 +3243,19 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private func indicatorTopPaddingBinding(for screenID: String) -> Binding<Double> {
         Binding(
-            get: { appStore.pageIndicatorOverride(for: screenID)?.topPadding ?? appStore.pageIndicatorTopPadding },
+            get: {
+                appStore.scopedPageIndicatorOverride(for: screenID, mode: selectedAppearanceLayoutMode)?.topPadding
+                ?? appStore.scopedPageIndicatorTopPadding(for: selectedAppearanceLayoutMode)
+            },
             set: { newValue in
                 scheduleIndicatorOverrideUpdate {
-                    let current = appStore.pageIndicatorOverride(for: screenID)
-                        ?? AppStore.PageIndicatorOverride(offset: appStore.pageIndicatorOffset,
-                                                          topPadding: appStore.pageIndicatorTopPadding)
-                    appStore.setPageIndicatorOverride(AppStore.PageIndicatorOverride(offset: current.offset,
-                                                                                    topPadding: newValue),
-                                                      for: screenID)
+                    let current = appStore.scopedPageIndicatorOverride(for: screenID, mode: selectedAppearanceLayoutMode)
+                        ?? AppStore.PageIndicatorOverride(offset: appStore.scopedPageIndicatorOffset(for: selectedAppearanceLayoutMode),
+                                                          topPadding: appStore.scopedPageIndicatorTopPadding(for: selectedAppearanceLayoutMode))
+                    appStore.setScopedPageIndicatorOverride(AppStore.PageIndicatorOverride(offset: current.offset,
+                                                                                           topPadding: newValue),
+                                                            for: screenID,
+                                                            mode: selectedAppearanceLayoutMode)
                 }
             }
         )
@@ -3230,8 +3305,10 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     @ViewBuilder
     private func indicatorOverrideCard(for entry: IndicatorScreenEntry) -> some View {
         let useCustom = indicatorCustomBinding(for: entry.id)
-        let offsetValue = appStore.pageIndicatorOverride(for: entry.id)?.offset ?? appStore.pageIndicatorOffset
-        let topPaddingValue = appStore.pageIndicatorOverride(for: entry.id)?.topPadding ?? appStore.pageIndicatorTopPadding
+        let offsetValue = appStore.scopedPageIndicatorOverride(for: entry.id, mode: selectedAppearanceLayoutMode)?.offset
+            ?? appStore.scopedPageIndicatorOffset(for: selectedAppearanceLayoutMode)
+        let topPaddingValue = appStore.scopedPageIndicatorOverride(for: entry.id, mode: selectedAppearanceLayoutMode)?.topPadding
+            ?? appStore.scopedPageIndicatorTopPadding(for: selectedAppearanceLayoutMode)
 
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 12) {
@@ -3425,6 +3502,9 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 .padding(.top, 16)
             appearanceQuaternarySection
                 .padding(.top, 16)
+        }
+        .onAppear {
+            syncLayoutModePreviewScopeToRuntime()
         }
     }
 
@@ -3623,7 +3703,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     Spacer()
                     layoutModeScopeControl()
                 }
-                Slider(value: $appStore.iconScale, in: 0.8...1.1)
+                Slider(value: scopedIconScaleBinding(), in: 0.8...1.1)
                 HStack {
                     Text(appStore.localized(.smaller)).font(.footnote)
                     Spacer()
@@ -3794,7 +3874,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     Spacer()
                     layoutModeScopeControl()
                 }
-                Slider(value: $appStore.iconLabelFontSize, in: 9...16, step: 0.5)
+                Slider(value: scopedIconLabelFontSizeBinding(), in: 9...16, step: 0.5)
                 HStack {
                     Text("9pt").font(.footnote)
                     Spacer()
@@ -3819,7 +3899,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     Spacer()
                     layoutModeScopeControl()
                 }
-                Slider(value: $appStore.folderDropZoneScale,
+                Slider(value: scopedFolderDropZoneScaleBinding(),
                        in: AppStore.folderDropZoneScaleRange,
                        step: 0.05)
                 HStack {
@@ -3827,7 +3907,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Text(String(format: "%.2fx", appStore.folderDropZoneScale))
+                    Text(String(format: "%.2fx", appStore.scopedFolderDropZoneScale(for: selectedAppearanceLayoutMode)))
                         .font(.footnote.monospacedDigit())
                     Spacer()
                     Text(String(format: "%.1fx", AppStore.folderDropZoneScaleRange.upperBound))
@@ -3844,52 +3924,53 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     Text(appStore.localized(.pageIndicatorOffsetLabel))
                         .font(.headline)
                     Spacer()
-                    if !appStore.pageIndicatorPerDisplayEnabled {
+                    if !selectedScopePerDisplayEnabled {
                         layoutModeScopeControl()
                     }
                 }
-                Slider(value: $appStore.pageIndicatorOffset, in: 0...80)
+                Slider(value: scopedPageIndicatorOffsetBinding(), in: 0...80)
                 HStack {
                     Text("0").font(.footnote)
                     Spacer()
-                    Text(String(format: "%.0f", appStore.pageIndicatorOffset)).font(.footnote)
+                    Text(String(format: "%.0f", appStore.scopedPageIndicatorOffset(for: selectedAppearanceLayoutMode))).font(.footnote)
                     Spacer()
                     Text("80").font(.footnote)
                 }
             }
-            .disabled(appStore.pageIndicatorPerDisplayEnabled)
+            .disabled(selectedScopePerDisplayEnabled)
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text(appStore.localized(.pageIndicatorTopPaddingLabel))
                         .font(.headline)
                     Spacer()
-                    if !appStore.pageIndicatorPerDisplayEnabled {
+                    if !selectedScopePerDisplayEnabled {
                         layoutModeScopeControl()
                     }
                 }
-                Slider(value: $appStore.pageIndicatorTopPadding,
+                Slider(value: scopedPageIndicatorTopPaddingBinding(),
                        in: AppStore.pageIndicatorTopPaddingRange)
                 HStack {
                     Text(String(format: "%.0f", AppStore.pageIndicatorTopPaddingRange.lowerBound)).font(.footnote)
                     Spacer()
-                    Text(String(format: "%.0f", appStore.pageIndicatorTopPadding)).font(.footnote)
+                    Text(String(format: "%.0f", appStore.scopedPageIndicatorTopPadding(for: selectedAppearanceLayoutMode))).font(.footnote)
                     Spacer()
                     Text(String(format: "%.0f", AppStore.pageIndicatorTopPaddingRange.upperBound)).font(.footnote)
                 }
             }
-            .disabled(appStore.pageIndicatorPerDisplayEnabled)
+            .disabled(selectedScopePerDisplayEnabled)
 
             VStack(alignment: .leading, spacing: 8) {
+                let perDisplayBinding = scopedPerDisplayIndicatorBinding()
                 Button {
-                    appStore.pageIndicatorPerDisplayEnabled.toggle()
+                    perDisplayBinding.wrappedValue.toggle()
                 } label: {
                     HStack(spacing: 8) {
                         Text("Per-display indicator position")
                             .font(.headline)
                         Spacer()
                         layoutModeScopeControl(width: 116)
-                        Toggle("", isOn: $appStore.pageIndicatorPerDisplayEnabled)
+                        Toggle("", isOn: perDisplayBinding)
                             .labelsHidden()
                             .toggleStyle(.switch)
                             .allowsHitTesting(false)
@@ -3902,11 +3983,11 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
-                if appStore.pageIndicatorPerDisplayEnabled {
+                if selectedScopePerDisplayEnabled {
                     HStack {
                         Button("Apply defaults to current display") {
                             if let screenID = currentIndicatorScreenID {
-                                appStore.applyIndicatorDefaults(to: screenID)
+                                appStore.applyIndicatorDefaults(to: screenID, mode: selectedAppearanceLayoutMode)
                             }
                         }
                         .buttonStyle(.bordered)
@@ -3948,7 +4029,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 try exportDataFolder(to: destParent)
             }
         } catch {
-            // Ignore errors or surface a user-facing message if desired
+            showBackupExportError(error)
         }
     }
 
@@ -3959,8 +4040,34 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         formatter.dateFormat = "yyyy-MM-dd'_'HH.mm.ss"
         let folderName = "LaunchNext_" + formatter.string(from: Date()) + ".launchnext"
         let destDir = destParent.appendingPathComponent(folderName, isDirectory: true)
-        try copyDirectory(from: sourceDir, to: destDir)
-        exportPreferences(to: destDir)
+        let fm = FileManager.default
+
+        func performExport() throws {
+            try copyDirectory(from: sourceDir, to: destDir)
+            exportPreferences(to: destDir)
+            guard backupExportLooksComplete(destDir) else {
+                throw NSError(domain: "LaunchNextBackup",
+                              code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "Backup export is incomplete."])
+            }
+        }
+
+        do {
+            try performExport()
+        } catch {
+            try? fm.removeItem(at: destDir)
+
+            guard removeLegacyBackupSocketIfNeeded() else {
+                throw error
+            }
+
+            do {
+                try performExport()
+            } catch {
+                try? fm.removeItem(at: destDir)
+                throw error
+            }
+        }
     }
 
     private func importDataFolder() {
@@ -4094,6 +4201,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert(AppStore.pageIndicatorTopPaddingKey)
                     keys.insert(AppStore.pageIndicatorPerDisplayEnabledKey)
                     keys.insert(AppStore.pageIndicatorPerDisplayOverridesKey)
+                    keys.insert(AppStore.dualModeAppearanceSettingsKey)
                     keys.insert("folderPopoverWidthFactor")
                     keys.insert("folderPopoverHeightFactor")
                     keys.insert(AppStore.hoverMagnificationKey)
@@ -4194,7 +4302,103 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         if fm.fileExists(atPath: dst.path) {
             try fm.removeItem(at: dst)
         }
-        try fm.copyItem(at: src, to: dst)
+        try fm.createDirectory(at: dst, withIntermediateDirectories: true)
+        copyDirectoryMetadata(from: src, to: dst)
+
+        guard let enumerator = fm.enumerator(at: src,
+                                             includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+                                             options: [],
+                                             errorHandler: { _, _ in true }) else {
+            throw NSError(domain: "LaunchNextBackup",
+                          code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "Failed to enumerate backup source directory."])
+        }
+
+        for case let itemURL as URL in enumerator {
+            if isSocketFile(at: itemURL) {
+                continue
+            }
+
+            let relativePath = itemURL.path.replacingOccurrences(of: src.path + "/", with: "")
+            let targetURL = dst.appendingPathComponent(relativePath, isDirectory: false)
+            let values = try itemURL.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+
+            if values.isDirectory == true {
+                try fm.createDirectory(at: targetURL, withIntermediateDirectories: true)
+                copyDirectoryMetadata(from: itemURL, to: targetURL)
+                continue
+            }
+
+            let parentDirectory = targetURL.deletingLastPathComponent()
+            if !fm.fileExists(atPath: parentDirectory.path) {
+                try fm.createDirectory(at: parentDirectory, withIntermediateDirectories: true)
+            }
+
+            if fm.fileExists(atPath: targetURL.path) {
+                try fm.removeItem(at: targetURL)
+            }
+
+            if values.isSymbolicLink == true {
+                let destination = try fm.destinationOfSymbolicLink(atPath: itemURL.path)
+                try fm.createSymbolicLink(atPath: targetURL.path, withDestinationPath: destination)
+            } else {
+                try fm.copyItem(at: itemURL, to: targetURL)
+            }
+        }
+    }
+
+    private func copyDirectoryMetadata(from src: URL, to dst: URL) {
+        copyExtendedAttributes(from: src, to: dst)
+
+        let fm = FileManager.default
+        guard let attributes = try? fm.attributesOfItem(atPath: src.path) else { return }
+
+        var copied: [FileAttributeKey: Any] = [:]
+        if let permissions = attributes[.posixPermissions] {
+            copied[.posixPermissions] = permissions
+        }
+        if let immutability = attributes[.immutable] {
+            copied[.immutable] = immutability
+        }
+
+        if !copied.isEmpty {
+            try? fm.setAttributes(copied, ofItemAtPath: dst.path)
+        }
+    }
+
+    private func copyExtendedAttributes(from src: URL, to dst: URL) {
+        let options: Int32 = 0
+
+        src.path.withCString { srcPath in
+            dst.path.withCString { dstPath in
+                let size = listxattr(srcPath, nil, 0, options)
+                guard size > 0 else { return }
+
+                var nameBuffer = [CChar](repeating: 0, count: size)
+                let readSize = listxattr(srcPath, &nameBuffer, nameBuffer.count, options)
+                guard readSize > 0 else { return }
+
+                var index = 0
+                while index < Int(readSize) {
+                    let name = nameBuffer.withUnsafeBufferPointer { buffer -> String in
+                        String(cString: buffer.baseAddress!.advanced(by: index))
+                    }
+
+                    let valueSize = getxattr(srcPath, name, nil, 0, 0, options)
+                    if valueSize >= 0 {
+                        var valueBuffer = [UInt8](repeating: 0, count: valueSize)
+                        let actualSize = getxattr(srcPath, name, &valueBuffer, valueBuffer.count, 0, options)
+                        if actualSize >= 0 {
+                            valueBuffer.withUnsafeBytes { rawBuffer in
+                                _ = setxattr(dstPath, name, rawBuffer.baseAddress, actualSize, 0, options)
+                            }
+                        }
+                    }
+
+                    index += name.utf8.count + 1
+                }
+            }
+        }
     }
 
     private func replaceDirectory(with src: URL, at dst: URL) throws {
@@ -4208,6 +4412,52 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             try fm.removeItem(at: dst)
         }
         try fm.copyItem(at: src, to: dst)
+    }
+
+    private func backupExportLooksComplete(_ folder: URL) -> Bool {
+        let fm = FileManager.default
+        let requiredFiles = [
+            folder.appendingPathComponent("Data.store"),
+            folder.appendingPathComponent("LaunchNext.plist")
+        ]
+        return requiredFiles.allSatisfy { fm.fileExists(atPath: $0.path) }
+    }
+
+    private func removeLegacyBackupSocketIfNeeded() -> Bool {
+        guard let legacySocketURL = try? supportDirectoryURL().appendingPathComponent(LaunchNextCLIIPCConfig.socketFileName, isDirectory: false) as URL else {
+            return false
+        }
+        guard isSocketFile(at: legacySocketURL) else { return false }
+        do {
+            try FileManager.default.removeItem(at: legacySocketURL)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func isSocketFile(at url: URL) -> Bool {
+        var fileStat = stat()
+        let result = url.path.withCString { path in
+            Darwin.lstat(path, &fileStat)
+        }
+        guard result == 0 else { return false }
+        return (fileStat.st_mode & S_IFMT) == S_IFSOCK
+    }
+
+    private func showBackupExportError(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Backup Failed"
+        let message = (error as NSError).localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        alert.informativeText = message.isEmpty ? "LaunchNext could not create a complete backup." : message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: appStore.localized(.okButton))
+
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
     }
 
     private func isValidExportFolder(_ folder: URL) -> Bool {

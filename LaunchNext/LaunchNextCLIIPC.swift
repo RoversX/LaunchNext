@@ -7,13 +7,13 @@ enum LaunchNextCLIIPCConfig {
 
     static func socketPath() -> String? {
         let fm = FileManager.default
-        guard let appSupport = try? fm.url(for: .applicationSupportDirectory,
-                                           in: .userDomainMask,
-                                           appropriateFor: nil,
-                                           create: true) else {
+        guard let caches = try? fm.url(for: .cachesDirectory,
+                                       in: .userDomainMask,
+                                       appropriateFor: nil,
+                                       create: true) else {
             return nil
         }
-        let directory = appSupport.appendingPathComponent("LaunchNext", isDirectory: true)
+        let directory = caches.appendingPathComponent("LaunchNext", isDirectory: true)
         if !fm.fileExists(atPath: directory.path) {
             try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
         }
