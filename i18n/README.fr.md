@@ -100,7 +100,7 @@ Lit directement depuis la base de données système Launchpad :
 ## Installation
 
 ### Configuration requise
-- macOS 26 (Tahoe) ou version ultérieure
+- macOS 15 (Sequoia) ou version ultérieure
 - Processeur Apple Silicon ou Intel
 - Xcode 26 (pour compiler depuis les sources)
 
@@ -112,12 +112,17 @@ Lit directement depuis la base de données système Launchpad :
    cd LaunchNext/LaunchNext
    ```
 
-2. **Ouvrir dans Xcode**
+2. **Compiler le metteur à jour**
+   ```bash
+   swift build --package-path UpdaterScripts/SwiftUpdater --configuration release --arch arm64 --arch x86_64 --product SwiftUpdater
+   ```
+
+3. **Ouvrir dans Xcode**
    ```bash
    open LaunchNext.xcodeproj
    ```
 
-3. **Compiler et exécuter**
+4. **Compiler et exécuter**
    - Sélectionner votre périphérique cible
    - Appuyer sur `⌘+R` pour compiler et exécuter
    - Ou `⌘+B` pour compiler seulement
@@ -163,7 +168,7 @@ xcodebuild -project LaunchNext.xcodeproj -scheme LaunchNext -configuration Relea
 ### Problèmes courants
 
 **Q: L'application ne démarre pas ?**
-R: Assurez-vous d'avoir macOS 26+ et vérifiez les permissions système.
+R: Assurez-vous d'avoir macOS 15+ et vérifiez les permissions système.
 
 **Q: Le bouton d'import est manquant ?**
 R: Vérifiez que SettingsView.swift inclut la fonctionnalité d'import.

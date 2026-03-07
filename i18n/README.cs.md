@@ -57,7 +57,7 @@ Data aplikace jsou bezpečně uložena v:
 ## Instalace
 
 ### Požadavky
-- macOS 26 (Tahoe) nebo novější
+- macOS 15 (Sequoia) nebo novější
 - Procesor Apple Silicon nebo Intel
 - Xcode 26 (pro sestavení ze zdrojového kódu)
 
@@ -69,12 +69,17 @@ Data aplikace jsou bezpečně uložena v:
    cd LaunchNext
    ```
 
-2. **Otevřít v Xcode**
+2. **Sestavit aktualizátor**
+   ```bash
+   swift build --package-path UpdaterScripts/SwiftUpdater --configuration release --arch arm64 --arch x86_64 --product SwiftUpdater
+   ```
+
+3. **Otevřít v Xcode**
    ```bash
    open LaunchNext.xcodeproj
    ```
 
-3. **Sestavit a spustit**
+4. **Sestavit a spustit**
    - Vyberte vaše cílové zařízení
    - Stiskněte `⌘+R` pro sestavení a spuštění
    - Nebo `⌘+B` pouze pro sestavení
@@ -132,7 +137,7 @@ xcodebuild -project LaunchNext.xcodeproj -scheme LaunchNext -configuration Relea
 ### Běžné problémy
 
 **Q: Aplikace se nespustí?**
-A: Ujistěte se, že máte macOS 26.0+ a zkontrolujte systémová oprávnění.
+A: Ujistěte se, že máte macOS 15.0+ a zkontrolujte systémová oprávnění.
 
 ## Přispívání
 

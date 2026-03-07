@@ -100,7 +100,7 @@ sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
 ## 安装
 
 ### 系统要求
-- macOS 26 (Tahoe) 或更高版本
+- macOS 15 (Sequoia) 或更高版本
 - Apple Silicon 或 Intel 处理器
 - Xcode 26（从源码构建）
 
@@ -112,12 +112,17 @@ sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
    cd LaunchNext/LaunchNext
    ```
 
-2. **在 Xcode 中打开**
+2. **构建更新器**
+   ```bash
+   swift build --package-path UpdaterScripts/SwiftUpdater --configuration release --arch arm64 --arch x86_64 --product SwiftUpdater
+   ```
+
+3. **在 Xcode 中打开**
    ```bash
    open LaunchNext.xcodeproj
    ```
 
-3. **构建和运行**
+4. **构建和运行**
    - 选择目标设备
    - 按 `⌘+R` 构建并运行
    - 或按 `⌘+B` 仅构建
@@ -163,7 +168,7 @@ xcodebuild -project LaunchNext.xcodeproj -scheme LaunchNext -configuration Relea
 ### 常见问题
 
 **问：应用无法启动？**
-答：确保 macOS 26.0+ 并检查系统权限。
+答：确保 macOS 15.0+ 并检查系统权限。
 
 **问：导入按钮缺失？**
 答：验证 SettingsView.swift 包含导入功能。

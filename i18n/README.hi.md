@@ -102,7 +102,7 @@ sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
 ## स्थापना
 
 ### आवश्यकताएं
-- macOS 26 (Tahoe) या बाद का संस्करण
+- macOS 15 (Sequoia) या बाद का संस्करण
 - Apple Silicon या Intel प्रोसेसर
 - Xcode 26 (स्रोत से बिल्ड करने के लिए)
 
@@ -114,12 +114,17 @@ sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
    cd LaunchNext/LaunchNext
    ```
 
-2. **Xcode में खोलें**
+2. **अपडेटर बिल्ड करें**
+   ```bash
+   swift build --package-path UpdaterScripts/SwiftUpdater --configuration release --arch arm64 --arch x86_64 --product SwiftUpdater
+   ```
+
+3. **Xcode में खोलें**
    ```bash
    open LaunchNext.xcodeproj
    ```
 
-3. **बिल्ड और रन करें**
+4. **बिल्ड और रन करें**
    - अपना लक्ष्य डिवाइस चुनें
    - बिल्ड और रन करने के लिए `⌘+R` दबाएं
    - या केवल बिल्ड करने के लिए `⌘+B`
@@ -227,7 +232,7 @@ LaunchNext/
 ### सामान्य समस्याएं
 
 **प्र: ऐप शुरू नहीं हो रहा?**
-उ: macOS 26.0+ सुनिश्चित करें और सिस्टम अनुमतियों की जांच करें।
+उ: macOS 15.0+ सुनिश्चित करें और सिस्टम अनुमतियों की जांच करें।
 
 **प्र: आयात बटन गायब है?**
 उ: सत्यापित करें कि SettingsView.swift में आयात कार्यक्षमता शामिल है।
