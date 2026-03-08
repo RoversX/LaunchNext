@@ -47,6 +47,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     private var pendingHide = false
     private var isHeadlessCLIRuntime = false
     private var isHeadlessTUIRuntime = false
+    private var isPerformingExternalSystemDrag = false
     private var cliEndpointSocketPath: String?
     private var cliEndpointMonitorTimer: DispatchSourceTimer?
     
@@ -1274,6 +1275,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
         startPendingWindowTransition()
     }
 
+    func beginExternalSystemDragSession() {
+        isPerformingExternalSystemDrag = true
+    }
+
+    func endExternalSystemDragSession() {
+        guard isPerformingExternalSystemDrag else { return }
+        isPerformingExternalSystemDrag = false
+        guard windowIsVisible, !appStore.isSetting, let window else { return }
+        guard !window.isKeyWindow && !window.isMainWindow else { return }
+        hideWindow()
+    }
+
     func toggleWindow() {
         if windowIsVisible {
             hideWindow()
@@ -1483,6 +1496,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     func windowDidResignKey(_ notification: Notification) { autoHideIfNeeded() }
     func windowDidResignMain(_ notification: Notification) { autoHideIfNeeded() }
     private func autoHideIfNeeded() {
+        guard !isPerformingExternalSystemDrag else { return }
         guard !appStore.isSetting else { return }
         hideWindow()
     }

@@ -49,6 +49,9 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         view.activePressScale = CGFloat(appStore.activePressScale)
         view.animationsEnabled = appStore.enableAnimations
         view.animationDuration = appStore.animationDuration
+        view.dockDragEnabled = appStore.dockDragEnabled
+        view.dockDragSide = appStore.dockDragSide
+        view.externalAppDragTriggerDistance = CGFloat(appStore.dockDragTriggerDistance)
         view.hideAppMenuTitle = appStore.localized(.hiddenAppsAddButton)
         view.dissolveFolderMenuTitle = appStore.localized(.contextMenuDissolveFolder)
         view.uninstallWithToolMenuTitle = appStore.localized(.contextMenuUninstallWithConfiguredTool)
@@ -302,6 +305,9 @@ struct CAGridViewRepresentable: NSViewRepresentable {
             guard let selectedIndex else { return nil }
             return items.indices.contains(selectedIndex) ? selectedIndex : nil
         }()
+        nsView.dockDragEnabled = appStore.dockDragEnabled
+        nsView.dockDragSide = appStore.dockDragSide
+        nsView.externalAppDragTriggerDistance = CGFloat(appStore.dockDragTriggerDistance)
         nsView.updateSelection(safeSelectedIndex, animated: true)
         nsView.updateExternalDragState(sourceIndex: externalDragSourceIndex,
                                        hoverIndex: externalDragHoverIndex)

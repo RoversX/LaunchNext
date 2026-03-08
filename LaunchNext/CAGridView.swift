@@ -12,7 +12,7 @@ extension Array {
 
 // MARK: - Core Animation Grid View
 /// 使用 Core Animation 实现的高性能网格视图，支持 120Hz ProMotion
-final class CAGridView: NSView, CALayerDelegate {
+final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
 
     // MARK: - Properties
 
@@ -174,10 +174,15 @@ final class CAGridView: NSView, CALayerDelegate {
     // let wheelSnapDelay: TimeInterval = 0.15  // 停止滚动后多久触发 snap
     let debugScrollMismatch = false
     var externalDragActive = false
+    var externalAppDragSessionActive = false
     var hoveredIndex: Int?
     var selectedIndex: Int?
     var hoverTrackingArea: NSTrackingArea?
     var isScrollEnabled: Bool = true
+    var dockDragEnabled: Bool = true
+    let externalAppDragOutset: CGFloat = 18
+    var dockDragSide: AppStore.DockDragSide = .bottom
+    var externalAppDragTriggerDistance: CGFloat = CGFloat(AppStore.defaultDockDragTriggerDistance)
 
     func logIfMismatch(_ tag: String, appPage: Int? = nil) {
         guard debugScrollMismatch else { return }

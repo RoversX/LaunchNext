@@ -179,6 +179,24 @@ final class AppStore: ObservableObject {
         }
     }
 
+    enum DockDragSide: String, CaseIterable, Codable, Identifiable {
+        case disabled
+        case bottom
+        case left
+        case right
+
+        var id: String { rawValue }
+
+        var localizationKey: LocalizationKey {
+            switch self {
+            case .disabled: return .dockDragDisabled
+            case .bottom: return .dockDragSideBottom
+            case .left: return .dockDragSideLeft
+            case .right: return .dockDragSideRight
+            }
+        }
+    }
+
     enum DevelopmentBackgroundOverride: String, CaseIterable, Identifiable {
         case none
         case solidWhite
@@ -263,6 +281,9 @@ final class AppStore: ObservableObject {
     static let useCAGridRendererKey = "useCAGridRenderer"
     static let windowOpenAnimationKey = "windowOpenAnimationEnabled"
     static let developmentEnableCLICodeKey = "developmentEnableCLICode"
+    static let dockDragEnabledKey = "dockDragEnabled"
+    static let dockDragSideKey = "dockDragSide"
+    static let dockDragTriggerDistanceKey = "dockDragTriggerDistance"
     private static let cliShimMarker = "# LaunchNext CLI shim"
     private static let cliPathSnippetHeader = "# >>> LaunchNext CLI >>>"
     private static let cliPathSnippetFooter = "# <<< LaunchNext CLI <<<"
@@ -287,6 +308,8 @@ final class AppStore: ObservableObject {
     static let pageIndicatorTopPaddingKey = "pageIndicatorTopPadding"
     static let onboardingVersionKey = "onboardingVersionShown"
     static let currentOnboardingVersion = 1
+    static let dockDragTriggerDistanceRange: ClosedRange<Double> = 8...72
+    static let defaultDockDragTriggerDistance: Double = 50
     // private static let aiFeatureEnabledKey = "aiFeatureEnabled"
     // private static let aiOverlayHotKeyKey = "aiOverlayHotKeyConfiguration"
 
@@ -710,6 +733,10 @@ final class AppStore: ObservableObject {
 
     private static func clampPageIndicatorTopPadding(_ value: Double) -> Double {
         min(max(value, pageIndicatorTopPaddingRange.lowerBound), pageIndicatorTopPaddingRange.upperBound)
+    }
+
+    private static func clampDockDragTriggerDistance(_ value: Double) -> Double {
+        min(max(value, dockDragTriggerDistanceRange.lowerBound), dockDragTriggerDistanceRange.upperBound)
     }
 
     private var appearanceRefreshWorkItem: DispatchWorkItem?
@@ -1449,6 +1476,57 @@ final class AppStore: ObservableObject {
         }
     }
 
+    @Published var dockDragEnabled: Bool = {
+        let defaults = UserDefaults.standard
+        if let stored = defaults.object(forKey: AppStore.dockDragEnabledKey) as? Bool {
+            return stored
+        }
+        let legacySideRaw = defaults.string(forKey: AppStore.dockDragSideKey)
+        let enabled = legacySideRaw != DockDragSide.disabled.rawValue
+        defaults.set(enabled, forKey: AppStore.dockDragEnabledKey)
+        return enabled
+    }() {
+        didSet {
+            guard dockDragEnabled != oldValue else { return }
+            UserDefaults.standard.set(dockDragEnabled, forKey: Self.dockDragEnabledKey)
+        }
+    }
+
+    @Published var dockDragSide: DockDragSide = {
+        let defaults = UserDefaults.standard
+        if let raw = defaults.string(forKey: AppStore.dockDragSideKey),
+           let side = DockDragSide(rawValue: raw),
+           side != .disabled {
+            return side
+        }
+        return .bottom
+    }() {
+        didSet {
+            guard dockDragSide != oldValue else { return }
+            UserDefaults.standard.set(dockDragSide.rawValue, forKey: Self.dockDragSideKey)
+        }
+    }
+
+    @Published var dockDragTriggerDistance: Double = {
+        let defaults = UserDefaults.standard
+        let stored = defaults.object(forKey: AppStore.dockDragTriggerDistanceKey) as? Double
+        let initial = stored ?? AppStore.defaultDockDragTriggerDistance
+        let clamped = AppStore.clampDockDragTriggerDistance(initial)
+        if stored == nil || stored != clamped {
+            defaults.set(clamped, forKey: AppStore.dockDragTriggerDistanceKey)
+        }
+        return clamped
+    }() {
+        didSet {
+            let clamped = Self.clampDockDragTriggerDistance(dockDragTriggerDistance)
+            if dockDragTriggerDistance != clamped {
+                dockDragTriggerDistance = clamped
+                return
+            }
+            UserDefaults.standard.set(dockDragTriggerDistance, forKey: Self.dockDragTriggerDistanceKey)
+        }
+    }
+
     // @Published var isAIEnabled: Bool = {
     //     if UserDefaults.standard.object(forKey: AppStore.aiFeatureEnabledKey) == nil { return false }
     //     return UserDefaults.standard.bool(forKey: AppStore.aiFeatureEnabledKey)
@@ -1984,6 +2062,16 @@ final class AppStore: ObservableObject {
         if UserDefaults.standard.object(forKey: AppStore.reverseWheelPagingKey) == nil {
             UserDefaults.standard.set(false, forKey: AppStore.reverseWheelPagingKey)
         }
+        if defaults.object(forKey: Self.dockDragEnabledKey) == nil {
+            let legacySideRaw = defaults.string(forKey: Self.dockDragSideKey)
+            defaults.set(legacySideRaw != DockDragSide.disabled.rawValue, forKey: Self.dockDragEnabledKey)
+        }
+        if defaults.object(forKey: Self.dockDragSideKey) == nil {
+            defaults.set(DockDragSide.bottom.rawValue, forKey: Self.dockDragSideKey)
+        }
+        let storedDockDragDistance = defaults.object(forKey: Self.dockDragTriggerDistanceKey) as? Double ?? Self.defaultDockDragTriggerDistance
+        let clampedDockDragDistance = Self.clampDockDragTriggerDistance(storedDockDragDistance)
+        defaults.set(clampedDockDragDistance, forKey: Self.dockDragTriggerDistanceKey)
         if defaults.object(forKey: Self.gameControllerMenuToggleKey) == nil {
             defaults.set(true, forKey: Self.gameControllerMenuToggleKey)
         }
@@ -2035,6 +2123,10 @@ final class AppStore: ObservableObject {
         let storedDuration = UserDefaults.standard.double(forKey: "animationDuration")
         self.animationDuration = storedDuration == 0 ? 0.3 : storedDuration
         self.enableWindowOpenAnimation = defaults.object(forKey: Self.windowOpenAnimationKey) as? Bool ?? true
+        self.dockDragEnabled = defaults.object(forKey: Self.dockDragEnabledKey) as? Bool ?? true
+        let storedDockDragSide = DockDragSide(rawValue: defaults.string(forKey: Self.dockDragSideKey) ?? "")
+        self.dockDragSide = storedDockDragSide == .disabled ? .bottom : (storedDockDragSide ?? .bottom)
+        self.dockDragTriggerDistance = clampedDockDragDistance
         self.enableAnimations = UserDefaults.standard.object(forKey: "enableAnimations") as? Bool ?? true
         self.customIconFileURL = AppStore.customIconFileURL
 

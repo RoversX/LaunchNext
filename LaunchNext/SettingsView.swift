@@ -83,6 +83,7 @@ struct SettingsView: View {
     @State private var copiedCLICommand: String? = nil
     @State private var cliCommandActionMessage: String? = nil
     @State private var layoutModePreviewScope: LayoutModePreviewScope = .fullscreen
+    private let dockDragSelectableSides: [AppStore.DockDragSide] = [.bottom, .left, .right]
 
     // Sidebar sizing presets
     private var sidebarIconFrame: CGFloat {
@@ -325,6 +326,32 @@ private func scopedPerDisplayIndicatorBinding() -> Binding<Bool> {
     Binding(
         get: { appStore.scopedPageIndicatorPerDisplayEnabled(for: selectedAppearanceLayoutMode) },
         set: { appStore.setScopedPageIndicatorPerDisplayEnabled($0, for: selectedAppearanceLayoutMode) }
+    )
+}
+
+private var dockDragSideBinding: Binding<AppStore.DockDragSide> {
+    Binding(
+        get: { appStore.dockDragSide },
+        set: { newValue in
+            guard appStore.dockDragSide != newValue else { return }
+            DispatchQueue.main.async {
+                appStore.dockDragSide = newValue
+            }
+        }
+    )
+}
+
+private var dockDragTriggerDistanceBinding: Binding<Double> {
+    Binding(
+        get: { appStore.dockDragTriggerDistance },
+        set: { newValue in
+            let clamped = min(max(newValue, AppStore.dockDragTriggerDistanceRange.lowerBound),
+                              AppStore.dockDragTriggerDistanceRange.upperBound)
+            guard appStore.dockDragTriggerDistance != clamped else { return }
+            DispatchQueue.main.async {
+                appStore.dockDragTriggerDistance = clamped
+            }
+        }
     )
 }
 
@@ -3501,6 +3528,188 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(appStore.localized(.dockDragSectionTitle), systemImage: "dock.rectangle")
+                            .font(.headline)
+                        Text(appStore.localized(.dockDragSectionDescription))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 12)
+                    dockDragPreview
+                }
+
+                HStack {
+                    Text(appStore.localized(.dockDragEnabledTitle))
+                    Spacer()
+                    Toggle("", isOn: dockDragEnabledBinding)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text(appStore.localized(.dockDragSideTitle))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(appStore.localized(appStore.dockDragSide.localizationKey))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(Color.accentColor.opacity(colorScheme == .dark ? 0.2 : 0.12), in: Capsule())
+                    }
+
+                    HStack(spacing: 8) {
+                        ForEach(dockDragSelectableSides) { side in
+                            dockDragSideButton(for: side)
+                        }
+                    }
+                    .disabled(!appStore.dockDragEnabled)
+                    .opacity(appStore.dockDragEnabled ? 1 : 0.45)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(appStore.localized(.dockDragTriggerDistanceTitle))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text("\(Int(appStore.dockDragTriggerDistance)) px")
+                                .font(.footnote.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Slider(value: dockDragTriggerDistanceBinding,
+                               in: AppStore.dockDragTriggerDistanceRange,
+                               step: 1)
+                        .disabled(!appStore.dockDragEnabled)
+                        .opacity(appStore.dockDragEnabled ? 1 : 0.45)
+
+                        HStack {
+                            Text("\(Int(AppStore.dockDragTriggerDistanceRange.lowerBound))")
+                            Spacer()
+                            Text("\(Int(AppStore.dockDragTriggerDistanceRange.upperBound))")
+                        }
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                        .opacity(appStore.dockDragEnabled ? 1 : 0.45)
+                    }
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
+
+    private var dockDragPreview: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor).opacity(colorScheme == .dark ? 0.28 : 0.82))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                )
+
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                )
+                .padding(16)
+                .overlay(dockDragPreviewHighlight.padding(16))
+        }
+        .frame(width: 118, height: 82)
+    }
+
+    @ViewBuilder
+    private var dockDragPreviewHighlight: some View {
+        if !appStore.dockDragEnabled {
+            Image(systemName: "slash.circle")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(.secondary)
+        } else {
+            switch appStore.dockDragSide {
+            case .disabled:
+                EmptyView()
+            case .bottom:
+                VStack {
+                    Spacer()
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.95))
+                        .frame(width: 54, height: 6)
+                        .padding(.bottom, 4)
+                }
+            case .left:
+                HStack {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.95))
+                        .frame(width: 6, height: 34)
+                        .padding(.leading, 4)
+                    Spacer()
+                }
+            case .right:
+                HStack {
+                    Spacer()
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.95))
+                        .frame(width: 6, height: 34)
+                        .padding(.trailing, 4)
+                }
+            }
+        }
+    }
+
+    private var dockDragEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { appStore.dockDragEnabled },
+            set: { newValue in
+                guard appStore.dockDragEnabled != newValue else { return }
+                DispatchQueue.main.async {
+                    appStore.dockDragEnabled = newValue
+                }
+            }
+        )
+    }
+
+    private func dockDragSideButton(for side: AppStore.DockDragSide) -> some View {
+        let isSelected = appStore.dockDragSide == side
+
+        return Button {
+            dockDragSideBinding.wrappedValue = side
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: dockDragSideSymbol(for: side))
+                    .font(.caption.weight(.semibold))
+                Text(appStore.localized(side.localizationKey))
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(colorScheme == .dark ? 0.18 : 0.12)
+                                     : Color(nsColor: .windowBackgroundColor).opacity(colorScheme == .dark ? 0.25 : 0.75))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor.opacity(0.65) : Color.primary.opacity(0.08), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func dockDragSideSymbol(for side: AppStore.DockDragSide) -> String {
+        switch side {
+        case .disabled: return "nosign"
+        case .bottom: return "arrow.down.to.line"
+        case .left: return "arrow.left.to.line"
+        case .right: return "arrow.right.to.line"
         }
     }
 
@@ -4182,6 +4391,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert(AppStore.showQuickRefreshButtonKey)
                     keys.insert(AppStore.lockLayoutKey)
                     keys.insert(AppStore.uninstallToolAppPathKey)
+                    keys.insert(AppStore.dockDragSideKey)
+                    keys.insert(AppStore.dockDragTriggerDistanceKey)
                 }
                 if appearanceCheckbox.state == .on {
                     keys.insert(AppStore.sidebarIconPresetKey)
@@ -4214,6 +4425,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert(AppStore.pageIndicatorPerDisplayEnabledKey)
                     keys.insert(AppStore.pageIndicatorPerDisplayOverridesKey)
                     keys.insert(AppStore.dualModeAppearanceSettingsKey)
+                    keys.insert(AppStore.dockDragEnabledKey)
                     keys.insert("folderPopoverWidthFactor")
                     keys.insert("folderPopoverHeightFactor")
                     keys.insert(AppStore.hoverMagnificationKey)

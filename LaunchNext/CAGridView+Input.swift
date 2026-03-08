@@ -237,6 +237,7 @@ extension CAGridView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        guard !externalAppDragSessionActive else { return }
         // 确保成为第一响应者，这样后续的滚轮事件才能被接收
         window?.makeFirstResponder(self)
 
@@ -271,6 +272,7 @@ extension CAGridView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if externalAppDragSessionActive { return }
         let location = convert(event.locationInWindow, from: nil)
 
         // 页面拖拽模式
@@ -316,11 +318,21 @@ extension CAGridView {
 
         // 更新拖拽位置
         if isDraggingItem {
+            let dragDelta = CGPoint(x: location.x - dragCurrentPoint.x,
+                                    y: location.y - dragCurrentPoint.y)
+            if let app = externalDockDragCandidate(),
+               shouldStartExternalDockDrag(localPoint: location,
+                                           windowPoint: event.locationInWindow,
+                                           dragDelta: dragDelta) {
+                startExternalDockDrag(for: app, event: event, at: location)
+                return
+            }
             updateDragging(at: location)
         }
     }
 
     override func mouseUp(with event: NSEvent) {
+        if externalAppDragSessionActive { return }
         let location = convert(event.locationInWindow, from: nil)
 
         // 取消长按计时器
@@ -513,6 +525,90 @@ extension CAGridView {
 
         containerLayer.addSublayer(container)
         draggingLayer = container
+    }
+
+    func externalDockDragCandidate() -> AppInfo? {
+        guard !isBatchDragging else { return nil }
+        guard case .app(let app) = draggingItem else { return nil }
+        let path = app.url.path
+        guard !path.isEmpty else { return nil }
+        guard app.url.pathExtension.lowercased() == "app" else { return nil }
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        return app
+    }
+
+    func shouldStartExternalDockDrag(localPoint point: CGPoint, windowPoint: CGPoint, dragDelta: CGPoint) -> Bool {
+        guard let contentView = window?.contentView else { return false }
+        guard dockDragEnabled else { return false }
+
+        switch dockDragSide {
+        case .disabled:
+            return false
+        case .bottom:
+            let movingTowardDock = dragDelta.y < -1.5
+            let nearBottomEdge = windowPoint.y <= contentView.bounds.minY + externalAppDragTriggerDistance
+            let isInsideHorizontalRange =
+                windowPoint.x >= contentView.bounds.minX - externalAppDragOutset &&
+                windowPoint.x <= contentView.bounds.maxX + externalAppDragOutset
+            return movingTowardDock && nearBottomEdge && isInsideHorizontalRange
+
+        case .left:
+            let movingTowardDock = dragDelta.x < -1.5
+            let nearLeftEdge = windowPoint.x <= contentView.bounds.minX + externalAppDragTriggerDistance
+            let isInsideVerticalRange =
+                windowPoint.y >= contentView.bounds.minY - externalAppDragOutset &&
+                windowPoint.y <= contentView.bounds.maxY + externalAppDragOutset
+            return movingTowardDock && nearLeftEdge && isInsideVerticalRange
+
+        case .right:
+            let movingTowardDock = dragDelta.x > 1.5
+            let nearRightEdge = windowPoint.x >= contentView.bounds.maxX - externalAppDragTriggerDistance
+            let isInsideVerticalRange =
+                windowPoint.y >= contentView.bounds.minY - externalAppDragOutset &&
+                windowPoint.y <= contentView.bounds.maxY + externalAppDragOutset
+            return movingTowardDock && nearRightEdge && isInsideVerticalRange
+        }
+    }
+
+    func startExternalDockDrag(for app: AppInfo, event: NSEvent, at point: CGPoint) {
+        guard !externalAppDragSessionActive else { return }
+
+        clearDropTargetHighlight()
+        cancelEdgeDragTimer()
+
+        let writer = app.url as NSURL
+        let draggingItem = NSDraggingItem(pasteboardWriter: writer)
+
+        let dragImage = renderedExternalDockDragPreview(for: app)
+        let frame = CGRect(x: point.x - iconSize / 2,
+                           y: point.y - iconSize / 2,
+                           width: iconSize,
+                           height: iconSize)
+        draggingItem.setDraggingFrame(frame, contents: dragImage)
+
+        cancelDragging()
+
+        externalAppDragSessionActive = true
+        AppDelegate.shared?.beginExternalSystemDragSession()
+
+        let session = beginDraggingSession(with: [draggingItem], event: event, source: self)
+        session.draggingFormation = .none
+        session.animatesToStartingPositionsOnCancelOrFail = true
+    }
+
+    func renderedExternalDockDragPreview(for app: AppInfo) -> NSImage {
+        let icon = IconStore.shared.icon(forPath: app.url.path)
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let renderSize = NSSize(width: iconSize * scale, height: iconSize * scale)
+        let renderedImage = NSImage(size: renderSize)
+        renderedImage.lockFocus()
+        icon.draw(in: NSRect(origin: .zero, size: renderSize),
+                  from: .zero,
+                  operation: .copy,
+                  fraction: 1.0)
+        renderedImage.unlockFocus()
+        renderedImage.size = NSSize(width: iconSize, height: iconSize)
+        return renderedImage
     }
 
     func addBatchDragCountBadge(to container: CALayer, count: Int) {
@@ -1322,6 +1418,19 @@ extension CAGridView {
         restoreBatchHiddenCompanionLayers()
         hardSnapToCurrentPage()
         logIfMismatch("cancelDragging")
+    }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .outsideApplication ? .copy : []
+    }
+
+    func ignoreModifierKeys(for session: NSDraggingSession) -> Bool {
+        true
+    }
+
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        externalAppDragSessionActive = false
+        AppDelegate.shared?.endExternalSystemDragSession()
     }
 
     func itemAt(_ point: CGPoint) -> (LaunchpadItem, Int)? {
