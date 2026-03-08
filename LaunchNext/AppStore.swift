@@ -197,6 +197,24 @@ final class AppStore: ObservableObject {
         }
     }
 
+    enum HotCornerPosition: String, CaseIterable, Codable, Identifiable {
+        case topLeft
+        case topRight
+        case bottomLeft
+        case bottomRight
+
+        var id: String { rawValue }
+
+        var localizationKey: LocalizationKey {
+            switch self {
+            case .topLeft: return .hotCornerPositionTopLeft
+            case .topRight: return .hotCornerPositionTopRight
+            case .bottomLeft: return .hotCornerPositionBottomLeft
+            case .bottomRight: return .hotCornerPositionBottomRight
+            }
+        }
+    }
+
     enum DevelopmentBackgroundOverride: String, CaseIterable, Identifiable {
         case none
         case solidWhite
@@ -284,6 +302,11 @@ final class AppStore: ObservableObject {
     static let dockDragEnabledKey = "dockDragEnabled"
     static let dockDragSideKey = "dockDragSide"
     static let dockDragTriggerDistanceKey = "dockDragTriggerDistance"
+    static let hotCornerEnabledKey = "hotCornerEnabled"
+    static let hotCornerPositionKey = "hotCornerPosition"
+    static let hotCornerTriggerDelayKey = "hotCornerTriggerDelay"
+    static let hotCornerHitboxSizeKey = "hotCornerHitboxSize"
+    static let hotCornerToggleWhenOpenKey = "hotCornerToggleWhenOpen"
     private static let cliShimMarker = "# LaunchNext CLI shim"
     private static let cliPathSnippetHeader = "# >>> LaunchNext CLI >>>"
     private static let cliPathSnippetFooter = "# <<< LaunchNext CLI <<<"
@@ -310,6 +333,10 @@ final class AppStore: ObservableObject {
     static let currentOnboardingVersion = 1
     static let dockDragTriggerDistanceRange: ClosedRange<Double> = 8...72
     static let defaultDockDragTriggerDistance: Double = 50
+    static let hotCornerTriggerDelayRange: ClosedRange<Double> = 0...1.2
+    static let hotCornerHitboxSizeRange: ClosedRange<Double> = 20...120
+    static let defaultHotCornerTriggerDelay: Double = 0.25
+    static let defaultHotCornerHitboxSize: Double = 50
     // private static let aiFeatureEnabledKey = "aiFeatureEnabled"
     // private static let aiOverlayHotKeyKey = "aiOverlayHotKeyConfiguration"
 
@@ -737,6 +764,14 @@ final class AppStore: ObservableObject {
 
     private static func clampDockDragTriggerDistance(_ value: Double) -> Double {
         min(max(value, dockDragTriggerDistanceRange.lowerBound), dockDragTriggerDistanceRange.upperBound)
+    }
+
+    private static func clampHotCornerTriggerDelay(_ value: Double) -> Double {
+        min(max(value, hotCornerTriggerDelayRange.lowerBound), hotCornerTriggerDelayRange.upperBound)
+    }
+
+    private static func clampHotCornerHitboxSize(_ value: Double) -> Double {
+        min(max(value, hotCornerHitboxSizeRange.lowerBound), hotCornerHitboxSizeRange.upperBound)
     }
 
     private var appearanceRefreshWorkItem: DispatchWorkItem?
@@ -1527,6 +1562,86 @@ final class AppStore: ObservableObject {
         }
     }
 
+    @Published var hotCornerEnabled: Bool = {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppStore.hotCornerEnabledKey) == nil {
+            defaults.set(false, forKey: AppStore.hotCornerEnabledKey)
+        }
+        return defaults.bool(forKey: AppStore.hotCornerEnabledKey)
+    }() {
+        didSet {
+            guard hotCornerEnabled != oldValue else { return }
+            UserDefaults.standard.set(hotCornerEnabled, forKey: Self.hotCornerEnabledKey)
+        }
+    }
+
+    @Published var hotCornerPosition: HotCornerPosition = {
+        let defaults = UserDefaults.standard
+        if let raw = defaults.string(forKey: AppStore.hotCornerPositionKey),
+           let position = HotCornerPosition(rawValue: raw) {
+            return position
+        }
+        return .topLeft
+    }() {
+        didSet {
+            guard hotCornerPosition != oldValue else { return }
+            UserDefaults.standard.set(hotCornerPosition.rawValue, forKey: Self.hotCornerPositionKey)
+        }
+    }
+
+    @Published var hotCornerTriggerDelay: Double = {
+        let defaults = UserDefaults.standard
+        let stored = defaults.object(forKey: AppStore.hotCornerTriggerDelayKey) as? Double
+        let initial = stored ?? AppStore.defaultHotCornerTriggerDelay
+        let clamped = AppStore.clampHotCornerTriggerDelay(initial)
+        if stored == nil || stored != clamped {
+            defaults.set(clamped, forKey: AppStore.hotCornerTriggerDelayKey)
+        }
+        return clamped
+    }() {
+        didSet {
+            let clamped = Self.clampHotCornerTriggerDelay(hotCornerTriggerDelay)
+            if hotCornerTriggerDelay != clamped {
+                hotCornerTriggerDelay = clamped
+                return
+            }
+            UserDefaults.standard.set(hotCornerTriggerDelay, forKey: Self.hotCornerTriggerDelayKey)
+        }
+    }
+
+    @Published var hotCornerHitboxSize: Double = {
+        let defaults = UserDefaults.standard
+        let stored = defaults.object(forKey: AppStore.hotCornerHitboxSizeKey) as? Double
+        let initial = stored ?? AppStore.defaultHotCornerHitboxSize
+        let clamped = AppStore.clampHotCornerHitboxSize(initial)
+        if stored == nil || stored != clamped {
+            defaults.set(clamped, forKey: AppStore.hotCornerHitboxSizeKey)
+        }
+        return clamped
+    }() {
+        didSet {
+            let clamped = Self.clampHotCornerHitboxSize(hotCornerHitboxSize)
+            if hotCornerHitboxSize != clamped {
+                hotCornerHitboxSize = clamped
+                return
+            }
+            UserDefaults.standard.set(hotCornerHitboxSize, forKey: Self.hotCornerHitboxSizeKey)
+        }
+    }
+
+    @Published var hotCornerToggleWhenOpen: Bool = {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppStore.hotCornerToggleWhenOpenKey) == nil {
+            defaults.set(false, forKey: AppStore.hotCornerToggleWhenOpenKey)
+        }
+        return defaults.bool(forKey: AppStore.hotCornerToggleWhenOpenKey)
+    }() {
+        didSet {
+            guard hotCornerToggleWhenOpen != oldValue else { return }
+            UserDefaults.standard.set(hotCornerToggleWhenOpen, forKey: Self.hotCornerToggleWhenOpenKey)
+        }
+    }
+
     // @Published var isAIEnabled: Bool = {
     //     if UserDefaults.standard.object(forKey: AppStore.aiFeatureEnabledKey) == nil { return false }
     //     return UserDefaults.standard.bool(forKey: AppStore.aiFeatureEnabledKey)
@@ -2072,6 +2187,21 @@ final class AppStore: ObservableObject {
         let storedDockDragDistance = defaults.object(forKey: Self.dockDragTriggerDistanceKey) as? Double ?? Self.defaultDockDragTriggerDistance
         let clampedDockDragDistance = Self.clampDockDragTriggerDistance(storedDockDragDistance)
         defaults.set(clampedDockDragDistance, forKey: Self.dockDragTriggerDistanceKey)
+        if defaults.object(forKey: Self.hotCornerEnabledKey) == nil {
+            defaults.set(false, forKey: Self.hotCornerEnabledKey)
+        }
+        if defaults.object(forKey: Self.hotCornerPositionKey) == nil {
+            defaults.set(HotCornerPosition.topLeft.rawValue, forKey: Self.hotCornerPositionKey)
+        }
+        let storedHotCornerDelay = defaults.object(forKey: Self.hotCornerTriggerDelayKey) as? Double ?? Self.defaultHotCornerTriggerDelay
+        let clampedHotCornerDelay = Self.clampHotCornerTriggerDelay(storedHotCornerDelay)
+        defaults.set(clampedHotCornerDelay, forKey: Self.hotCornerTriggerDelayKey)
+        let storedHotCornerHitboxSize = defaults.object(forKey: Self.hotCornerHitboxSizeKey) as? Double ?? Self.defaultHotCornerHitboxSize
+        let clampedHotCornerHitboxSize = Self.clampHotCornerHitboxSize(storedHotCornerHitboxSize)
+        defaults.set(clampedHotCornerHitboxSize, forKey: Self.hotCornerHitboxSizeKey)
+        if defaults.object(forKey: Self.hotCornerToggleWhenOpenKey) == nil {
+            defaults.set(false, forKey: Self.hotCornerToggleWhenOpenKey)
+        }
         if defaults.object(forKey: Self.gameControllerMenuToggleKey) == nil {
             defaults.set(true, forKey: Self.gameControllerMenuToggleKey)
         }
@@ -2127,6 +2257,11 @@ final class AppStore: ObservableObject {
         let storedDockDragSide = DockDragSide(rawValue: defaults.string(forKey: Self.dockDragSideKey) ?? "")
         self.dockDragSide = storedDockDragSide == .disabled ? .bottom : (storedDockDragSide ?? .bottom)
         self.dockDragTriggerDistance = clampedDockDragDistance
+        self.hotCornerEnabled = defaults.object(forKey: Self.hotCornerEnabledKey) as? Bool ?? false
+        self.hotCornerPosition = HotCornerPosition(rawValue: defaults.string(forKey: Self.hotCornerPositionKey) ?? "") ?? .topLeft
+        self.hotCornerTriggerDelay = clampedHotCornerDelay
+        self.hotCornerHitboxSize = clampedHotCornerHitboxSize
+        self.hotCornerToggleWhenOpen = defaults.object(forKey: Self.hotCornerToggleWhenOpenKey) as? Bool ?? false
         self.enableAnimations = UserDefaults.standard.object(forKey: "enableAnimations") as? Bool ?? true
         self.customIconFileURL = AppStore.customIconFileURL
 

@@ -50,6 +50,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     private var isPerformingExternalSystemDrag = false
     private var cliEndpointSocketPath: String?
     private var cliEndpointMonitorTimer: DispatchSourceTimer?
+    private var hotCornerMonitor: HotCornerMonitor?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         if runHeadlessModeIfRequested() { return }
@@ -77,6 +78,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
         bindControllerMenuToggle()
         bindSystemUIVisibility()
         bindCLICodePreference()
+        bindHotCornerPreference()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.applyAppearancePreference(self.appStore.appearancePreference)
@@ -302,6 +304,62 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
                 self?.updateCLIIPCServer(enabled: enabled)
             }
             .store(in: &cancellables)
+    }
+
+    private func bindHotCornerPreference() {
+        Publishers.CombineLatest4(
+            appStore.$hotCornerEnabled.removeDuplicates(),
+            appStore.$hotCornerPosition.removeDuplicates(),
+            appStore.$hotCornerTriggerDelay.removeDuplicates(),
+            appStore.$hotCornerHitboxSize.removeDuplicates()
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] enabled, position, delay, hitboxSize in
+            self?.updateHotCornerMonitor(
+                enabled: enabled,
+                position: position,
+                triggerDelay: delay,
+                hitboxSize: hitboxSize
+            )
+        }
+        .store(in: &cancellables)
+    }
+
+    private func updateHotCornerMonitor(enabled: Bool,
+                                        position: AppStore.HotCornerPosition,
+                                        triggerDelay: Double,
+                                        hitboxSize: Double) {
+        let configuration = HotCornerMonitor.Configuration(
+            isEnabled: enabled,
+            position: position,
+            triggerDelay: triggerDelay,
+            hitboxSize: CGFloat(hitboxSize)
+        )
+
+        if hotCornerMonitor == nil {
+            hotCornerMonitor = HotCornerMonitor(configuration: configuration) { [weak self] in
+                DispatchQueue.main.async {
+                    self?.handleHotCornerTrigger()
+                }
+            }
+        }
+
+        hotCornerMonitor?.update(configuration: configuration)
+    }
+
+    private func handleHotCornerTrigger() {
+        guard !isTerminating else { return }
+        guard !appStore.isSetting else { return }
+        guard !isPerformingExternalSystemDrag else { return }
+        guard !isAnimatingWindow else { return }
+
+        if windowIsVisible {
+            guard appStore.hotCornerToggleWhenOpen else { return }
+            hideWindow()
+            return
+        }
+
+        showWindow()
     }
 
     private func updateCLIIPCServer(enabled: Bool) {
