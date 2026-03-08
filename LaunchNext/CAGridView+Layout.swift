@@ -56,6 +56,8 @@ extension CAGridView {
     // Track if layout needs refresh after bounds become valid
 
     func createIconLayer(for item: LaunchpadItem, localIndex: Int, pageIndex: Int) -> CALayer {
+        _ = localIndex
+        _ = pageIndex
         let containerLayer = CALayer()
         containerLayer.masksToBounds = false
         containerLayer.drawsAsynchronously = true
@@ -126,6 +128,26 @@ extension CAGridView {
         // 设置图标
         setIcon(for: iconLayer, item: item)
 
+        if case .app = item {
+            let checkboxLayer = CALayer()
+            checkboxLayer.name = "batchSelectionCheckbox"
+            checkboxLayer.isHidden = true
+            checkboxLayer.cornerRadius = 8
+            checkboxLayer.borderWidth = 1.25
+            checkboxLayer.zPosition = 20
+            checkboxLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2.0
+
+            let markLayer = CAShapeLayer()
+            markLayer.name = "batchSelectionCheckboxMark"
+            markLayer.fillColor = NSColor.clear.cgColor
+            markLayer.strokeColor = NSColor.white.cgColor
+            markLayer.lineCap = .round
+            markLayer.lineJoin = .round
+            markLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2.0
+            checkboxLayer.addSublayer(markLayer)
+            containerLayer.addSublayer(checkboxLayer)
+        }
+
         return containerLayer
     }
 
@@ -157,8 +179,9 @@ extension CAGridView {
         case .folder(let folder):
             // 异步加载文件夹图标
             let folderIconSize = iconSize
+            let previewScale = folderPreviewScale
             DispatchQueue.global(qos: .userInitiated).async { [weak layer] in
-                let icon = folder.icon(of: folderIconSize)
+                let icon = folder.icon(of: folderIconSize, scale: previewScale)
                 if let cgImage = icon.cgImage(forProposedRect: nil, context: nil, hints: nil) {
                     DispatchQueue.main.async {
                         CATransaction.begin()
@@ -269,6 +292,20 @@ extension CAGridView {
                     let iconY = labelHeight + labelTopSpacing
                     let iconFrame = CGRect(x: iconX, y: iconY, width: actualIconSize, height: actualIconSize)
                     iconLayer.frame = iconFrame
+
+                    if let checkboxLayer = containerLayer.sublayers?.first(where: { $0.name == "batchSelectionCheckbox" }) {
+                        let checkboxSize = max(16, min(22, actualIconSize * 0.28))
+                        let edgeInset = max(2.5, min(5.0, actualIconSize * 0.055))
+                        let checkboxX = iconFrame.maxX - checkboxSize - edgeInset
+                        let checkboxY = iconFrame.maxY - checkboxSize - edgeInset
+                        checkboxLayer.frame = CGRect(x: checkboxX, y: checkboxY, width: checkboxSize, height: checkboxSize)
+                        checkboxLayer.cornerRadius = checkboxSize * 0.5
+                        if let markLayer = checkboxLayer.sublayers?.first(where: { $0.name == "batchSelectionCheckboxMark" }) as? CAShapeLayer {
+                            markLayer.frame = checkboxLayer.bounds
+                            markLayer.lineWidth = max(1.7, checkboxSize * 0.14)
+                            markLayer.path = checkboxMarkPath(in: checkboxLayer.bounds)
+                        }
+                    }
                 }
                 
                 // Update glass background for folders
@@ -294,11 +331,55 @@ extension CAGridView {
         pageContainerLayer.transform = CATransform3DIdentity
         pageContainerLayer.frame = CGRect(x: 0, y: 0, width: totalWidth, height: bounds.height)
         pageContainerLayer.transform = CATransform3DMakeTranslation(scrollOffset, 0, 0)
+        refreshBatchSelectionUI()
 
         CATransaction.commit()
 
         logIfMismatch("updateLayout")
         // print("📐 [CAGrid] Layout: \(columns)x\(rows), iconSize=\(actualIconSize), cell=\(cellWidth)x\(cellHeight)")
+    }
+
+    func refreshBatchSelectionUI() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+
+        for (pageIndex, pageLayers) in iconLayers.enumerated() {
+            let pageStart = pageIndex * itemsPerPage
+            for (localIndex, containerLayer) in pageLayers.enumerated() {
+                let globalIndex = pageStart + localIndex
+                guard items.indices.contains(globalIndex),
+                      case .app(let app) = items[globalIndex],
+                      let checkboxLayer = containerLayer.sublayers?.first(where: { $0.name == "batchSelectionCheckbox" }) else {
+                    continue
+                }
+                let isSelected = batchSelectedAppPathSet.contains(app.url.path)
+                checkboxLayer.isHidden = !isBatchSelectionMode
+                if isSelected {
+                    checkboxLayer.backgroundColor = NSColor.systemBlue.cgColor
+                    checkboxLayer.borderColor = NSColor.systemBlue.withAlphaComponent(0.95).cgColor
+                } else {
+                    checkboxLayer.backgroundColor = NSColor.white.withAlphaComponent(0.88).cgColor
+                    checkboxLayer.borderColor = NSColor.black.withAlphaComponent(0.35).cgColor
+                }
+                if let markLayer = checkboxLayer.sublayers?.first(where: { $0.name == "batchSelectionCheckboxMark" }) as? CAShapeLayer {
+                    markLayer.isHidden = !isSelected
+                    markLayer.strokeColor = NSColor.white.cgColor
+                }
+            }
+        }
+
+        CATransaction.commit()
+    }
+
+    func checkboxMarkPath(in bounds: CGRect) -> CGPath {
+        let path = CGMutablePath()
+        let start = CGPoint(x: bounds.minX + bounds.width * 0.24, y: bounds.minY + bounds.height * 0.50)
+        let mid = CGPoint(x: bounds.minX + bounds.width * 0.44, y: bounds.minY + bounds.height * 0.30)
+        let end = CGPoint(x: bounds.minX + bounds.width * 0.76, y: bounds.minY + bounds.height * 0.66)
+        path.move(to: start)
+        path.addLine(to: mid)
+        path.addLine(to: end)
+        return path
     }
 
     override func viewWillDraw() {

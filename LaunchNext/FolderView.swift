@@ -313,6 +313,7 @@ extension FolderView {
 
         if appStore.isLayoutLocked {
             base
+                .launchNextHideAppContextMenu(app: app, appStore: appStore)
         } else {
             base
                 .opacity(isDraggingThisTile ? 0 : 1)
@@ -430,8 +431,9 @@ extension FolderView {
                                 }
                             }
                         }
-                        }
+                    }
                 )
+                .launchNextHideAppContextMenu(app: app, appStore: appStore)
         }
     }
 }

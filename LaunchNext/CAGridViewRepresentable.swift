@@ -38,14 +38,24 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         view.showLabels = appStore.showLabels
         view.isLayoutLocked = appStore.isLayoutLocked
         view.folderDropZoneScale = CGFloat(appStore.folderDropZoneScale)
+        let preferredScale = nsViewScale(for: view)
+        view.folderPreviewScale = appStore.enableHighResFolderPreviews ? preferredScale : 1
         view.enableIconPreload = false
         view.scrollSensitivity = appStore.scrollSensitivity
+        view.reverseWheelPagingDirection = appStore.reverseWheelPagingDirection
         view.hoverMagnificationEnabled = appStore.enableHoverMagnification
         view.hoverMagnificationScale = CGFloat(appStore.hoverMagnificationScale)
         view.activePressEffectEnabled = appStore.enableActivePressEffect
         view.activePressScale = CGFloat(appStore.activePressScale)
         view.animationsEnabled = appStore.enableAnimations
         view.animationDuration = appStore.animationDuration
+        view.hideAppMenuTitle = appStore.localized(.hiddenAppsAddButton)
+        view.dissolveFolderMenuTitle = appStore.localized(.contextMenuDissolveFolder)
+        view.uninstallWithToolMenuTitle = appStore.localized(.contextMenuUninstallWithConfiguredTool)
+        view.batchSelectAppsMenuTitle = appStore.localized(.contextMenuBatchSelectApps)
+        view.finishBatchSelectionMenuTitle = appStore.localized(.contextMenuFinishBatchSelection)
+        view.canUseConfiguredUninstallTool = appStore.uninstallToolAppURL != nil
+        view.allowsBatchSelectionMode = appStore.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         
         // Set current page BEFORE items to ensure correct initial position
         view.setInitialPage(appStore.currentPage)
@@ -56,8 +66,10 @@ struct CAGridViewRepresentable: NSViewRepresentable {
             switch item {
             case .app(let app):
                 onOpenApp?(app)
-                NSWorkspace.shared.open(app.url)
                 AppDelegate.shared?.hideWindow()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    NSWorkspace.shared.open(app.url)
+                }
             case .folder(let folder):
                 onOpenFolder?(folder)
             case .missingApp:
@@ -89,6 +101,24 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         view.onEmptyAreaClicked = {
             // 点击空白区域关闭窗口
             AppDelegate.shared?.hideWindow()
+        }
+
+        view.onHideApp = { app in
+            DispatchQueue.main.async {
+                _ = appStore.hideApp(app)
+            }
+        }
+        view.onDissolveFolder = { folder in
+            DispatchQueue.main.async {
+                _ = appStore.dissolveFolder(folder)
+            }
+        }
+        view.onUninstallWithTool = { app in
+            DispatchQueue.main.async {
+                if !appStore.openConfiguredUninstallTool(for: app) {
+                    NSSound.beep()
+                }
+            }
         }
 
         // 拖拽创建文件夹
@@ -143,6 +173,12 @@ struct CAGridViewRepresentable: NSViewRepresentable {
             }
         }
 
+        view.onReorderAppBatch = { appPathsOrdered, toIndex in
+            DispatchQueue.main.async {
+                appStore.moveSelectedAppsAcrossPagesWithCascade(appPathsOrdered: appPathsOrdered, to: toIndex)
+            }
+        }
+
         // 请求创建新页面（拖拽到右边缘时）
         view.onRequestNewPage = {
             DispatchQueue.main.async {
@@ -178,7 +214,8 @@ struct CAGridViewRepresentable: NSViewRepresentable {
                             nsView.labelFontWeight != nsFontWeight(for: appStore.iconLabelFontWeight) ||
                             nsView.showLabels != appStore.showLabels ||
                             nsView.isLayoutLocked != appStore.isLayoutLocked ||
-                            nsView.folderDropZoneScale != CGFloat(appStore.folderDropZoneScale)
+                            nsView.folderDropZoneScale != CGFloat(appStore.folderDropZoneScale) ||
+                            nsView.folderPreviewScale != (appStore.enableHighResFolderPreviews ? nsViewScale(for: nsView) : 1)
 
         if configChanged {
             nsView.columns = appStore.gridColumnsPerPage
@@ -193,10 +230,13 @@ struct CAGridViewRepresentable: NSViewRepresentable {
             nsView.showLabels = appStore.showLabels
             nsView.isLayoutLocked = appStore.isLayoutLocked
             nsView.folderDropZoneScale = CGFloat(appStore.folderDropZoneScale)
+            let preferredScale = nsViewScale(for: nsView)
+            nsView.folderPreviewScale = appStore.enableHighResFolderPreviews ? preferredScale : 1
         }
         nsView.scrollSensitivity = appStore.scrollSensitivity
         nsView.enableIconPreload = false
         nsView.scrollSensitivity = appStore.scrollSensitivity
+        nsView.reverseWheelPagingDirection = appStore.reverseWheelPagingDirection
         nsView.hoverMagnificationEnabled = appStore.enableHoverMagnification
         nsView.hoverMagnificationScale = CGFloat(appStore.hoverMagnificationScale)
         nsView.activePressEffectEnabled = appStore.enableActivePressEffect
@@ -204,6 +244,13 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         nsView.animationsEnabled = appStore.enableAnimations
         nsView.animationDuration = appStore.animationDuration
         nsView.isScrollEnabled = appStore.openFolder == nil && !appStore.isSetting
+        nsView.hideAppMenuTitle = appStore.localized(.hiddenAppsAddButton)
+        nsView.dissolveFolderMenuTitle = appStore.localized(.contextMenuDissolveFolder)
+        nsView.uninstallWithToolMenuTitle = appStore.localized(.contextMenuUninstallWithConfiguredTool)
+        nsView.batchSelectAppsMenuTitle = appStore.localized(.contextMenuBatchSelectApps)
+        nsView.finishBatchSelectionMenuTitle = appStore.localized(.contextMenuFinishBatchSelection)
+        nsView.canUseConfiguredUninstallTool = appStore.uninstallToolAppURL != nil
+        nsView.allowsBatchSelectionMode = appStore.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
         // 检查刷新触发器是否变化（文件夹创建/修改会触发）
         let triggerChanged = context.coordinator.lastGridRefreshTrigger != gridRefreshTrigger ||
@@ -273,6 +320,13 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         case .semibold: return .semibold
         case .bold: return .bold
         }
+    }
+
+    private func nsViewScale(for view: NSView) -> CGFloat {
+        if let scale = view.window?.backingScaleFactor {
+            return scale
+        }
+        return NSScreen.main?.backingScaleFactor ?? 1
     }
 
     class Coordinator {

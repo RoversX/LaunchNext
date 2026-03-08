@@ -11,6 +11,66 @@ class NativeLaunchpadImporter {
         self.modelContext = modelContext
     }
 
+    static func nativeLaunchpadDatabasePath() throws -> String {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/getconf")
+        task.arguments = ["DARWIN_USER_DIR"]
+
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = pipe
+
+        try task.run()
+        task.waitUntilExit()
+
+        guard task.terminationStatus == 0 else {
+            throw ImportError.systemError("Failed to get user directory path")
+        }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let userDir = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        return "/private\(userDir)com.apple.dock.launchpad/db/db"
+    }
+
+    static func hasNativeLaunchpadDatabase() -> Bool {
+        guard let path = try? nativeLaunchpadDatabasePath() else { return false }
+        return FileManager.default.fileExists(atPath: path)
+    }
+
+    static func hasImportableNativeLaunchpadDatabase() -> Bool {
+        guard let path = try? nativeLaunchpadDatabasePath(),
+              FileManager.default.fileExists(atPath: path) else { return false }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            return false
+        }
+        defer { sqlite3_close(db) }
+
+        return schemaTableExists(in: db, name: "apps")
+            && schemaTableExists(in: db, name: "groups")
+            && schemaTableExists(in: db, name: "items")
+    }
+
+    private static func schemaTableExists(in db: OpaquePointer?, name: String) -> Bool {
+        let query = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return false }
+        defer { sqlite3_finalize(stmt) }
+
+        name.withCString { cstr in
+            let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+            _ = sqlite3_bind_text(stmt, 1, cstr, -1, SQLITE_TRANSIENT)
+        }
+
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            return sqlite3_column_int(stmt, 0) > 0
+        }
+        return false
+    }
+
     /// 从原生 Launchpad 数据库导入布局
     func importFromNativeLaunchpad() throws -> ImportResult {
         let nativeLaunchpadDB = try getNativeLaunchpadDatabasePath()
@@ -82,26 +142,7 @@ class NativeLaunchpadImporter {
 
     /// 获取原生 Launchpad 数据库路径
     private func getNativeLaunchpadDatabasePath() throws -> String {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/getconf")
-        task.arguments = ["DARWIN_USER_DIR"]
-
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = pipe
-
-        try task.run()
-        task.waitUntilExit()
-
-        guard task.terminationStatus == 0 else {
-            throw ImportError.systemError("Failed to get user directory path")
-        }
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let userDir = String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-        return "/private\(userDir)com.apple.dock.launchpad/db/db"
+        try Self.nativeLaunchpadDatabasePath()
     }
 
     private func parseLaunchpadDatabase(at dbPath: String) throws -> LaunchpadData {

@@ -22,28 +22,50 @@ struct FolderInfo: Identifiable, Equatable {
     }
 
     func icon(of side: CGFloat) -> NSImage {
+        let useHighRes = UserDefaults.standard.object(forKey: AppStore.folderPreviewHighResKey) as? Bool ?? true
+        let scale = useHighRes ? (NSScreen.main?.backingScaleFactor ?? 1) : 1
+        return icon(of: side, scale: scale)
+    }
+
+    func icon(of side: CGFloat, scale: CGFloat) -> NSImage {
         let normalizedSide = max(16, side)
-        let cacheKey = folderPreviewCacheKey(for: normalizedSide)
+        let normalizedScale = max(1, scale)
+        let cacheKey = folderPreviewCacheKey(for: normalizedSide, scale: normalizedScale)
         if let cached = FolderPreviewCache.shared.image(forKey: cacheKey) {
             return cached
         }
-        let icon = renderFolderIcon(side: normalizedSide)
+        let icon = renderFolderIcon(side: normalizedSide, scale: normalizedScale)
         FolderPreviewCache.shared.store(icon, forKey: cacheKey)
         return icon
     }
 
-    private func renderFolderIcon(side: CGFloat) -> NSImage {
-        let size = NSSize(width: side, height: side)
-        let image = NSImage(size: size)
-        image.lockFocus()
-        defer { image.unlockFocus() }
+    private func renderFolderIcon(side: CGFloat, scale: CGFloat) -> NSImage {
+        let pointSize = NSSize(width: side, height: side)
+        let pixelSide = max(16, Int((side * scale).rounded()))
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil,
+                                         pixelsWide: pixelSide,
+                                         pixelsHigh: pixelSide,
+                                         bitsPerSample: 8,
+                                         samplesPerPixel: 4,
+                                         hasAlpha: true,
+                                         isPlanar: false,
+                                         colorSpaceName: .deviceRGB,
+                                         bytesPerRow: 0,
+                                         bitsPerPixel: 0) else {
+            return NSImage(size: pointSize)
+        }
+        rep.size = pointSize
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        defer { NSGraphicsContext.restoreGraphicsState() }
 
         if let ctx = NSGraphicsContext.current {
             ctx.imageInterpolation = .high
             ctx.shouldAntialias = true
         }
 
-        let rect = NSRect(origin: .zero, size: size)
+        let rect = NSRect(origin: .zero, size: pointSize)
 
         let outerInset = round(side * 0.12)
         let contentRect = rect.insetBy(dx: outerInset, dy: outerInset)
@@ -80,18 +102,21 @@ struct FolderInfo: Identifiable, Equatable {
             iconToDraw.draw(in: iconRect)
         }
 
+        let image = NSImage(size: pointSize)
+        image.addRepresentation(rep)
         return image
     }
 
-    private func folderPreviewCacheKey(for side: CGFloat) -> String {
+    private func folderPreviewCacheKey(for side: CGFloat, scale: CGFloat) -> String {
         var hasher = Hasher()
         hasher.combine(id)
         for app in apps {
             hasher.combine(app.url.path)
         }
         let contentHash = hasher.finalize()
-        let sizeKey = Int(side.rounded())
-        return "folderPreview_\(id)_\(sizeKey)_\(contentHash)"
+        let sizeKey = Int((side * scale).rounded())
+        let scaleKey = Int((scale * 100).rounded())
+        return "folderPreview_\(id)_\(sizeKey)_\(scaleKey)_\(contentHash)"
     }
     
     static func == (lhs: FolderInfo, rhs: FolderInfo) -> Bool {

@@ -81,22 +81,27 @@ private extension View {
     @ViewBuilder
     func launchpadBackgroundStyle(_ style: AppStore.BackgroundStyle,
                                   cornerRadius: CGFloat,
+                                  forcedColor: Color? = nil,
                                   maskColor: Color? = nil) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        switch style {
-        case .glass:
-            let base = self.liquidGlass(in: shape)
-            if let maskColor {
-                base.background(maskColor, in: shape)
-            } else {
-                base
-            }
-        case .blur:
-            let base = self.background(.ultraThinMaterial, in: shape)
-            if let maskColor {
-                base.background(maskColor, in: shape)
-            } else {
-                base
+        if let forcedColor {
+            self.background(forcedColor, in: shape)
+        } else {
+            switch style {
+            case .glass:
+                let base = self.liquidGlass(in: shape)
+                if let maskColor {
+                    base.background(maskColor, in: shape)
+                } else {
+                    base
+                }
+            case .blur:
+                let base = self.background(.ultraThinMaterial, in: shape)
+                if let maskColor {
+                    base.background(maskColor, in: shape)
+                } else {
+                    base
+                }
             }
         }
     }
@@ -158,6 +163,9 @@ struct LaunchpadView: View {
     @State private var fpsValue: Double = 0
     @State private var frameTimeMilliseconds: Double = 0
     @State private var isWindowVisible: Bool = true
+    @State private var postOnboardingGridOpacity: Double = 1
+    @State private var postOnboardingGridScale: CGFloat = 1
+    @State private var pendingPostOnboardingReveal: Bool = false
 
     private var isFolderOpen: Bool { appStore.openFolder != nil }
     private var currentScreenID: String? {
@@ -174,7 +182,16 @@ struct LaunchpadView: View {
     }
 
     private var backdropOpacity: Double {
-        appStore.isFullscreenMode ? (colorScheme == .dark ? 0.30 : 0.25) : 0.0
+        guard appStore.isFullscreenMode else { return 0.0 }
+        if appStore.shouldShowOnboarding {
+            return colorScheme == .dark ? 0.34 : 0.10
+        }
+        return colorScheme == .dark ? 0.30 : 0.35
+    }
+
+    private var onboardingLightFilterOpacity: Double {
+        guard appStore.isFullscreenMode, appStore.shouldShowOnboarding, colorScheme == .light else { return 0.0 }
+        return 0.20
     }
 
     var filteredItems: [LaunchpadItem] {
@@ -285,541 +302,11 @@ struct LaunchpadView: View {
     }
     
     var body: some View {
-        GeometryReader { geo in
-            let actualTopPadding = config.isFullscreen ? geo.size.height * config.topPadding : 0
-            let actualBottomPadding = config.isFullscreen ? geo.size.height * config.bottomPadding : 0
-            let actualHorizontalPadding = config.isFullscreen ? geo.size.width * config.horizontalPadding : 0
-            let indicatorTopPadding = appStore.effectivePageIndicatorTopPadding(for: currentScreenID)
-            let indicatorOffset = appStore.effectivePageIndicatorOffset(for: currentScreenID)
-            
-            VStack {
-                // 在顶部添加动态padding（全屏模式）
-                if config.isFullscreen {
-                    Spacer()
-                        .frame(height: actualTopPadding)
-                }
-                ZStack {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(.secondary)
-                        TextField(appStore.localized(.searchPlaceholder), text: $appStore.searchText)
-                            .textFieldStyle(.plain)
-                    }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
-                    .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                    )
-                    .frame(maxWidth: 480)
-                    .disabled(isFolderOpen)
-                    .onChange(of: appStore.searchQuery) {
-                        guard !isFolderOpen else { return }
-                        // 避免在视图更新周期内直接发布变化，推迟到下一循环
-                        let maxPageIndex = max(pages.count - 1, 0)
-                        DispatchQueue.main.async {
-                            appStore.currentPage = 0
-                            if appStore.currentPage > maxPageIndex {
-                                appStore.currentPage = maxPageIndex
-                            }
-                        }
-                        selectedIndex = filteredItems.isEmpty ? nil : 0
-                        isKeyboardNavigationActive = false
-                        clampSelection()
-                    }
-                    .focused($isSearchFieldFocused)
-                    .frame(maxWidth: .infinity)
+        launchpadEventBoundView
+    }
 
-                    HStack(spacing: 8) {
-                        Spacer()
-                        if appStore.showQuickRefreshButton {
-                            Button {
-                                appStore.refresh()
-                            } label: {
-                                Image(systemName: "arrow.clockwise.circle")
-                                    .font(.title)
-                                    .foregroundStyle(.placeholder.opacity(0.5))
-                            }
-                            .buttonStyle(.plain)
-                            .help(appStore.localized(.refresh))
-                        }
-                        Button {
-                            appStore.isSetting = true
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
-                                .font(.title)
-                                .foregroundStyle(.placeholder.opacity(0.5))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.top)
-                .padding(.horizontal)
-                .background(
-                    GeometryReader { proxy in
-                        // 记录顶部区域的总高度（包含顶部动态 padding + 此区域本身 + 额外余量）
-                        Color.clear.onAppear {
-                            let extra: CGFloat = 24
-                            let total = (config.isFullscreen ? geo.size.height * config.topPadding : 0) + proxy.size.height + extra
-                            DispatchQueue.main.async { headerTotalHeight = total }
-                        }
-                        .onChange(of: proxy.size) { _ in
-                            let extra: CGFloat = 24
-                            let total = (config.isFullscreen ? geo.size.height * config.topPadding : 0) + proxy.size.height + extra
-                            DispatchQueue.main.async { headerTotalHeight = total }
-                        }
-                    }
-                )
-                .opacity(isFolderOpen ? 0.1 : 1)
-                .allowsHitTesting(!isFolderOpen)
-                
-                // 保持原有上下留白，去掉可见的分割线
-                Spacer()
-                    .frame(height: 16)
-
-                GeometryReader { geo in
-                    let appCountPerRow = config.columns
-                    let maxRowsPerPage = Int(ceil(Double(config.itemsPerPage) / Double(appCountPerRow)))
-                    let availableWidth = geo.size.width
-                    let availableHeight = geo.size.height - (actualTopPadding + actualBottomPadding)
-                    
-                    let appHeight: CGFloat = {
-                        let totalRowSpacing = config.rowSpacing * CGFloat(maxRowsPerPage - 1)
-                        let height = (availableHeight - totalRowSpacing) / CGFloat(maxRowsPerPage)
-                        return max(56, height)
-                    }()
-
-                    let columnWidth: CGFloat = {
-                        let totalColumnSpacing = config.columnSpacing * CGFloat(appCountPerRow - 1)
-                        let width = (availableWidth - totalColumnSpacing) / CGFloat(appCountPerRow)
-                        return max(40, width)
-                    }()
-
-                    let iconSize: CGFloat = min(columnWidth, appHeight) * CGFloat(min(max(appStore.iconScale, 0.6), 1.15))
-
-                    let effectivePageWidth = geo.size.width + config.pageSpacing
-
-                    // Helper: decide whether to close when tapping at a point in grid space
-                    let maybeCloseAt: (CGPoint) -> Void = { p in
-                        guard appStore.openFolder == nil, draggingItem == nil else { return }
-                        if let idx = indexAt(point: p,
-                                             in: geo.size,
-                                             pageIndex: appStore.currentPage,
-                                             columnWidth: columnWidth,
-                                             appHeight: appHeight) {
-                            if currentItems.indices.contains(idx), case .empty = currentItems[idx] {
-                                AppDelegate.shared?.hideWindow()
-                            }
-                        } else {
-                            AppDelegate.shared?.hideWindow()
-                        }
-                    }
-
-                    if appStore.isInitialLoading {
-                        VStack(spacing: 16) {
-                            ProgressView()
-                                .controlSize(.large)
-                                .progressViewStyle(.circular)
-                            Text(appStore.localized(.loadingApplications))
-                                .font(.headline)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else if filteredItems.isEmpty && !appStore.searchQuery.isEmpty {
-                        VStack(spacing: 20) {
-                            Image(systemName: "magnifyingglass")
-                                .font(.largeTitle)
-                                .foregroundStyle(.placeholder)
-                            Text(appStore.localized(.noAppsFound))
-                                .font(.title)
-                                .foregroundStyle(.placeholder)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else if appStore.useCAGridRenderer {
-                        let caInsets = NSEdgeInsets(top: actualTopPadding,
-                                                    left: 0,
-                                                    bottom: actualBottomPadding,
-                                                    right: 0)
-                        let caItems: [LaunchpadItem] = filteredItems
-                        let externalDragSourceIndex: Int? = draggingItem.flatMap { filteredItems.firstIndex(of: $0) }
-                        let externalDragHoverIndex: Int? = draggingItem != nil ? pendingDropIndex : nil
-                        ZStack(alignment: .topLeading) {
-                            CAGridViewRepresentable(
-                                appStore: appStore,
-                                items: caItems,
-                                iconSize: iconSize,
-                                columnSpacing: config.columnSpacing,
-                                rowSpacing: config.rowSpacing,
-                                contentInsets: caInsets,
-                                pageSpacing: config.pageSpacing,
-                                onOpenApp: nil,
-                                onOpenFolder: { folder in
-                                    withAnimation(LNAnimations.springFast) {
-                                        appStore.openFolder = folder
-                                    }
-                                },
-                                externalDragSourceIndex: externalDragSourceIndex,
-                                externalDragHoverIndex: externalDragHoverIndex,
-                                selectedIndex: isKeyboardNavigationActive ? selectedIndex : nil
-                            )
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .opacity(isFolderOpen ? 0.1 : 1)
-                            .allowsHitTesting(!isFolderOpen)
-
-                            if let draggingItem {
-                                DragPreviewItem(item: draggingItem,
-                                               iconSize: iconSize,
-                                               labelWidth: columnWidth * 0.9,
-                                               scale: dragPreviewScale)
-                                    .position(x: dragPreviewPosition.x, y: dragPreviewPosition.y)
-                                    .zIndex(100)
-                                    .allowsHitTesting(false)
-                            }
-                        }
-                        .coordinateSpace(name: "grid")
-                        .onAppear {
-                            captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
-                        }
-                        .onChange(of: appStore.handoffDraggingApp) {
-                            if appStore.openFolder == nil, appStore.handoffDraggingApp != nil {
-                                startHandoffDragIfNeeded(geo: geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
-                            }
-                        }
-                        .onChange(of: appStore.openFolder) {
-                            if appStore.openFolder == nil, appStore.handoffDraggingApp != nil {
-                                startHandoffDragIfNeeded(geo: geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
-                            }
-                        }
-                        .onChange(of: geo.size) {
-                            DispatchQueue.main.async {
-                                captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
-                            }
-                        }
-                        .onChange(of: appStore.gridRefreshTrigger) { _ in
-                            DispatchQueue.main.async {
-                                captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
-                            }
-                        }
-                    } else {
-                        let hStackOffset = -CGFloat(appStore.currentPage) * effectivePageWidth
-                            + (appStore.followScrollPagingEnabled ? scrollState.followOffset : 0)
-                        ZStack(alignment: .topLeading) {
-                            // 内容
-                            HStack(spacing: config.pageSpacing) {
-                                ForEach(pages.indices, id: \.self) { index in
-                                    VStack(alignment: .leading, spacing: 0) {
-                                        // 在网格上方添加动态padding
-                                        if config.isFullscreen {
-                                            Spacer()
-                                                .frame(height: actualTopPadding)
-                                        }
-                                        LazyVGrid(columns: config.gridItems, spacing: config.rowSpacing) {
-                                            let pageItems = pages[index]
-                                            ForEach(0..<pageItems.count, id: \.self) { localOffset in
-                                                let item = pageItems[localOffset]
-                                                let globalIndex = index * config.itemsPerPage + localOffset
-                                                itemDraggable(
-                                                    item: item,
-                                                    globalIndex: globalIndex,
-                                                    pageIndex: index,
-                                                    containerSize: geo.size,
-                                                    columnWidth: columnWidth,
-                                                    iconSize: iconSize,
-                                                    appHeight: appHeight,
-                                                    labelWidth: columnWidth * 0.9,
-                                                    isSelected: (!isFolderOpen && isKeyboardNavigationActive && selectedIndex == globalIndex)
-                                                )
-                                            }
-                                        }
-                                        .animation(LNAnimations.gridUpdate, value: pendingDropIndex)
-                                        .id("grid_\(index)_\(appStore.gridRefreshTrigger.uuidString)")
-                                        // 避免非必要的全局刷新动画，降低拖拽重绘
-                                        .frame(maxHeight: .infinity, alignment: .top)
-                                    }
-                                    .frame(width: geo.size.width, height: geo.size.height)
-                                }
-                            }
-                            .offset(x: hStackOffset)
-                            .opacity(isFolderOpen ? 0.1 : 1)
-                            .allowsHitTesting(!isFolderOpen)
-                            
-
-                            // 将预览提升到外层坐标空间，避免受到 offset 影响
-                            if let draggingItem {
-                                DragPreviewItem(item: draggingItem,
-                                               iconSize: iconSize,
-                                               labelWidth: columnWidth * 0.9,
-                                               scale: dragPreviewScale)
-                                    .position(x: dragPreviewPosition.x, y: dragPreviewPosition.y)
-                                    .zIndex(100)
-                                    .allowsHitTesting(false)
-                            }
-                        }
-                        
-                        .coordinateSpace(name: "grid")
-                        // 让整个网格容器都可命中，以捕获空白区域的点击
-                        .contentShape(Rectangle())
-                        .simultaneousGesture(blankDragGesture(geoSize: geo.size,
-                                                               columnWidth: columnWidth,
-                                                               appHeight: appHeight,
-                                                               iconSize: iconSize),
-                                             including: draggingItem == nil ? .gesture : .subviews)
-                        .onTapGesture {
-                            // 失焦输入
-                            NSApp.keyWindow?.makeFirstResponder(nil)
-                            // 使用屏幕坐标换算为网格坐标，允许在空白处点击关闭
-                            let p = convertScreenToGrid(NSEvent.mouseLocation)
-                            closeIfTappedOnEmptyOrGap(at: p,
-                                                      geoSize: geo.size,
-                                                      columnWidth: columnWidth,
-                                                      appHeight: appHeight,
-                                                      iconSize: iconSize)
-                        }
-                        .onAppear { }
-                        
-                        .onChange(of: appStore.handoffDraggingApp) {
-                            if appStore.openFolder == nil, appStore.handoffDraggingApp != nil {
-                                startHandoffDragIfNeeded(geo: geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
-                            }
-                        }
-                        .onChange(of: appStore.openFolder) {
-                            if appStore.openFolder == nil, appStore.handoffDraggingApp != nil {
-                                startHandoffDragIfNeeded(geo: geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
-                            }
-                        }
-                        .onChange(of: appStore.currentPage) {
-                            DispatchQueue.main.async {
-                                captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
-                                
-                                // 智能预加载当前页面和相邻页面的图标
-                                AppCacheManager.shared.smartPreloadIcons(
-                                    for: appStore.items,
-                                    currentPage: appStore.currentPage,
-                                    itemsPerPage: config.itemsPerPage
-                                )
-                            }
-                        }
-                        .onChange(of: appStore.gridRefreshTrigger) { _ in
-                            DispatchQueue.main.async {
-                                captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
-                            }
-                        }
-                        .onChange(of: geo.size) {
-                            DispatchQueue.main.async {
-                                captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
-                            }
-                        }
-        .task {
-            await MainActor.run {
-                captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
-            }
-        }
-                    }
-                }
-                
-                // Merged PageIndicator - add tap to jump to page
-                if pages.count > 1 {
-                    HStack(spacing: 8) {
-                        ForEach(0..<pages.count, id: \.self) { index in
-                            Circle()
-                                .fill(appStore.currentPage == index ? Color.gray : Color.gray.opacity(0.3))
-                                .frame(width: 8, height: 8)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    navigateToPage(index)
-                                }
-                        }
-                    }
-                    .padding(.top, CGFloat(indicatorTopPadding))
-                    .padding(.bottom, CGFloat(indicatorOffset))
-                    .opacity(isFolderOpen ? 0.1 : 1)
-                    .allowsHitTesting(!isFolderOpen)
-                }
-                
-                // 在页面指示圆点下方添加动态padding
-                if config.isFullscreen {
-                    Spacer()
-                        .frame(height: actualBottomPadding)
-                }
-
-            }
-            .padding(.horizontal, actualHorizontalPadding)
-        }
-        .padding()
-        .launchpadBackgroundStyle(appStore.launchpadBackgroundStyle,
-                                   cornerRadius: appStore.isFullscreenMode ? 0 : 30,
-                                   maskColor: appStore.backgroundMaskColor(for: colorScheme))
-        .background(
-            appStore.isFullscreenMode
-                ? Color.black.opacity(backdropOpacity)
-                : Color.clear
-        )
-        .ignoresSafeArea()
-            .overlay(
-            ZStack {
-                // 全窗口滚动捕获层（不拦截点击，仅监听滚动）
-                if !appStore.useCAGridRenderer {
-                    ScrollEventCatcher { deltaX, deltaY, phase, isMomentum, isPrecise in
-                        guard !appStore.isSetting else { return }
-                        let pageWidth = currentContainerSize.width + config.pageSpacing
-                        handleScroll(deltaX: deltaX,
-                                     deltaY: deltaY,
-                                     phase: phase,
-                                     isMomentum: isMomentum,
-                                     isPrecise: isPrecise,
-                                     pageWidth: pageWidth)
-                    }
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-                }
-
-                // 半透明背景：仅在文件夹打开时插入，使用淡入淡出过渡
-                if isFolderOpen {
-                    Color.black
-                        .opacity(0.1)
-                        .ignoresSafeArea()
-                        .transition(.opacity)
-                        .onTapGesture {
-                            if !appStore.isFolderNameEditing {
-                                let closingFolder = appStore.openFolder
-                                withAnimation(LNAnimations.springFast) { appStore.openFolder = nil }
-                                if let folder = closingFolder,
-                                   let idx = filteredItems.firstIndex(of: .folder(folder)) {
-                                    isKeyboardNavigationActive = true
-                                    selectedIndex = idx
-                                    let targetPage = idx / config.itemsPerPage
-                                    if targetPage != appStore.currentPage { appStore.currentPage = targetPage }
-                                }
-                                isSearchFieldFocused = true
-                            }
-                        }
-                }
-
-                if let openFolder = appStore.openFolder {
-                    GeometryReader { proxy in
-                        let widthFactor: CGFloat = appStore.isFullscreenMode ? 0.7 : CGFloat(appStore.folderPopoverWidthFactor)
-                        let heightFactor: CGFloat = appStore.isFullscreenMode ? 0.7 : CGFloat(appStore.folderPopoverHeightFactor)
-                        let minWidth: CGFloat = appStore.isFullscreenMode ? 520 : 560
-                        let minHeight: CGFloat = 420
-                        let rawHorizontalMargin: CGFloat = appStore.isFullscreenMode ? max(proxy.size.width * 0.15, 120) : 32
-                        let rawVerticalMargin: CGFloat = appStore.isFullscreenMode ? max(proxy.size.height * 0.15, 120) : 32
-                        let horizontalMargin = min(rawHorizontalMargin, proxy.size.width / 2)
-                        let verticalMargin = min(rawVerticalMargin, proxy.size.height / 2)
-
-                        let proposedWidth = proxy.size.width * widthFactor
-                        let proposedHeight = proxy.size.height * heightFactor
-
-                        let maxAllowedWidth = max(proxy.size.width - horizontalMargin * 2, 0)
-                        let maxAllowedHeight = max(proxy.size.height - verticalMargin * 2, 0)
-
-                        let minAllowedWidth = min(minWidth, maxAllowedWidth)
-                        let minAllowedHeight = min(minHeight, maxAllowedHeight)
-
-                        let clampedWidth = max(min(proposedWidth, maxAllowedWidth), minAllowedWidth)
-                        let clampedHeight = max(min(proposedHeight, maxAllowedHeight), minAllowedHeight)
-                        let folderId = openFolder.id
-
-                        // 使用计算属性来确保绑定能够正确响应folderUpdateTrigger的变化
-                        let folderBinding = Binding<FolderInfo>(
-                            get: {
-                                // 每次访问都重新查找文件夹，确保获取最新状态
-                                if let idx = appStore.folders.firstIndex(where: { $0.id == folderId }) {
-                                    return appStore.folders[idx]
-                                }
-                                return openFolder
-                            },
-                            set: { newValue in
-                                if let idx = appStore.folders.firstIndex(where: { $0.id == folderId }) {
-                                    appStore.folders[idx] = newValue
-                                }
-                            }
-                        )
-                        
-                        FolderView(
-                            appStore: appStore,
-                            folder: folderBinding,
-                            preferredIconSize: currentIconSize * CGFloat(min(max(appStore.iconScale, 0.6), 1.15)),
-                            onClose: {
-                                let closingFolder = appStore.openFolder
-                                withAnimation(LNAnimations.springFast) {
-                                    appStore.openFolder = nil
-                                }
-                                // 关闭后将键盘导航选中项切换到该文件夹
-                                if let folder = closingFolder,
-                                   let idx = filteredItems.firstIndex(of: .folder(folder)) {
-                                    isKeyboardNavigationActive = true
-                                    selectedIndex = idx
-                                    let targetPage = idx / config.itemsPerPage
-                                    if targetPage != appStore.currentPage {
-                                        appStore.currentPage = targetPage
-                                    }
-                                }
-                                // 关闭文件夹后恢复搜索框焦点
-                                isSearchFieldFocused = true
-                            },
-                            onLaunchApp: { app in
-                                launchApp(app)
-                            }
-                        )
-                        .frame(width: clampedWidth, height: clampedHeight)
-                        .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
-                        .id("folder_\(folderId)") // 使用稳定ID，避免每次更新导致视图重建
-                        .transition(LNAnimations.folderOpenTransition)
-
-                    }
-                }
-
-                // 点击关闭：顶部区域（含搜索）不关闭；窗口四周边距点击关闭
-                GeometryReader { proxy in
-                    let w = proxy.size.width
-                    let h = proxy.size.height
-                    let topSafe = max(0, headerTotalHeight)
-                    let bottomPad = max(config.isFullscreen ? h * config.bottomPadding : 0, 24)
-                    let sidePad = max(config.isFullscreen ? w * config.horizontalPadding : 0, 24)
-
-                    // 顶部安全区：透传
-                    VStack(spacing: 0) {
-                        Rectangle().fill(Color.clear)
-                            .frame(height: topSafe)
-                            .allowsHitTesting(false)
-                        Spacer()
-                        // 底部边距：点击关闭
-                        Rectangle().fill(Color.clear)
-                            .frame(height: bottomPad)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if appStore.openFolder == nil && !appStore.isFolderNameEditing {
-                                    AppDelegate.shared?.hideWindow()
-                                }
-                            }
-                    }
-                    .ignoresSafeArea()
-
-                    // 左右边距：点击关闭
-                    HStack(spacing: 0) {
-                        Rectangle().fill(Color.clear)
-                            .frame(width: sidePad)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if appStore.openFolder == nil && !appStore.isFolderNameEditing {
-                                    AppDelegate.shared?.hideWindow()
-                                }
-                            }
-                        Spacer()
-                        Rectangle().fill(Color.clear)
-                            .frame(width: sidePad)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if appStore.openFolder == nil && !appStore.isFolderNameEditing {
-                                    AppDelegate.shared?.hideWindow()
-                                }
-                            }
-                    }
-                    .ignoresSafeArea()
-                }
-            }
-        )
+    private var launchpadEventBoundView: some View {
+        launchpadBaseView
         .sheet(isPresented: $appStore.isSetting) {
             SettingsView(appStore: appStore)
         }
@@ -864,7 +351,10 @@ struct LaunchpadView: View {
          }
 
            .onAppear {
-              appStore.performInitialScanIfNeeded()
+              if !appStore.shouldShowOnboarding {
+                  appStore.performInitialScanIfNeeded()
+                  checkCacheStatus()
+              }
               setupKeyHandlers()
               setupInitialSelection()
               setupWindowShownObserver()
@@ -890,9 +380,6 @@ struct LaunchpadView: View {
               }
                isKeyboardNavigationActive = false
                clampSelection()
-               
-               // 检查缓存状态
-               checkCacheStatus()
               if appStore.showFPSOverlay {
                   startFPSMonitoring()
               }
@@ -912,6 +399,24 @@ struct LaunchpadView: View {
             windowHiddenObserver = nil
             stopFPSMonitoring()
          }
+        .onChange(of: appStore.shouldShowOnboarding) { wasVisible, visible in
+            if wasVisible && !visible {
+                if appStore.isInitialLoading {
+                    postOnboardingGridOpacity = 0
+                    pendingPostOnboardingReveal = true
+                } else {
+                    playPostOnboardingGridReveal()
+                }
+            }
+
+            guard !visible, !appStore.isInitialLoading else { return }
+            appStore.performInitialScanIfNeeded()
+            checkCacheStatus()
+        }
+        .onChange(of: appStore.isInitialLoading) { _, loading in
+            guard !loading, pendingPostOnboardingReveal, !appStore.shouldShowOnboarding else { return }
+            playPostOnboardingGridReveal()
+        }
         .onChange(of: appStore.showFPSOverlay) { enabled in
             if enabled {
                 startFPSMonitoring()
@@ -958,7 +463,596 @@ struct LaunchpadView: View {
             clampSelection()
         }
     }
+
+    private var launchpadBaseView: some View {
+        GeometryReader { geo in
+            launchpadMainContent(in: geo)
+        }
+        .padding()
+        .launchpadBackgroundStyle(appStore.launchpadBackgroundStyle,
+                                  cornerRadius: appStore.isFullscreenMode ? 0 : 30,
+                                  forcedColor: appStore.developmentBackgroundOverride.color,
+                                  maskColor: appStore.backgroundMaskColor(for: colorScheme))
+        .background(
+            ZStack {
+                Color.black.opacity(backdropOpacity)
+                if onboardingLightFilterOpacity > 0 {
+                    Color.white.opacity(onboardingLightFilterOpacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.22), value: appStore.shouldShowOnboarding)
+            .animation(.easeInOut(duration: 0.22), value: colorScheme)
+        )
+        .ignoresSafeArea()
+        .overlay(launchpadInteractionOverlay)
+    }
+
+    private func launchpadMainContent(in geo: GeometryProxy) -> some View {
+        let actualTopPadding = config.isFullscreen ? geo.size.height * config.topPadding : 0
+        let actualBottomPadding = config.isFullscreen ? geo.size.height * config.bottomPadding : 0
+        let actualHorizontalPadding = config.isFullscreen ? geo.size.width * config.horizontalPadding : 0
+        let indicatorTopPadding = appStore.effectivePageIndicatorTopPadding(for: currentScreenID)
+        let indicatorOffset = appStore.effectivePageIndicatorOffset(for: currentScreenID)
+
+        return VStack {
+            // 在顶部添加动态padding（全屏模式）
+            if config.isFullscreen {
+                Spacer()
+                    .frame(height: actualTopPadding)
+            }
+            ZStack {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField(appStore.localized(.searchPlaceholder), text: $appStore.searchText)
+                        .textFieldStyle(.plain)
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 12)
+                .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                )
+                .frame(maxWidth: 480)
+                .disabled(isFolderOpen)
+                .onChange(of: appStore.searchQuery) {
+                    guard !isFolderOpen else { return }
+                    // 避免在视图更新周期内直接发布变化，推迟到下一循环
+                    let maxPageIndex = max(pages.count - 1, 0)
+                    DispatchQueue.main.async {
+                        appStore.currentPage = 0
+                        if appStore.currentPage > maxPageIndex {
+                            appStore.currentPage = maxPageIndex
+                        }
+                    }
+                    selectedIndex = filteredItems.isEmpty ? nil : 0
+                    isKeyboardNavigationActive = false
+                    clampSelection()
+                }
+                .focused($isSearchFieldFocused)
+                .frame(maxWidth: .infinity)
+
+                HStack(spacing: 8) {
+                    Spacer()
+                    if appStore.showQuickRefreshButton {
+                        Button {
+                            appStore.refresh()
+                        } label: {
+                            Image(systemName: "arrow.clockwise.circle")
+                                .font(.title)
+                                .foregroundStyle(.placeholder.opacity(0.5))
+                        }
+                        .buttonStyle(.plain)
+                        .help(appStore.localized(.refresh))
+                    }
+                    Button {
+                        appStore.isSetting = true
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title)
+                            .foregroundStyle(.placeholder.opacity(0.5))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.top)
+            .padding(.horizontal)
+            .background(
+                GeometryReader { proxy in
+                    // 记录顶部区域的总高度（包含顶部动态 padding + 此区域本身 + 额外余量）
+                    Color.clear.onAppear {
+                        let extra: CGFloat = 24
+                        let total = (config.isFullscreen ? geo.size.height * config.topPadding : 0) + proxy.size.height + extra
+                        DispatchQueue.main.async { headerTotalHeight = total }
+                    }
+                    .onChange(of: proxy.size) { _ in
+                        let extra: CGFloat = 24
+                        let total = (config.isFullscreen ? geo.size.height * config.topPadding : 0) + proxy.size.height + extra
+                        DispatchQueue.main.async { headerTotalHeight = total }
+                    }
+                }
+            )
+            .opacity(isFolderOpen ? 0.1 : 1)
+            .allowsHitTesting(!isFolderOpen)
+
+            // 保持原有上下留白，去掉可见的分割线
+            Spacer()
+                .frame(height: 16)
+
+            GeometryReader { gridGeo in
+                gridRegion(in: gridGeo,
+                           actualTopPadding: actualTopPadding,
+                           actualBottomPadding: actualBottomPadding)
+            }
+            .opacity(appStore.shouldShowOnboarding ? 1 : postOnboardingGridOpacity)
+            .scaleEffect(appStore.shouldShowOnboarding ? 1 : postOnboardingGridScale)
+
+            // Merged PageIndicator - add tap to jump to page
+            if !appStore.shouldShowOnboarding && pages.count > 1 {
+                HStack(spacing: 8) {
+                    ForEach(0..<pages.count, id: \.self) { index in
+                        Circle()
+                            .fill(appStore.currentPage == index ? Color.gray : Color.gray.opacity(0.3))
+                            .frame(width: 8, height: 8)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                navigateToPage(index)
+                            }
+                    }
+                }
+                .padding(.top, CGFloat(indicatorTopPadding))
+                .padding(.bottom, CGFloat(indicatorOffset))
+                .opacity(isFolderOpen ? 0.1 : 1)
+                .allowsHitTesting(!isFolderOpen)
+            }
+
+            // 在页面指示圆点下方添加动态padding
+            if config.isFullscreen {
+                Spacer()
+                    .frame(height: actualBottomPadding)
+            }
+        }
+        .padding(.horizontal, actualHorizontalPadding)
+    }
+
+    private var launchpadInteractionOverlay: some View {
+        ZStack {
+            // 全窗口滚动捕获层（不拦截点击，仅监听滚动）
+            if !appStore.useCAGridRenderer {
+                ScrollEventCatcher { deltaX, deltaY, phase, isMomentum, isPrecise in
+                    guard !appStore.isSetting else { return }
+                    let pageWidth = currentContainerSize.width + config.pageSpacing
+                    handleScroll(deltaX: deltaX,
+                                 deltaY: deltaY,
+                                 phase: phase,
+                                 isMomentum: isMomentum,
+                                 isPrecise: isPrecise,
+                                 pageWidth: pageWidth)
+                }
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+            }
+
+            // 半透明背景：仅在文件夹打开时插入，使用淡入淡出过渡
+            if isFolderOpen {
+                Color.black
+                    .opacity(0.1)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                    .onTapGesture {
+                        if !appStore.isFolderNameEditing {
+                            let closingFolder = appStore.openFolder
+                            withAnimation(LNAnimations.springFast) { appStore.openFolder = nil }
+                            if let folder = closingFolder,
+                               let idx = filteredItems.firstIndex(of: .folder(folder)) {
+                                isKeyboardNavigationActive = true
+                                selectedIndex = idx
+                                let targetPage = idx / config.itemsPerPage
+                                if targetPage != appStore.currentPage { appStore.currentPage = targetPage }
+                            }
+                            isSearchFieldFocused = true
+                        }
+                    }
+            }
+
+            if let openFolder = appStore.openFolder {
+                GeometryReader { proxy in
+                    let widthFactor: CGFloat = appStore.isFullscreenMode ? 0.7 : CGFloat(appStore.folderPopoverWidthFactor)
+                    let heightFactor: CGFloat = appStore.isFullscreenMode ? 0.7 : CGFloat(appStore.folderPopoverHeightFactor)
+                    let minWidth: CGFloat = appStore.isFullscreenMode ? 520 : 560
+                    let minHeight: CGFloat = 420
+                    let rawHorizontalMargin: CGFloat = appStore.isFullscreenMode ? max(proxy.size.width * 0.15, 120) : 32
+                    let rawVerticalMargin: CGFloat = appStore.isFullscreenMode ? max(proxy.size.height * 0.15, 120) : 32
+                    let horizontalMargin = min(rawHorizontalMargin, proxy.size.width / 2)
+                    let verticalMargin = min(rawVerticalMargin, proxy.size.height / 2)
+
+                    let proposedWidth = proxy.size.width * widthFactor
+                    let proposedHeight = proxy.size.height * heightFactor
+
+                    let maxAllowedWidth = max(proxy.size.width - horizontalMargin * 2, 0)
+                    let maxAllowedHeight = max(proxy.size.height - verticalMargin * 2, 0)
+
+                    let minAllowedWidth = min(minWidth, maxAllowedWidth)
+                    let minAllowedHeight = min(minHeight, maxAllowedHeight)
+
+                    let clampedWidth = max(min(proposedWidth, maxAllowedWidth), minAllowedWidth)
+                    let clampedHeight = max(min(proposedHeight, maxAllowedHeight), minAllowedHeight)
+                    let folderId = openFolder.id
+
+                    // 使用计算属性来确保绑定能够正确响应folderUpdateTrigger的变化
+                    let folderBinding = Binding<FolderInfo>(
+                        get: {
+                            // 每次访问都重新查找文件夹，确保获取最新状态
+                            if let idx = appStore.folders.firstIndex(where: { $0.id == folderId }) {
+                                return appStore.folders[idx]
+                            }
+                            return openFolder
+                        },
+                        set: { newValue in
+                            if let idx = appStore.folders.firstIndex(where: { $0.id == folderId }) {
+                                appStore.folders[idx] = newValue
+                            }
+                        }
+                    )
+
+                    FolderView(
+                        appStore: appStore,
+                        folder: folderBinding,
+                        preferredIconSize: currentIconSize * CGFloat(min(max(appStore.iconScale, 0.6), 1.15)),
+                        onClose: {
+                            let closingFolder = appStore.openFolder
+                            withAnimation(LNAnimations.springFast) {
+                                appStore.openFolder = nil
+                            }
+                            // 关闭后将键盘导航选中项切换到该文件夹
+                            if let folder = closingFolder,
+                               let idx = filteredItems.firstIndex(of: .folder(folder)) {
+                                isKeyboardNavigationActive = true
+                                selectedIndex = idx
+                                let targetPage = idx / config.itemsPerPage
+                                if targetPage != appStore.currentPage {
+                                    appStore.currentPage = targetPage
+                                }
+                            }
+                            // 关闭文件夹后恢复搜索框焦点
+                            isSearchFieldFocused = true
+                        },
+                        onLaunchApp: { app in
+                            launchApp(app)
+                        }
+                    )
+                    .frame(width: clampedWidth, height: clampedHeight)
+                    .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+                    .id("folder_\(folderId)") // 使用稳定ID，避免每次更新导致视图重建
+                    .transition(LNAnimations.folderOpenTransition)
+                }
+            }
+
+            // 点击关闭：顶部区域（含搜索）不关闭；窗口四周边距点击关闭
+            GeometryReader { proxy in
+                let w = proxy.size.width
+                let h = proxy.size.height
+                let topSafe = max(0, headerTotalHeight)
+                let bottomPad = max(config.isFullscreen ? h * config.bottomPadding : 0, 24)
+                let sidePad = max(config.isFullscreen ? w * config.horizontalPadding : 0, 24)
+
+                // 顶部安全区：透传
+                VStack(spacing: 0) {
+                    Rectangle().fill(Color.clear)
+                        .frame(height: topSafe)
+                        .allowsHitTesting(false)
+                    Spacer()
+                    // 底部边距：点击关闭
+                    Rectangle().fill(Color.clear)
+                        .frame(height: bottomPad)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if appStore.openFolder == nil && !appStore.isFolderNameEditing {
+                                AppDelegate.shared?.hideWindow()
+                            }
+                        }
+                }
+                .ignoresSafeArea()
+
+                // 左右边距：点击关闭
+                HStack(spacing: 0) {
+                    Rectangle().fill(Color.clear)
+                        .frame(width: sidePad)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if appStore.openFolder == nil && !appStore.isFolderNameEditing {
+                                AppDelegate.shared?.hideWindow()
+                            }
+                        }
+                    Spacer()
+                    Rectangle().fill(Color.clear)
+                        .frame(width: sidePad)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if appStore.openFolder == nil && !appStore.isFolderNameEditing {
+                                AppDelegate.shared?.hideWindow()
+                            }
+                        }
+                }
+                .ignoresSafeArea()
+            }
+        }
+    }
     
+    private func playPostOnboardingGridReveal() {
+        pendingPostOnboardingReveal = false
+        postOnboardingGridOpacity = 0
+        postOnboardingGridScale = 0.96
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.86, blendDuration: 0.12)) {
+            postOnboardingGridOpacity = 1
+            postOnboardingGridScale = 1
+        }
+    }
+    
+    private func gridRegion(in geo: GeometryProxy,
+                            actualTopPadding: CGFloat,
+                            actualBottomPadding: CGFloat) -> AnyView {
+        let appCountPerRow = config.columns
+        let maxRowsPerPage = Int(ceil(Double(config.itemsPerPage) / Double(appCountPerRow)))
+        let availableWidth = geo.size.width
+        let availableHeight = geo.size.height - (actualTopPadding + actualBottomPadding)
+
+        let appHeight: CGFloat = {
+            let totalRowSpacing = config.rowSpacing * CGFloat(maxRowsPerPage - 1)
+            let height = (availableHeight - totalRowSpacing) / CGFloat(maxRowsPerPage)
+            return max(56, height)
+        }()
+
+        let columnWidth: CGFloat = {
+            let totalColumnSpacing = config.columnSpacing * CGFloat(appCountPerRow - 1)
+            let width = (availableWidth - totalColumnSpacing) / CGFloat(appCountPerRow)
+            return max(40, width)
+        }()
+
+        let iconSize: CGFloat = min(columnWidth, appHeight) * CGFloat(min(max(appStore.iconScale, 0.6), 1.15))
+        let effectivePageWidth = geo.size.width + config.pageSpacing
+
+        // Helper: decide whether to close when tapping at a point in grid space
+        let maybeCloseAt: (CGPoint) -> Void = { p in
+            guard appStore.openFolder == nil, draggingItem == nil else { return }
+            if let idx = indexAt(point: p,
+                                 in: geo.size,
+                                 pageIndex: appStore.currentPage,
+                                 columnWidth: columnWidth,
+                                 appHeight: appHeight) {
+                if currentItems.indices.contains(idx), case .empty = currentItems[idx] {
+                    AppDelegate.shared?.hideWindow()
+                }
+            } else {
+                AppDelegate.shared?.hideWindow()
+            }
+        }
+
+        if appStore.shouldShowOnboarding {
+            let compactOnboardingLayout = geo.size.width < 960
+            return AnyView(
+                FirstLaunchOnboardingPanel(appStore: appStore, compactLayout: compactOnboardingLayout)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .padding(.top, max(8, actualTopPadding))
+                    .padding(.bottom, max(12, actualBottomPadding))
+                    .padding(.horizontal, max(16, geo.size.width * 0.05))
+            )
+        }
+
+        if appStore.isInitialLoading {
+            return AnyView(
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .controlSize(.large)
+                        .progressViewStyle(.circular)
+                    Text(appStore.localized(.loadingApplications))
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            )
+        }
+
+        if filteredItems.isEmpty && !appStore.searchQuery.isEmpty {
+            return AnyView(
+                VStack(spacing: 20) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.largeTitle)
+                        .foregroundStyle(.placeholder)
+                    Text(appStore.localized(.noAppsFound))
+                        .font(.title)
+                        .foregroundStyle(.placeholder)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            )
+        }
+
+        if appStore.useCAGridRenderer {
+            let caInsets = NSEdgeInsets(top: actualTopPadding,
+                                        left: 0,
+                                        bottom: actualBottomPadding,
+                                        right: 0)
+            let caItems: [LaunchpadItem] = filteredItems
+            let externalDragSourceIndex: Int? = draggingItem.flatMap { filteredItems.firstIndex(of: $0) }
+            let externalDragHoverIndex: Int? = draggingItem != nil ? pendingDropIndex : nil
+
+            return AnyView(
+                ZStack(alignment: .topLeading) {
+                    CAGridViewRepresentable(
+                        appStore: appStore,
+                        items: caItems,
+                        iconSize: iconSize,
+                        columnSpacing: config.columnSpacing,
+                        rowSpacing: config.rowSpacing,
+                        contentInsets: caInsets,
+                        pageSpacing: config.pageSpacing,
+                        onOpenApp: nil,
+                        onOpenFolder: { folder in
+                            withAnimation(LNAnimations.springFast) {
+                                appStore.openFolder = folder
+                            }
+                        },
+                        externalDragSourceIndex: externalDragSourceIndex,
+                        externalDragHoverIndex: externalDragHoverIndex,
+                        selectedIndex: isKeyboardNavigationActive ? selectedIndex : nil
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .opacity(isFolderOpen ? 0.1 : 1)
+                    .allowsHitTesting(!isFolderOpen)
+
+                    if let draggingItem {
+                        DragPreviewItem(item: draggingItem,
+                                        iconSize: iconSize,
+                                        labelWidth: columnWidth * 0.9,
+                                        scale: dragPreviewScale)
+                            .position(x: dragPreviewPosition.x, y: dragPreviewPosition.y)
+                            .zIndex(100)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .coordinateSpace(name: "grid")
+                .onAppear {
+                    captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
+                }
+                .onChange(of: appStore.handoffDraggingApp) {
+                    if appStore.openFolder == nil, appStore.handoffDraggingApp != nil {
+                        startHandoffDragIfNeeded(geo: geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
+                    }
+                }
+                .onChange(of: appStore.openFolder) {
+                    if appStore.openFolder == nil, appStore.handoffDraggingApp != nil {
+                        startHandoffDragIfNeeded(geo: geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
+                    }
+                }
+                .onChange(of: geo.size) {
+                    DispatchQueue.main.async {
+                        captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
+                    }
+                }
+                .onChange(of: appStore.gridRefreshTrigger) { _ in
+                    DispatchQueue.main.async {
+                        captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
+                    }
+                }
+            )
+        }
+
+        let hStackOffset = -CGFloat(appStore.currentPage) * effectivePageWidth
+            + (appStore.followScrollPagingEnabled ? scrollState.followOffset : 0)
+
+        return AnyView(
+            ZStack(alignment: .topLeading) {
+                // 内容
+                HStack(spacing: config.pageSpacing) {
+                    ForEach(pages.indices, id: \.self) { index in
+                        VStack(alignment: .leading, spacing: 0) {
+                            // 在网格上方添加动态padding
+                            if config.isFullscreen {
+                                Spacer()
+                                    .frame(height: actualTopPadding)
+                            }
+                            LazyVGrid(columns: config.gridItems, spacing: config.rowSpacing) {
+                                let pageItems = pages[index]
+                                ForEach(0..<pageItems.count, id: \.self) { localOffset in
+                                    let item = pageItems[localOffset]
+                                    let globalIndex = index * config.itemsPerPage + localOffset
+                                    itemDraggable(
+                                        item: item,
+                                        globalIndex: globalIndex,
+                                        pageIndex: index,
+                                        containerSize: geo.size,
+                                        columnWidth: columnWidth,
+                                        iconSize: iconSize,
+                                        appHeight: appHeight,
+                                        labelWidth: columnWidth * 0.9,
+                                        isSelected: (!isFolderOpen && isKeyboardNavigationActive && selectedIndex == globalIndex)
+                                    )
+                                }
+                            }
+                            .animation(LNAnimations.gridUpdate, value: pendingDropIndex)
+                            .id("grid_\(index)_\(appStore.gridRefreshTrigger.uuidString)")
+                            // 避免非必要的全局刷新动画，降低拖拽重绘
+                            .frame(maxHeight: .infinity, alignment: .top)
+                        }
+                        .frame(width: geo.size.width, height: geo.size.height)
+                    }
+                }
+                .offset(x: hStackOffset)
+                .opacity(isFolderOpen ? 0.1 : 1)
+                .allowsHitTesting(!isFolderOpen)
+
+                // 将预览提升到外层坐标空间，避免受到 offset 影响
+                if let draggingItem {
+                    DragPreviewItem(item: draggingItem,
+                                    iconSize: iconSize,
+                                    labelWidth: columnWidth * 0.9,
+                                    scale: dragPreviewScale)
+                        .position(x: dragPreviewPosition.x, y: dragPreviewPosition.y)
+                        .zIndex(100)
+                        .allowsHitTesting(false)
+                }
+            }
+            .coordinateSpace(name: "grid")
+            // 让整个网格容器都可命中，以捕获空白区域的点击
+            .contentShape(Rectangle())
+            .simultaneousGesture(blankDragGesture(geoSize: geo.size,
+                                                  columnWidth: columnWidth,
+                                                  appHeight: appHeight,
+                                                  iconSize: iconSize),
+                                 including: draggingItem == nil ? .gesture : .subviews)
+            .onTapGesture {
+                // 失焦输入
+                NSApp.keyWindow?.makeFirstResponder(nil)
+                // 使用屏幕坐标换算为网格坐标，允许在空白处点击关闭
+                let p = convertScreenToGrid(NSEvent.mouseLocation)
+                closeIfTappedOnEmptyOrGap(at: p,
+                                          geoSize: geo.size,
+                                          columnWidth: columnWidth,
+                                          appHeight: appHeight,
+                                          iconSize: iconSize)
+            }
+            .onAppear { }
+            .onChange(of: appStore.handoffDraggingApp) {
+                if appStore.openFolder == nil, appStore.handoffDraggingApp != nil {
+                    startHandoffDragIfNeeded(geo: geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
+                }
+            }
+            .onChange(of: appStore.openFolder) {
+                if appStore.openFolder == nil, appStore.handoffDraggingApp != nil {
+                    startHandoffDragIfNeeded(geo: geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
+                }
+            }
+            .onChange(of: appStore.currentPage) {
+                DispatchQueue.main.async {
+                    captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
+
+                    // 智能预加载当前页面和相邻页面的图标
+                    AppCacheManager.shared.smartPreloadIcons(
+                        for: appStore.items,
+                        currentPage: appStore.currentPage,
+                        itemsPerPage: config.itemsPerPage
+                    )
+                }
+            }
+            .onChange(of: appStore.gridRefreshTrigger) { _ in
+                DispatchQueue.main.async {
+                    captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
+                }
+            }
+            .onChange(of: geo.size) {
+                DispatchQueue.main.async {
+                    captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
+                }
+            }
+            .task {
+                await MainActor.run {
+                    captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
+                }
+            }
+        )
+    }
+
     private func launchApp(_ app: AppInfo) {
         AppDelegate.shared?.hideWindow()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -1142,6 +1236,580 @@ struct LaunchpadView: View {
         navigateToPage(appStore.currentPage - 1)
     }
     
+}
+
+private struct FirstLaunchOnboardingPanel: View {
+    @ObservedObject var appStore: AppStore
+    let compactLayout: Bool
+    @State private var currentStep: Int = 0
+    @State private var movingForward: Bool = true
+    @State private var isImportingSystem = false
+    @State private var isApplyingPreset = false
+    @State private var statusMessage: String?
+    @State private var statusIsError = false
+    @State private var nativeImportAvailable: Bool = true
+    @State private var hasCheckedNativeImport: Bool = false
+    @State private var hasTriggeredBackgroundPreparation = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compactLayout ? 14 : 18) {
+            headerView
+
+            HStack(alignment: .top, spacing: compactLayout ? 16 : 22) {
+                if shouldShowStepSidebar {
+                    stepSidebar
+                }
+
+                ZStack {
+                    stepView(for: currentStep)
+                        .id(currentStep)
+                        .transition(stepTransition)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: stepContentHeight)
+            }
+
+            statusInlineRow
+            footerView
+        }
+        .padding(compactLayout ? 16 : 20)
+        .frame(maxWidth: compactLayout ? 680 : 760, alignment: .leading)
+        .task {
+            evaluateNativeImportAvailabilityIfNeeded()
+        }
+        .onChange(of: currentStep) { _, step in
+            if step == 1 {
+                triggerBackgroundPreparationIfNeeded()
+            }
+        }
+    }
+
+    private var headerView: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: heroSymbolName)
+                .font(.system(size: compactLayout ? 34 : 40, weight: .light))
+                .foregroundStyle(accentBlue)
+                .symbolRenderingMode(.monochrome)
+                .contentTransition(.symbolEffect(.replace))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(appStore.localized(.onboardingFlowWelcomeTitle))
+                    .font(.system(size: compactLayout ? 24 : 28, weight: .bold))
+                Text(appStore.localized(.onboardingFlowWelcomeSubtitle))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 0)
+
+            Text(String(format: appStore.localized(.onboardingFlowProgressFormat), visibleStepPosition, visibleStepTotal))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+        .overlay(alignment: .bottomLeading) {
+            progressRail
+                .offset(y: compactLayout ? 16 : 18)
+        }
+        .padding(.bottom, compactLayout ? 12 : 14)
+    }
+
+    @ViewBuilder
+    private var statusInlineRow: some View {
+        HStack(spacing: 8) {
+            if let statusMessage, !statusMessage.isEmpty {
+                Image(systemName: statusIsError ? "xmark.octagon.fill" : "checkmark.circle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(statusIsError ? Color.red : accentBlue)
+                Text(statusMessage)
+                    .font(.subheadline)
+                    .foregroundStyle(statusIsError ? Color.red : Color.secondary)
+                    .lineLimit(1)
+            } else {
+                Color.clear
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: compactLayout ? 20 : 22, alignment: .leading)
+        .animation(.easeInOut(duration: 0.2), value: statusMessage)
+    }
+
+    private var stepSidebar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(visibleStepSequence.enumerated()), id: \.element) { order, step in
+                Button {
+                    goToStep(step)
+                } label: {
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(step == currentStep ? accentBlue : Color.secondary.opacity(0.2))
+                            .frame(width: 18, height: 18)
+                            .overlay {
+                                Text("\(order + 1)")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(step == currentStep ? Color.white : Color.secondary)
+                            }
+
+                        Text(sidebarTitle(for: step))
+                            .font(.subheadline.weight(step == currentStep ? .semibold : .regular))
+                            .foregroundStyle(step == currentStep ? Color.primary : Color.secondary)
+                    }
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(width: compactLayout ? 128 : 150, alignment: .topLeading)
+    }
+
+    private var footerView: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(appStore.localized(.onboardingFlowPoweredBy))
+                    .font(.system(size: compactLayout ? 10 : 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Button(appStore.localized(.onboardingFlowSkip)) {
+                    appStore.completeOnboarding()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .tint(accentBlue)
+            }
+
+            Spacer(minLength: 0)
+
+            if !isAtFirstVisibleStep {
+                Button(appStore.localized(.onboardingFlowBack)) {
+                    goToStep(previousStepIndex(from: currentStep))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .tint(accentBlue)
+            }
+
+            Button(primaryActionTitle) {
+                if isAtLastVisibleStep {
+                    appStore.completeOnboarding()
+                } else {
+                    goToStep(nextStepIndex(from: currentStep))
+                }
+            }
+            .keyboardShortcut(.defaultAction)
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(accentBlue)
+        }
+    }
+
+    private var welcomeStep: some View {
+        stepCard(title: appStore.localized(.onboardingFlowIntroTitle),
+                 subtitle: appStore.localized(.onboardingFlowIntroSubtitle),
+                 icon: "sparkles") {
+            VStack(alignment: .leading, spacing: 10) {
+                introItem(icon: "square.and.arrow.down", text: appStore.localized(.onboardingFlowIntroImportItem))
+                introItem(icon: "square.grid.3x3", text: appStore.localized(.onboardingFlowIntroPresetItem))
+                introItem(icon: "command", text: appStore.localized(.onboardingFlowIntroShortcutItem))
+            }
+        }
+    }
+
+    private var setupChoiceStep: some View {
+        stepCard(title: appStore.localized(.onboardingFlowLayoutStepTitle),
+                 subtitle: appStore.localized(.onboardingFlowLayoutStepSubtitle),
+                 icon: "square.grid.3x3.topleft.filled") {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(appStore.localized(.onboardingFlowLayoutChooseMethod))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                LazyVGrid(columns: setupChoiceColumns, spacing: 12) {
+                    setupChoiceCard(
+                        title: appStore.localized(.onboardingFlowLayoutOptionATitle),
+                        subtitle: appStore.localized(.onboardingFlowLayoutOptionASubtitle),
+                        detail: nativeImportAvailable ? appStore.localized(.onboardingFlowLayoutOptionADetail) : appStore.localized(.onboardingFlowLayoutOptionAUnavailableDetail),
+                        icon: "square.and.arrow.down.on.square.fill",
+                        buttonTitle: nativeImportAvailable ? appStore.localized(.onboardingFlowLayoutOptionAButton) : appStore.localized(.onboardingFlowLayoutOptionAUnavailableButton),
+                        loading: isImportingSystem,
+                        enabled: nativeImportAvailable,
+                        action: importFromSystemLaunchpad
+                    )
+
+                    setupChoiceCard(
+                        title: appStore.localized(.onboardingFlowLayoutOptionBTitle),
+                        subtitle: appStore.localized(.onboardingFlowLayoutOptionBSubtitle),
+                        detail: appStore.localized(.onboardingFlowLayoutOptionBDetail),
+                        icon: "square.grid.3x3.topleft.filled",
+                        buttonTitle: appStore.localized(.onboardingFlowLayoutOptionBButton),
+                        loading: isApplyingPreset,
+                        enabled: true,
+                        action: applyClassicLayoutPreset
+                    )
+                }
+
+                HStack {
+                    Spacer()
+                    Button(appStore.localized(.onboardingFlowLayoutSkipButton)) {
+                        goToStep(2)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .tint(accentBlue)
+                    .disabled(isBusy)
+                }
+            }
+        }
+    }
+
+    private var shortcutStep: some View {
+        stepCard(title: appStore.localized(.onboardingFlowShortcutStepTitle),
+                 subtitle: appStore.localized(.onboardingFlowShortcutStepSubtitle),
+                 icon: "command.circle.fill") {
+            Button(appStore.localized(.onboardingFlowShortcutStepButton)) {
+                DispatchQueue.main.async {
+                    appStore.isSetting = true
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(accentBlue)
+        }
+    }
+
+    private var completionStep: some View {
+        VStack(alignment: .leading, spacing: compactLayout ? 16 : 20) {
+            Spacer(minLength: 0)
+
+            HStack(spacing: compactLayout ? 14 : 18) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: compactLayout ? 34 : 40, weight: .semibold))
+                    .foregroundStyle(accentBlue)
+
+                Text(appStore.localized(.onboardingFlowWelcomeTitle))
+                    .font(.system(size: compactLayout ? 34 : 42, weight: .bold))
+            }
+
+            Text(appStore.localized(.onboardingFlowCompletionHeadline))
+                .font(.system(size: compactLayout ? 20 : 24, weight: .semibold))
+                .foregroundStyle(.primary)
+
+            Text(appStore.localized(.onboardingFlowCompletionDescription))
+                .font(.system(size: compactLayout ? 15 : 17))
+                .foregroundStyle(.secondary)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .padding(.horizontal, compactLayout ? 10 : 14)
+    }
+
+    private func stepCard<Content: View>(title: String,
+                                         subtitle: String,
+                                         icon: String,
+                                         @ViewBuilder content: () -> Content) -> some View {
+        HStack(alignment: .top, spacing: compactLayout ? 18 : 24) {
+            stepSymbol(icon: icon)
+                .frame(width: compactLayout ? 52 : 68, alignment: .top)
+
+            VStack(alignment: .leading, spacing: compactLayout ? 10 : 12) {
+                Text(title)
+                    .font(.system(size: compactLayout ? 22 : 25, weight: .bold))
+
+                Text(subtitle)
+                    .font(.system(size: compactLayout ? 14 : 15))
+                    .foregroundColor(Color(nsColor: .secondaryLabelColor))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Divider()
+                    .overlay(accentBlue.opacity(0.22))
+
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(compactLayout ? 14 : 18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var setupChoiceColumns: [GridItem] {
+        if compactLayout {
+            return [GridItem(.flexible(), spacing: 12)]
+        }
+        return [
+            GridItem(.flexible(), spacing: 12),
+            GridItem(.flexible(), spacing: 12)
+        ]
+    }
+
+    private func setupChoiceCard(title: String,
+                                 subtitle: String,
+                                 detail: String,
+                                 icon: String,
+                                 buttonTitle: String,
+                                 loading: Bool,
+                                 enabled: Bool,
+                                 action: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: compactLayout ? 18 : 20, weight: .semibold))
+                    .foregroundStyle(enabled ? accentBlue : Color.secondary)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+
+            Text(subtitle)
+                .font(.system(size: compactLayout ? 16 : 17, weight: .bold))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+
+            Text(detail)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(2)
+
+            Spacer(minLength: 0)
+
+            Button(action: action) {
+                HStack(spacing: 8) {
+                    if loading {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(buttonTitle)
+                        .fontWeight(.semibold)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(accentBlue)
+            .disabled(isBusy || !enabled)
+        }
+        .padding(compactLayout ? 12 : 14)
+        .frame(maxWidth: .infinity, minHeight: compactLayout ? 168 : 182, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(enabled ? accentBlue.opacity(0.20) : Color.secondary.opacity(0.20), lineWidth: 1)
+        )
+    }
+
+    private func stepView(for step: Int) -> some View {
+        Group {
+            switch step {
+            case 0:
+                welcomeStep
+            case 1:
+                setupChoiceStep
+            case 2:
+                shortcutStep
+            case 3:
+                completionStep
+            default:
+                completionStep
+            }
+        }
+    }
+
+    private var stepTransition: AnyTransition {
+        let insertionX: CGFloat = movingForward ? 46 : -46
+        let removalX: CGFloat = movingForward ? -34 : 34
+        return .asymmetric(
+            insertion: .modifier(
+                active: StepMotionModifier(offsetX: insertionX, opacity: 0),
+                identity: StepMotionModifier(offsetX: 0, opacity: 1)
+            ),
+            removal: .modifier(
+                active: StepMotionModifier(offsetX: removalX, opacity: 0),
+                identity: StepMotionModifier(offsetX: 0, opacity: 1)
+            )
+        )
+    }
+
+    private func introItem(icon: String, text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(accentBlue)
+
+            Text(text)
+                .font(.subheadline)
+                .foregroundColor(Color(nsColor: .secondaryLabelColor))
+        }
+    }
+
+    private func stepSymbol(icon: String) -> some View {
+        Image(systemName: icon)
+            .font(.system(size: compactLayout ? 42 : 54, weight: .light))
+            .foregroundStyle(accentBlue)
+            .symbolRenderingMode(.monochrome)
+            .contentTransition(.symbolEffect(.replace))
+    }
+
+    private var heroSymbolName: String {
+        switch currentStep {
+        case 0: return "sparkles"
+        case 1: return "square.grid.3x3"
+        case 2: return "command"
+        default: return "sparkles"
+        }
+    }
+
+    private var accentBlue: Color {
+        Color(red: 0.18, green: 0.48, blue: 1.0)
+    }
+
+    private var progressRail: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.secondary.opacity(0.18))
+                    .frame(height: 4)
+
+                Capsule()
+                    .fill(accentBlue)
+                    .frame(width: progressWidth(totalWidth: proxy.size.width), height: 4)
+            }
+        }
+        .frame(width: compactLayout ? 180 : 210, height: 4)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: visibleStepPosition)
+    }
+
+    private var primaryActionTitle: String {
+        if isAtLastVisibleStep { return appStore.localized(.onboardingFlowDone) }
+        if currentStep == 0 { return appStore.localized(.onboardingFlowStart) }
+        return appStore.localized(.onboardingFlowNext)
+    }
+
+    private func sidebarTitle(for step: Int) -> String {
+        switch step {
+        case 0: return appStore.localized(.onboardingFlowSidebarStart)
+        case 1: return appStore.localized(.onboardingFlowSidebarLayout)
+        case 2: return appStore.localized(.onboardingFlowSidebarShortcut)
+        default: return appStore.localized(.onboardingFlowSidebarDone)
+        }
+    }
+
+    private func progressWidth(totalWidth: CGFloat) -> CGFloat {
+        let ratio = CGFloat(visibleStepPosition) / CGFloat(max(visibleStepTotal, 1))
+        return max(18, totalWidth * ratio)
+    }
+
+    private var visibleStepSequence: [Int] {
+        [0, 1, 2, 3]
+    }
+
+    private var visibleStepPosition: Int {
+        (visibleStepSequence.firstIndex(of: currentStep) ?? 0) + 1
+    }
+
+    private var visibleStepTotal: Int {
+        visibleStepSequence.count
+    }
+
+    private var isAtFirstVisibleStep: Bool {
+        currentStep == (visibleStepSequence.first ?? 0)
+    }
+
+    private var isAtLastVisibleStep: Bool {
+        currentStep == (visibleStepSequence.last ?? lastStep)
+    }
+
+    private func nextStepIndex(from step: Int) -> Int {
+        guard let idx = visibleStepSequence.firstIndex(of: step) else { return min(step + 1, lastStep) }
+        let nextIdx = min(idx + 1, visibleStepSequence.count - 1)
+        return visibleStepSequence[nextIdx]
+    }
+
+    private func previousStepIndex(from step: Int) -> Int {
+        guard let idx = visibleStepSequence.firstIndex(of: step) else { return max(step - 1, 0) }
+        let previousIdx = max(idx - 1, 0)
+        return visibleStepSequence[previousIdx]
+    }
+
+    private func goToStep(_ target: Int) {
+        let normalized = min(max(0, target), lastStep)
+
+        guard normalized != currentStep else { return }
+
+        let currentIndex = visibleStepSequence.firstIndex(of: currentStep) ?? 0
+        let targetIndex = visibleStepSequence.firstIndex(of: normalized) ?? currentIndex
+        movingForward = targetIndex > currentIndex
+
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.9, blendDuration: 0.18)) {
+            currentStep = normalized
+        }
+    }
+
+    private func evaluateNativeImportAvailabilityIfNeeded() {
+        guard !hasCheckedNativeImport else { return }
+        hasCheckedNativeImport = true
+
+        let available = NativeLaunchpadImporter.hasImportableNativeLaunchpadDatabase()
+        nativeImportAvailable = available
+    }
+
+    private func triggerBackgroundPreparationIfNeeded() {
+        guard !hasTriggeredBackgroundPreparation else { return }
+        hasTriggeredBackgroundPreparation = true
+        appStore.performInitialScanIfNeeded()
+    }
+
+    private var shouldShowStepSidebar: Bool { currentStep != lastStep }
+    private var stepContentHeight: CGFloat {
+        if currentStep == 1 {
+            return compactLayout ? 360 : 390
+        }
+        return compactLayout ? 250 : 290
+    }
+    private var lastStep: Int { 3 }
+    private var isBusy: Bool { isImportingSystem || isApplyingPreset }
+
+    private struct StepMotionModifier: ViewModifier {
+        let offsetX: CGFloat
+        let opacity: Double
+
+        func body(content: Content) -> some View {
+            content
+                .opacity(opacity)
+                .offset(x: offsetX)
+        }
+    }
+
+    private func importFromSystemLaunchpad() {
+        guard !isBusy else { return }
+        isImportingSystem = true
+        Task {
+            let result = await appStore.importFromNativeLaunchpad()
+            await MainActor.run {
+                statusMessage = result.message
+                statusIsError = !result.success
+                isImportingSystem = false
+                if result.success {
+                    goToStep(2)
+                }
+            }
+        }
+    }
+
+    private func applyClassicLayoutPreset() {
+        guard !isBusy else { return }
+        isApplyingPreset = true
+        let success = appStore.applyMacOS26PresetLayout()
+        statusMessage = success ? appStore.localized(.layoutPresetAppliedMessage) : appStore.localized(.layoutPresetApplyFailedMessage)
+        statusIsError = !success
+        isApplyingPreset = false
+        if success {
+            goToStep(2)
+        }
+    }
 }
 
 // MARK: - FPS Monitoring
@@ -1691,26 +2359,24 @@ extension LaunchpadView {
             }()
 
             let base = LaunchpadItemButton(
-                item: item,
-                iconSize: iconSize,
-                labelWidth: labelWidth,
-                isSelected: isSelected,
-                showLabel: appStore.showLabels,
-                labelFontSize: CGFloat(appStore.iconLabelFontSize),
-                labelFontWeight: appStore.iconLabelFontWeightValue,
-                shouldAllowHover: shouldAllowHover,
-                externalScale: isCenterCreatingTarget ? 1.2 : nil,
-                hoverMagnificationEnabled: appStore.enableHoverMagnification,
-                hoverMagnificationScale: CGFloat(appStore.hoverMagnificationScale),
-                activePressEffectEnabled: appStore.enableActivePressEffect,
-                activePressScale: CGFloat(appStore.activePressScale),
-                onTap: { if draggingItem == nil { handleItemTap(item) } }
-            )
-            .frame(height: appHeight)
-            // 保持稳定的视图身份，避免在文件夹更新后中断拖拽手势
-            .id(item.id)
-
-
+                    item: item,
+                    iconSize: iconSize,
+                    labelWidth: labelWidth,
+                    isSelected: isSelected,
+                    showLabel: appStore.showLabels,
+                    labelFontSize: CGFloat(appStore.iconLabelFontSize),
+                    labelFontWeight: appStore.iconLabelFontWeightValue,
+                    shouldAllowHover: shouldAllowHover,
+                    externalScale: isCenterCreatingTarget ? 1.2 : nil,
+                    hoverMagnificationEnabled: appStore.enableHoverMagnification,
+                    hoverMagnificationScale: CGFloat(appStore.hoverMagnificationScale),
+                    activePressEffectEnabled: appStore.enableActivePressEffect,
+                    activePressScale: CGFloat(appStore.activePressScale),
+                    onTap: { if draggingItem == nil { handleItemTap(item) } }
+                )
+                .frame(height: appHeight)
+                // 保持稳定的视图身份，避免在文件夹更新后中断拖拽手势
+                .id(item.id)
             if appStore.searchText.isEmpty && !isFolderOpen && !appStore.isLayoutLocked {
                 let isDraggingThisTile = (draggingItem == item)
 
@@ -1740,11 +2406,14 @@ extension LaunchpadView {
                                 }
                             }
                     )
+                    .launchNextHideAppContextMenu(app: item.contextMenuApp, folder: item.contextMenuFolder, appStore: appStore)
             } else {
                 base
+                    .launchNextHideAppContextMenu(app: item.contextMenuApp, folder: item.contextMenuFolder, appStore: appStore)
             }
         }
     }
+
 }
 
 // MARK: - Drag math helpers
@@ -1963,6 +2632,7 @@ extension LaunchpadView {
     private func handleWheelScroll(_ primaryDelta: CGFloat) {
         if primaryDelta == 0 { return }
         let direction = primaryDelta > 0 ? 1 : -1
+        let effectiveDirection = appStore.reverseWheelPagingDirection ? -direction : direction
         if scrollState.wheelLastDirection != direction { scrollState.wheelAccumulated = 0 }
         scrollState.wheelLastDirection = direction
         scrollState.wheelAccumulated += abs(primaryDelta)
@@ -1973,7 +2643,7 @@ extension LaunchpadView {
         let now = Date()
         if scrollState.wheelAccumulated >= threshold {
             if let last = scrollState.wheelLastFlipAt, now.timeIntervalSince(last) < wheelFlipCooldown { return }
-            if direction > 0 { navigateToNextPage() } else { navigateToPreviousPage() }
+            if effectiveDirection > 0 { navigateToNextPage() } else { navigateToPreviousPage() }
             scrollState.wheelLastFlipAt = now
             // Reset so one tick flips at most once.
             scrollState.wheelAccumulated = 0
@@ -2499,10 +3169,11 @@ func arrowDelta(for keyCode: UInt16) -> (dx: Int, dy: Int)? {
 extension LaunchpadView {
     /// 检查缓存状态
     private func checkCacheStatus() {
+        guard !appStore.shouldShowOnboarding else { return }
         // 如果缓存无效，触发重新扫描
         if !AppCacheManager.shared.isCacheValid {
-    
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                guard !self.appStore.shouldShowOnboarding else { return }
                 self.appStore.performInitialScanIfNeeded()
             }
         }

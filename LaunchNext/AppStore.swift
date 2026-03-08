@@ -97,6 +97,43 @@ final class AppStore: ObservableObject {
         var topPadding: Double
     }
 
+    enum AppearanceLayoutMode: String, CaseIterable, Codable, Identifiable {
+        case fullscreen
+        case compact
+
+        var id: String { rawValue }
+    }
+
+    struct ModeScopedAppearanceSettings: Codable, Equatable {
+        var iconScale: Double
+        var iconLabelFontSize: Double
+        var folderDropZoneScale: Double
+        var pageIndicatorOffset: Double
+        var pageIndicatorTopPadding: Double
+        var pageIndicatorPerDisplayEnabled: Bool
+        var pageIndicatorOverrides: [String: PageIndicatorOverride]
+    }
+
+    struct DualModeAppearanceSettings: Codable, Equatable {
+        var fullscreen: ModeScopedAppearanceSettings
+        var compact: ModeScopedAppearanceSettings
+
+        subscript(mode: AppearanceLayoutMode) -> ModeScopedAppearanceSettings {
+            get {
+                switch mode {
+                case .fullscreen: return fullscreen
+                case .compact: return compact
+                }
+            }
+            set {
+                switch mode {
+                case .fullscreen: fullscreen = newValue
+                case .compact: compact = newValue
+                }
+            }
+        }
+    }
+
     struct RGBAColor: Codable, Equatable {
         var red: Double
         var green: Double
@@ -138,6 +175,25 @@ final class AppStore: ObservableObject {
             switch self {
             case .blur: return .backgroundStyleOptionBlur
             case .glass: return .backgroundStyleOptionGlass
+            }
+        }
+    }
+
+    enum DevelopmentBackgroundOverride: String, CaseIterable, Identifiable {
+        case none
+        case solidWhite
+        case solidBlack
+
+        var id: String { rawValue }
+
+        var color: Color? {
+            switch self {
+            case .none:
+                return nil
+            case .solidWhite:
+                return .white
+            case .solidBlack:
+                return .black
             }
         }
     }
@@ -203,14 +259,23 @@ final class AppStore: ObservableObject {
     static let activePressEffectKey = "enableActivePressEffect"
     static let activePressScaleKey = "activePressScale"
     static let followScrollPagingKey = "followScrollPagingEnabled"
+    static let reverseWheelPagingKey = "reverseWheelPagingDirection"
     static let useCAGridRendererKey = "useCAGridRenderer"
+    static let windowOpenAnimationKey = "windowOpenAnimationEnabled"
+    static let developmentEnableCLICodeKey = "developmentEnableCLICode"
+    private static let cliShimMarker = "# LaunchNext CLI shim"
+    private static let cliPathSnippetHeader = "# >>> LaunchNext CLI >>>"
+    private static let cliPathSnippetFooter = "# <<< LaunchNext CLI <<<"
     static let backgroundStyleKey = "launchpadBackgroundStyle"
     static let backgroundMaskEnabledKey = "launchpadBackgroundMaskEnabled"
     static let backgroundMaskLightKey = "launchpadBackgroundMaskLight"
     static let backgroundMaskDarkKey = "launchpadBackgroundMaskDark"
+    static let folderPreviewHighResKey = "folderPreviewHighRes"
     static let sidebarIconPresetKey = "sidebarIconPreset"
+    static let uninstallToolAppPathKey = "uninstallToolAppPath"
     static let pageIndicatorPerDisplayEnabledKey = "pageIndicatorPerDisplayEnabled"
     static let pageIndicatorPerDisplayOverridesKey = "pageIndicatorPerDisplayOverrides"
+    static let dualModeAppearanceSettingsKey = "dualModeAppearanceSettings"
     private static let gameControllerEnabledKey = "gameControllerEnabled"
     static let gameControllerMenuToggleKey = "gameControllerMenuToggleLaunchpad"
     private static let soundEffectsEnabledKey = "soundEffectsEnabled"
@@ -220,6 +285,8 @@ final class AppStore: ObservableObject {
     private static let voiceFeedbackEnabledKey = "voiceFeedbackEnabled"
     static let folderDropZoneScaleKey = "folderDropZoneScale"
     static let pageIndicatorTopPaddingKey = "pageIndicatorTopPadding"
+    static let onboardingVersionKey = "onboardingVersionShown"
+    static let currentOnboardingVersion = 1
     // private static let aiFeatureEnabledKey = "aiFeatureEnabled"
     // private static let aiOverlayHotKeyKey = "aiOverlayHotKeyConfiguration"
 
@@ -435,6 +502,23 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // Development-only override to capture flat screenshots quickly.
+    @Published var developmentBackgroundOverride: DevelopmentBackgroundOverride = .none
+
+    @Published var developmentEnableCLICode: Bool = {
+        if UserDefaults.standard.object(forKey: AppStore.developmentEnableCLICodeKey) == nil { return false }
+        return UserDefaults.standard.bool(forKey: AppStore.developmentEnableCLICodeKey)
+    }() {
+        didSet {
+            UserDefaults.standard.set(developmentEnableCLICode, forKey: Self.developmentEnableCLICodeKey)
+            if developmentEnableCLICode && !oldValue {
+                installCLICommandIfNeeded()
+            } else if !developmentEnableCLICode && oldValue {
+                uninstallCLICommandIfNeeded()
+            }
+        }
+    }
+
     @Published var backgroundMaskEnabled: Bool = AppStore.loadBackgroundMaskEnabled() {
         didSet {
             UserDefaults.standard.set(backgroundMaskEnabled, forKey: Self.backgroundMaskEnabledKey)
@@ -478,6 +562,7 @@ final class AppStore: ObservableObject {
            let preset = SidebarIconPreset(rawValue: raw) {
             sidebarIconPreset = preset
         }
+        uninstallToolAppPath = UserDefaults.standard.string(forKey: AppStore.uninstallToolAppPathKey) ?? ""
 
         launchpadBackgroundStyle = AppStore.loadBackgroundStyle()
         backgroundMaskEnabled = AppStore.loadBackgroundMaskEnabled()
@@ -490,7 +575,37 @@ final class AppStore: ObservableObject {
         useLocalizedThirdPartyTitles = UserDefaults.standard.object(forKey: "useLocalizedThirdPartyTitles") as? Bool ?? true
         enableAnimations = UserDefaults.standard.object(forKey: "enableAnimations") as? Bool ?? true
         scrollSensitivity = UserDefaults.standard.object(forKey: "scrollSensitivity") as? Double ?? scrollSensitivity
-        useCAGridRenderer = UserDefaults.standard.object(forKey: Self.useCAGridRendererKey) as? Bool ?? false
+        reverseWheelPagingDirection = UserDefaults.standard.object(forKey: Self.reverseWheelPagingKey) as? Bool ?? false
+        useCAGridRenderer = UserDefaults.standard.object(forKey: Self.useCAGridRendererKey) as? Bool ?? useCAGridRenderer
+        developmentEnableCLICode = UserDefaults.standard.object(forKey: Self.developmentEnableCLICodeKey) as? Bool ?? false
+
+        // Keep imported appearance/input settings in sync without requiring relaunch.
+        iconScale = UserDefaults.standard.object(forKey: "iconScale") as? Double ?? iconScale
+        iconLabelFontSize = UserDefaults.standard.object(forKey: "iconLabelFontSize") as? Double ?? iconLabelFontSize
+        if let rawFontWeight = UserDefaults.standard.string(forKey: Self.iconLabelFontWeightKey),
+           let fontWeight = IconLabelFontWeightOption(rawValue: rawFontWeight) {
+            iconLabelFontWeight = fontWeight
+        }
+
+        pageIndicatorOffset = UserDefaults.standard.object(forKey: "pageIndicatorOffset") as? Double ?? pageIndicatorOffset
+        let importedTopPadding = UserDefaults.standard.object(forKey: Self.pageIndicatorTopPaddingKey) as? Double ?? pageIndicatorTopPadding
+        pageIndicatorTopPadding = Self.clampPageIndicatorTopPadding(importedTopPadding)
+        if let importedPerDisplayEnabled = UserDefaults.standard.object(forKey: Self.pageIndicatorPerDisplayEnabledKey) as? Bool {
+            pageIndicatorPerDisplayEnabled = importedPerDisplayEnabled
+        }
+        pageIndicatorOverrides = Self.loadPageIndicatorOverrides()
+
+        if let storedDualModeAppearance = Self.loadDualModeAppearanceSettings(from: UserDefaults.standard) {
+            dualModeAppearanceSettings = storedDualModeAppearance
+        } else {
+            let legacy = Self.legacyAppearanceSettings(from: UserDefaults.standard)
+            dualModeAppearanceSettings = DualModeAppearanceSettings(fullscreen: legacy, compact: legacy)
+            persistDualModeAppearanceSettings()
+        }
+        syncActiveAppearanceProxies(from: currentAppearanceLayoutMode)
+        persistLegacyAppearanceProxyValues()
+
+        globalHotKey = Self.loadHotKeyConfiguration()
 
         // Apply hidden filtering immediately
         pruneHiddenAppsFromAppList()
@@ -502,6 +617,7 @@ final class AppStore: ObservableObject {
     }
     @Published var isSetting = false
     @Published var isInitialLoading = true
+    @Published var shouldShowOnboarding: Bool = false
     @Published var currentPage = 0 {
         didSet {
             if currentPage < 0 { currentPage = 0; return }
@@ -550,6 +666,8 @@ final class AppStore: ObservableObject {
     @Published var isFullscreenMode: Bool = false {
         didSet {
             UserDefaults.standard.set(isFullscreenMode, forKey: "isFullscreenMode")
+            syncActiveAppearanceProxies(from: currentAppearanceLayoutMode)
+            persistLegacyAppearanceProxyValues()
             DispatchQueue.main.async { [weak self] in
                 if let appDelegate = AppDelegate.shared {
                     appDelegate.updateWindowMode(isFullscreen: self?.isFullscreenMode ?? false)
@@ -596,6 +714,23 @@ final class AppStore: ObservableObject {
 
     private var appearanceRefreshWorkItem: DispatchWorkItem?
     private var lastAppearanceEventAt: TimeInterval = 0
+    private var isApplyingScopedAppearanceState = false
+    @Published private var dualModeAppearanceSettings: DualModeAppearanceSettings = DualModeAppearanceSettings(
+        fullscreen: ModeScopedAppearanceSettings(iconScale: 0.95,
+                                                 iconLabelFontSize: 11.0,
+                                                 folderDropZoneScale: AppStore.defaultFolderDropZoneScale,
+                                                 pageIndicatorOffset: 27.0,
+                                                 pageIndicatorTopPadding: AppStore.defaultPageIndicatorTopPadding,
+                                                 pageIndicatorPerDisplayEnabled: false,
+                                                 pageIndicatorOverrides: [:]),
+        compact: ModeScopedAppearanceSettings(iconScale: 0.95,
+                                              iconLabelFontSize: 11.0,
+                                              folderDropZoneScale: AppStore.defaultFolderDropZoneScale,
+                                              pageIndicatorOffset: 27.0,
+                                              pageIndicatorTopPadding: AppStore.defaultPageIndicatorTopPadding,
+                                              pageIndicatorPerDisplayEnabled: false,
+                                              pageIndicatorOverrides: [:])
+    )
 
     static func screenIdentifier(for screen: NSScreen) -> String {
         if let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
@@ -619,12 +754,215 @@ final class AppStore: ObservableObject {
         }
     }
 
+    private static func legacyAppearanceSettings(from defaults: UserDefaults) -> ModeScopedAppearanceSettings {
+        let iconScale = defaults.object(forKey: "iconScale") as? Double ?? 0.95
+        let iconLabelFontSize = defaults.object(forKey: "iconLabelFontSize") as? Double ?? 11.0
+        let dropZoneScale = clampFolderDropZoneScale(defaults.object(forKey: Self.folderDropZoneScaleKey) as? Double ?? Self.defaultFolderDropZoneScale)
+        let indicatorOffset = defaults.object(forKey: "pageIndicatorOffset") as? Double ?? 27.0
+        let indicatorTopPadding = clampPageIndicatorTopPadding(defaults.object(forKey: Self.pageIndicatorTopPaddingKey) as? Double ?? Self.defaultPageIndicatorTopPadding)
+        let perDisplayEnabled = defaults.object(forKey: Self.pageIndicatorPerDisplayEnabledKey) as? Bool ?? false
+        let overrides = (try? JSONDecoder().decode([String: PageIndicatorOverride].self,
+                                                   from: defaults.data(forKey: Self.pageIndicatorPerDisplayOverridesKey) ?? Data())) ?? [:]
+        return ModeScopedAppearanceSettings(iconScale: iconScale,
+                                            iconLabelFontSize: iconLabelFontSize,
+                                            folderDropZoneScale: dropZoneScale,
+                                            pageIndicatorOffset: indicatorOffset,
+                                            pageIndicatorTopPadding: indicatorTopPadding,
+                                            pageIndicatorPerDisplayEnabled: perDisplayEnabled,
+                                            pageIndicatorOverrides: overrides)
+    }
+
+    private static func normalizedAppearanceSettings(_ settings: ModeScopedAppearanceSettings) -> ModeScopedAppearanceSettings {
+        ModeScopedAppearanceSettings(iconScale: settings.iconScale,
+                                     iconLabelFontSize: settings.iconLabelFontSize,
+                                     folderDropZoneScale: clampFolderDropZoneScale(settings.folderDropZoneScale),
+                                     pageIndicatorOffset: settings.pageIndicatorOffset,
+                                     pageIndicatorTopPadding: clampPageIndicatorTopPadding(settings.pageIndicatorTopPadding),
+                                     pageIndicatorPerDisplayEnabled: settings.pageIndicatorPerDisplayEnabled,
+                                     pageIndicatorOverrides: settings.pageIndicatorOverrides)
+    }
+
+    private static func normalizedDualModeAppearanceSettings(_ settings: DualModeAppearanceSettings) -> DualModeAppearanceSettings {
+        DualModeAppearanceSettings(fullscreen: normalizedAppearanceSettings(settings.fullscreen),
+                                   compact: normalizedAppearanceSettings(settings.compact))
+    }
+
+    private static func loadDualModeAppearanceSettings(from defaults: UserDefaults) -> DualModeAppearanceSettings? {
+        guard let data = defaults.data(forKey: dualModeAppearanceSettingsKey),
+              let decoded = try? JSONDecoder().decode(DualModeAppearanceSettings.self, from: data) else {
+            return nil
+        }
+        return normalizedDualModeAppearanceSettings(decoded)
+    }
+
+    private func persistDualModeAppearanceSettings() {
+        let normalized = Self.normalizedDualModeAppearanceSettings(dualModeAppearanceSettings)
+        dualModeAppearanceSettings = normalized
+        if let data = try? JSONEncoder().encode(normalized) {
+            UserDefaults.standard.set(data, forKey: Self.dualModeAppearanceSettingsKey)
+        }
+    }
+
+    private var currentAppearanceLayoutMode: AppearanceLayoutMode {
+        isFullscreenMode ? .fullscreen : .compact
+    }
+
+    private func updateScopedAppearanceSettings(for mode: AppearanceLayoutMode,
+                                                _ update: (inout ModeScopedAppearanceSettings) -> Void) {
+        var settings = dualModeAppearanceSettings
+        var scoped = settings[mode]
+        update(&scoped)
+        settings[mode] = Self.normalizedAppearanceSettings(scoped)
+        dualModeAppearanceSettings = settings
+        persistDualModeAppearanceSettings()
+    }
+
+    private func syncActiveAppearanceProxies(from mode: AppearanceLayoutMode) {
+        let settings = dualModeAppearanceSettings[mode]
+        isApplyingScopedAppearanceState = true
+        defer { isApplyingScopedAppearanceState = false }
+        iconScale = settings.iconScale
+        iconLabelFontSize = settings.iconLabelFontSize
+        folderDropZoneScale = settings.folderDropZoneScale
+        pageIndicatorOffset = settings.pageIndicatorOffset
+        pageIndicatorTopPadding = settings.pageIndicatorTopPadding
+        pageIndicatorPerDisplayEnabled = settings.pageIndicatorPerDisplayEnabled
+        pageIndicatorOverrides = settings.pageIndicatorOverrides
+    }
+
+    private func persistLegacyAppearanceProxyValues() {
+        let defaults = UserDefaults.standard
+        defaults.set(iconScale, forKey: "iconScale")
+        defaults.set(iconLabelFontSize, forKey: "iconLabelFontSize")
+        defaults.set(folderDropZoneScale, forKey: Self.folderDropZoneScaleKey)
+        defaults.set(pageIndicatorOffset, forKey: "pageIndicatorOffset")
+        defaults.set(pageIndicatorTopPadding, forKey: Self.pageIndicatorTopPaddingKey)
+        defaults.set(pageIndicatorPerDisplayEnabled, forKey: Self.pageIndicatorPerDisplayEnabledKey)
+        persistPageIndicatorOverrides(pageIndicatorOverrides)
+    }
+
+    func scopedIconScale(for mode: AppearanceLayoutMode) -> Double {
+        dualModeAppearanceSettings[mode].iconScale
+    }
+
+    func setScopedIconScale(_ value: Double, for mode: AppearanceLayoutMode) {
+        if mode == currentAppearanceLayoutMode {
+            iconScale = value
+        } else {
+            updateScopedAppearanceSettings(for: mode) { $0.iconScale = value }
+        }
+    }
+
+    func scopedIconLabelFontSize(for mode: AppearanceLayoutMode) -> Double {
+        dualModeAppearanceSettings[mode].iconLabelFontSize
+    }
+
+    func setScopedIconLabelFontSize(_ value: Double, for mode: AppearanceLayoutMode) {
+        if mode == currentAppearanceLayoutMode {
+            iconLabelFontSize = value
+        } else {
+            updateScopedAppearanceSettings(for: mode) { $0.iconLabelFontSize = value }
+        }
+    }
+
+    func scopedFolderDropZoneScale(for mode: AppearanceLayoutMode) -> Double {
+        dualModeAppearanceSettings[mode].folderDropZoneScale
+    }
+
+    func setScopedFolderDropZoneScale(_ value: Double, for mode: AppearanceLayoutMode) {
+        let clamped = Self.clampFolderDropZoneScale(value)
+        if mode == currentAppearanceLayoutMode {
+            folderDropZoneScale = clamped
+        } else {
+            updateScopedAppearanceSettings(for: mode) { $0.folderDropZoneScale = clamped }
+        }
+    }
+
+    func scopedPageIndicatorOffset(for mode: AppearanceLayoutMode) -> Double {
+        dualModeAppearanceSettings[mode].pageIndicatorOffset
+    }
+
+    func setScopedPageIndicatorOffset(_ value: Double, for mode: AppearanceLayoutMode) {
+        if mode == currentAppearanceLayoutMode {
+            pageIndicatorOffset = value
+        } else {
+            updateScopedAppearanceSettings(for: mode) { $0.pageIndicatorOffset = value }
+        }
+    }
+
+    func scopedPageIndicatorTopPadding(for mode: AppearanceLayoutMode) -> Double {
+        dualModeAppearanceSettings[mode].pageIndicatorTopPadding
+    }
+
+    func setScopedPageIndicatorTopPadding(_ value: Double, for mode: AppearanceLayoutMode) {
+        let clamped = Self.clampPageIndicatorTopPadding(value)
+        if mode == currentAppearanceLayoutMode {
+            pageIndicatorTopPadding = clamped
+        } else {
+            updateScopedAppearanceSettings(for: mode) { $0.pageIndicatorTopPadding = clamped }
+        }
+    }
+
+    func scopedPageIndicatorPerDisplayEnabled(for mode: AppearanceLayoutMode) -> Bool {
+        dualModeAppearanceSettings[mode].pageIndicatorPerDisplayEnabled
+    }
+
+    func setScopedPageIndicatorPerDisplayEnabled(_ enabled: Bool, for mode: AppearanceLayoutMode) {
+        if mode == currentAppearanceLayoutMode {
+            pageIndicatorPerDisplayEnabled = enabled
+        } else {
+            updateScopedAppearanceSettings(for: mode) { $0.pageIndicatorPerDisplayEnabled = enabled }
+        }
+    }
+
+    func scopedPageIndicatorOverrides(for mode: AppearanceLayoutMode) -> [String: PageIndicatorOverride] {
+        dualModeAppearanceSettings[mode].pageIndicatorOverrides
+    }
+
+    func scopedPageIndicatorOverride(for screenID: String, mode: AppearanceLayoutMode) -> PageIndicatorOverride? {
+        dualModeAppearanceSettings[mode].pageIndicatorOverrides[screenID]
+    }
+
+    func setScopedPageIndicatorOverride(_ override: PageIndicatorOverride?, for screenID: String, mode: AppearanceLayoutMode) {
+        if mode == currentAppearanceLayoutMode {
+            setPageIndicatorOverride(override, for: screenID)
+            return
+        }
+        updateScopedAppearanceSettings(for: mode) { settings in
+            if let override {
+                settings.pageIndicatorOverrides[screenID] = override
+            } else {
+                settings.pageIndicatorOverrides.removeValue(forKey: screenID)
+            }
+        }
+    }
+
+    func applyIndicatorDefaults(to screenID: String, mode: AppearanceLayoutMode) {
+        let settings = dualModeAppearanceSettings[mode]
+        let override = PageIndicatorOverride(offset: settings.pageIndicatorOffset,
+                                             topPadding: settings.pageIndicatorTopPadding)
+        setScopedPageIndicatorOverride(override, for: screenID, mode: mode)
+    }
+
     // 图标标题显示
     @Published var showLabels: Bool = {
         if UserDefaults.standard.object(forKey: "showLabels") == nil { return true }
         return UserDefaults.standard.bool(forKey: "showLabels")
     }() {
         didSet { UserDefaults.standard.set(showLabels, forKey: "showLabels") }
+    }
+
+    @Published var enableHighResFolderPreviews: Bool = {
+        if UserDefaults.standard.object(forKey: AppStore.folderPreviewHighResKey) == nil { return true }
+        return UserDefaults.standard.bool(forKey: AppStore.folderPreviewHighResKey)
+    }() {
+        didSet {
+            guard enableHighResFolderPreviews != oldValue else { return }
+            UserDefaults.standard.set(enableHighResFolderPreviews, forKey: AppStore.folderPreviewHighResKey)
+            clearIconCachesForLayoutChange()
+            triggerFolderUpdate()
+            triggerGridRefresh()
+        }
     }
 
     @Published var hideDock: Bool = {
@@ -710,6 +1048,8 @@ final class AppStore: ObservableObject {
                 return
             }
             UserDefaults.standard.set(folderDropZoneScale, forKey: Self.folderDropZoneScaleKey)
+            guard !isApplyingScopedAppearanceState else { return }
+            updateScopedAppearanceSettings(for: currentAppearanceLayoutMode) { $0.folderDropZoneScale = folderDropZoneScale }
         }
     }
 
@@ -721,6 +1061,8 @@ final class AppStore: ObservableObject {
                 return
             }
             UserDefaults.standard.set(pageIndicatorTopPadding, forKey: Self.pageIndicatorTopPaddingKey)
+            guard !isApplyingScopedAppearanceState else { return }
+            updateScopedAppearanceSettings(for: currentAppearanceLayoutMode) { $0.pageIndicatorTopPadding = pageIndicatorTopPadding }
         }
     }
 
@@ -772,8 +1114,15 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(followScrollPagingEnabled, forKey: Self.followScrollPagingKey) }
     }
 
+    @Published var reverseWheelPagingDirection: Bool = {
+        if UserDefaults.standard.object(forKey: AppStore.reverseWheelPagingKey) == nil { return false }
+        return UserDefaults.standard.bool(forKey: AppStore.reverseWheelPagingKey)
+    }() {
+        didSet { UserDefaults.standard.set(reverseWheelPagingDirection, forKey: Self.reverseWheelPagingKey) }
+    }
+
     @Published var useCAGridRenderer: Bool = {
-        if UserDefaults.standard.object(forKey: AppStore.useCAGridRendererKey) == nil { return false }
+        if UserDefaults.standard.object(forKey: AppStore.useCAGridRendererKey) == nil { return true }
         let enabled = UserDefaults.standard.bool(forKey: AppStore.useCAGridRendererKey)
         if PerformanceMode.current == .full { return false }
         return enabled
@@ -812,6 +1161,8 @@ final class AppStore: ObservableObject {
     }() {
         didSet {
             UserDefaults.standard.set(iconLabelFontSize, forKey: "iconLabelFontSize")
+            guard !isApplyingScopedAppearanceState else { return }
+            updateScopedAppearanceSettings(for: currentAppearanceLayoutMode) { $0.iconLabelFontSize = iconLabelFontSize }
             triggerGridRefresh()
         }
     }
@@ -842,6 +1193,20 @@ final class AppStore: ObservableObject {
         didSet {
             guard showQuickRefreshButton != oldValue else { return }
             UserDefaults.standard.set(showQuickRefreshButton, forKey: AppStore.showQuickRefreshButtonKey)
+        }
+    }
+
+    @Published var uninstallToolAppPath: String = {
+        UserDefaults.standard.string(forKey: AppStore.uninstallToolAppPathKey) ?? ""
+    }() {
+        didSet {
+            guard uninstallToolAppPath != oldValue else { return }
+            let trimmed = uninstallToolAppPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                UserDefaults.standard.removeObject(forKey: AppStore.uninstallToolAppPathKey)
+            } else {
+                UserDefaults.standard.set(trimmed, forKey: AppStore.uninstallToolAppPathKey)
+            }
         }
     }
 
@@ -879,6 +1244,13 @@ final class AppStore: ObservableObject {
         return stored == 0 ? 0.3 : stored
     }() {
         didSet { UserDefaults.standard.set(animationDuration, forKey: "animationDuration") }
+    }
+
+    @Published var enableWindowOpenAnimation: Bool = {
+        if UserDefaults.standard.object(forKey: AppStore.windowOpenAnimationKey) == nil { return true }
+        return UserDefaults.standard.bool(forKey: AppStore.windowOpenAnimationKey)
+    }() {
+        didSet { UserDefaults.standard.set(enableWindowOpenAnimation, forKey: Self.windowOpenAnimationKey) }
     }
 
     @Published var useLocalizedThirdPartyTitles: Bool = {
@@ -987,6 +1359,8 @@ final class AppStore: ObservableObject {
     }() {
         didSet {
             UserDefaults.standard.set(pageIndicatorOffset, forKey: "pageIndicatorOffset")
+            guard !isApplyingScopedAppearanceState else { return }
+            updateScopedAppearanceSettings(for: currentAppearanceLayoutMode) { $0.pageIndicatorOffset = pageIndicatorOffset }
         }
     }
 
@@ -996,10 +1370,18 @@ final class AppStore: ObservableObject {
     }() {
         didSet {
             UserDefaults.standard.set(pageIndicatorPerDisplayEnabled, forKey: AppStore.pageIndicatorPerDisplayEnabledKey)
+            guard !isApplyingScopedAppearanceState else { return }
+            updateScopedAppearanceSettings(for: currentAppearanceLayoutMode) { $0.pageIndicatorPerDisplayEnabled = pageIndicatorPerDisplayEnabled }
         }
     }
 
-    @Published private(set) var pageIndicatorOverrides: [String: PageIndicatorOverride] = AppStore.loadPageIndicatorOverrides()
+    @Published private(set) var pageIndicatorOverrides: [String: PageIndicatorOverride] = AppStore.loadPageIndicatorOverrides() {
+        didSet {
+            persistPageIndicatorOverrides(pageIndicatorOverrides)
+            guard !isApplyingScopedAppearanceState else { return }
+            updateScopedAppearanceSettings(for: currentAppearanceLayoutMode) { $0.pageIndicatorOverrides = pageIndicatorOverrides }
+        }
+    }
 
     @Published var rememberLastPage: Bool = AppStore.defaultRememberSetting() {
         didSet {
@@ -1056,7 +1438,7 @@ final class AppStore: ObservableObject {
     }
 
     private static func defaultRememberSetting() -> Bool {
-        if UserDefaults.standard.object(forKey: rememberPageKey) == nil { return false }
+        if UserDefaults.standard.object(forKey: rememberPageKey) == nil { return true }
         return UserDefaults.standard.bool(forKey: rememberPageKey)
     }
 
@@ -1532,11 +1914,11 @@ final class AppStore: ObservableObject {
             self.isFullscreenMode = UserDefaults.standard.bool(forKey: "isFullscreenMode")
         }
         if UserDefaults.standard.object(forKey: PerformanceMode.userDefaultsKey) == nil {
-            PerformanceMode.persist(.full)
+            PerformanceMode.persist(.lean)
         }
         let defaults = UserDefaults.standard
 
-        let shouldRememberPage = defaults.object(forKey: Self.rememberPageKey) == nil ? false : defaults.bool(forKey: Self.rememberPageKey)
+        let shouldRememberPage = defaults.object(forKey: Self.rememberPageKey) == nil ? true : defaults.bool(forKey: Self.rememberPageKey)
         let savedPageIndex = defaults.object(forKey: Self.rememberedPageIndexKey) as? Int
 
         let initialScrollSensitivity: Double
@@ -1599,11 +1981,17 @@ final class AppStore: ObservableObject {
         if UserDefaults.standard.object(forKey: AppStore.followScrollPagingKey) == nil {
             UserDefaults.standard.set(false, forKey: AppStore.followScrollPagingKey)
         }
+        if UserDefaults.standard.object(forKey: AppStore.reverseWheelPagingKey) == nil {
+            UserDefaults.standard.set(false, forKey: AppStore.reverseWheelPagingKey)
+        }
         if defaults.object(forKey: Self.gameControllerMenuToggleKey) == nil {
             defaults.set(true, forKey: Self.gameControllerMenuToggleKey)
         }
         if defaults.object(forKey: Self.useCAGridRendererKey) == nil {
-            defaults.set(false, forKey: Self.useCAGridRendererKey)
+            defaults.set(true, forKey: Self.useCAGridRendererKey)
+        }
+        if defaults.object(forKey: Self.developmentEnableCLICodeKey) == nil {
+            defaults.set(false, forKey: Self.developmentEnableCLICodeKey)
         }
         if defaults.object(forKey: Self.backgroundMaskEnabledKey) == nil {
             defaults.set(false, forKey: Self.backgroundMaskEnabledKey)
@@ -1623,6 +2011,9 @@ final class AppStore: ObservableObject {
         if UserDefaults.standard.object(forKey: "animationDuration") == nil {
             UserDefaults.standard.set(0.3, forKey: "animationDuration")
         }
+        if defaults.object(forKey: Self.windowOpenAnimationKey) == nil {
+            defaults.set(true, forKey: Self.windowOpenAnimationKey)
+        }
         if UserDefaults.standard.object(forKey: "showFPSOverlay") == nil {
             UserDefaults.standard.set(false, forKey: "showFPSOverlay")
         }
@@ -1630,8 +2021,20 @@ final class AppStore: ObservableObject {
             defaults.set(27.0, forKey: "pageIndicatorOffset")
         }
 
+        if let storedDualModeAppearance = Self.loadDualModeAppearanceSettings(from: defaults) {
+            self.dualModeAppearanceSettings = storedDualModeAppearance
+        } else {
+            let legacy = Self.legacyAppearanceSettings(from: defaults)
+            let migrated = DualModeAppearanceSettings(fullscreen: legacy, compact: legacy)
+            self.dualModeAppearanceSettings = migrated
+            if let data = try? JSONEncoder().encode(migrated) {
+                defaults.set(data, forKey: Self.dualModeAppearanceSettingsKey)
+            }
+        }
+
         let storedDuration = UserDefaults.standard.double(forKey: "animationDuration")
         self.animationDuration = storedDuration == 0 ? 0.3 : storedDuration
+        self.enableWindowOpenAnimation = defaults.object(forKey: Self.windowOpenAnimationKey) as? Bool ?? true
         self.enableAnimations = UserDefaults.standard.object(forKey: "enableAnimations") as? Bool ?? true
         self.customIconFileURL = AppStore.customIconFileURL
 
@@ -1645,6 +2048,8 @@ final class AppStore: ObservableObject {
             self.currentAppIcon = fallbackIcon
         }
         applyCurrentAppIcon()
+        syncActiveAppearanceProxies(from: currentAppearanceLayoutMode)
+        persistLegacyAppearanceProxyValues()
 
         let sanitizedSources = sanitizedCustomPaths(from: customAppSourcePaths)
         if sanitizedSources != customAppSourcePaths {
@@ -1663,6 +2068,12 @@ final class AppStore: ObservableObject {
 
         searchQuery = searchText
 
+        if developmentEnableCLICode {
+            installCLICommandIfNeeded()
+        } else {
+            uninstallCLICommandIfNeeded()
+        }
+
         scheduleAutomaticUpdateCheck()
 
         self.rememberLastPage = shouldRememberPage
@@ -1678,6 +2089,194 @@ final class AppStore: ObservableObject {
         loginItemUpdateInProgress = true
         isStartOnLogin = SMAppService.mainApp.status == .enabled
         loginItemUpdateInProgress = false
+    }
+
+    private func installCLICommandIfNeeded() {
+        guard let executablePath = Bundle.main.executableURL?.path else { return }
+        for path in cliCommandTargets() {
+            if installCLIShim(at: path, executablePath: executablePath) {
+                let directory = (path as NSString).deletingLastPathComponent
+                ensureZProfilePathIncludes(directory: directory)
+                return
+            }
+        }
+    }
+
+    @discardableResult
+    func removeInstalledCLICommand() -> Bool {
+        uninstallCLICommandIfNeeded()
+    }
+
+    private func cliCommandTargets() -> [String] {
+        let homePath = FileManager.default.homeDirectoryForCurrentUser.path
+        return [
+            "/opt/homebrew/bin/launchnext",
+            "/usr/local/bin/launchnext",
+            "\(homePath)/.local/bin/launchnext",
+            "\(homePath)/bin/launchnext"
+        ]
+    }
+
+    private func installCLIShim(at shimPath: String, executablePath: String) -> Bool {
+        let fileManager = FileManager.default
+        let directoryPath = (shimPath as NSString).deletingLastPathComponent
+
+        if !fileManager.fileExists(atPath: directoryPath) {
+            do {
+                try fileManager.createDirectory(atPath: directoryPath, withIntermediateDirectories: true)
+            } catch {
+                return false
+            }
+        }
+
+        guard fileManager.isWritableFile(atPath: directoryPath) else {
+            return false
+        }
+
+        if fileManager.fileExists(atPath: shimPath) {
+            if let destination = try? fileManager.destinationOfSymbolicLink(atPath: shimPath),
+               destination == executablePath {
+                return true
+            }
+            if let existing = try? String(contentsOfFile: shimPath, encoding: .utf8),
+               existing.contains(Self.cliShimMarker) {
+                // Managed shim, safe to replace.
+            } else {
+                return false
+            }
+        }
+
+        let escapedExecutable = executablePath.replacingOccurrences(of: "\"", with: "\\\"")
+        let script = """
+        #!/bin/zsh
+        \(Self.cliShimMarker)
+        
+        if [[ "$1" == "--help" || "$1" == "-h" || "$1" == "help" ]]; then
+          cat <<'EOF'
+        LaunchNext CLI
+        
+        Usage:
+          launchnext --help
+          launchnext --gui
+          launchnext --tui
+          launchnext --cli help
+          launchnext --cli list
+          launchnext --cli snapshot
+          launchnext --cli search --query "safari"
+          launchnext --cli move --source normal-app --path "/Applications/Thaw.app" --to folder-append --target-folder-id <folder-id>
+        
+        Notes:
+          - Keep `--cli --help` and `--cli help` for full in-app CLI help.
+          - LaunchNext GUI must be running for list/snapshot/search/move.
+          - "Command line interface" must be ON in General settings.
+        EOF
+          exit 0
+        fi
+        
+        exec "\(escapedExecutable)" "$@"
+        """
+
+        do {
+            try script.write(toFile: shimPath, atomically: true, encoding: .utf8)
+            try fileManager.setAttributes([.posixPermissions: NSNumber(value: Int(0o755))], ofItemAtPath: shimPath)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    @discardableResult
+    private func uninstallCLICommandIfNeeded() -> Bool {
+        var removedAny = false
+        for path in cliCommandTargets() {
+            let directory = (path as NSString).deletingLastPathComponent
+            if uninstallCLIShim(at: path) { removedAny = true }
+            if removeCLIPathSnippetFromZProfile(directory: directory) { removedAny = true }
+        }
+        return removedAny
+    }
+
+    private func uninstallCLIShim(at shimPath: String) -> Bool {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: shimPath) else { return false }
+
+        let isManagedShim: Bool = {
+            if let existing = try? String(contentsOfFile: shimPath, encoding: .utf8),
+               existing.contains(Self.cliShimMarker) {
+                return true
+            }
+            if let destination = try? fileManager.destinationOfSymbolicLink(atPath: shimPath),
+               destination.contains("/LaunchNext.app/Contents/MacOS/LaunchNext") {
+                return true
+            }
+            return false
+        }()
+
+        guard isManagedShim else { return false }
+        do {
+            try fileManager.removeItem(atPath: shimPath)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func ensureZProfilePathIncludes(directory: String) {
+        guard directory.hasPrefix(FileManager.default.homeDirectoryForCurrentUser.path) else { return }
+
+        let zprofileURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".zprofile")
+        let snippet = cliPathSnippet(directory: directory)
+
+        if let existing = try? String(contentsOf: zprofileURL, encoding: .utf8) {
+            if existing.contains(":\(directory):") || existing.contains("export PATH=\"\(directory):$PATH\"") {
+                return
+            }
+            try? (existing + snippet).write(to: zprofileURL, atomically: true, encoding: .utf8)
+        } else {
+            try? snippet.write(to: zprofileURL, atomically: true, encoding: .utf8)
+        }
+    }
+
+    @discardableResult
+    private func removeCLIPathSnippetFromZProfile(directory: String) -> Bool {
+        let homePath = FileManager.default.homeDirectoryForCurrentUser.path
+        guard directory.hasPrefix(homePath) else { return false }
+
+        let zprofileURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".zprofile")
+        guard let existing = try? String(contentsOf: zprofileURL, encoding: .utf8) else { return false }
+
+        var updated = existing
+        updated = updated.replacingOccurrences(of: cliPathSnippet(directory: directory), with: "")
+        updated = updated.replacingOccurrences(of: legacyCLIPathSnippet(directory: directory), with: "")
+
+        guard updated != existing else { return false }
+        do {
+            try updated.write(to: zprofileURL, atomically: true, encoding: .utf8)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func cliPathSnippet(directory: String) -> String {
+        """
+        
+        \(Self.cliPathSnippetHeader)
+        if [[ ":$PATH:" != *":\(directory):"* ]]; then
+          export PATH="\(directory):$PATH"
+        fi
+        \(Self.cliPathSnippetFooter)
+        """
+    }
+
+    private func legacyCLIPathSnippet(directory: String) -> String {
+        """
+        
+        # LaunchNext CLI
+        if [[ ":$PATH:" != *":\(directory):"* ]]; then
+          export PATH="\(directory):$PATH"
+        fi
+        """
     }
 
     private static func loadCustomTitles() -> [String: String] {
@@ -1744,6 +2343,8 @@ final class AppStore: ObservableObject {
     @Published var iconScale: Double = 0.95 {
         didSet {
             UserDefaults.standard.set(iconScale, forKey: "iconScale")
+            guard !isApplyingScopedAppearanceState else { return }
+            updateScopedAppearanceSettings(for: currentAppearanceLayoutMode) { $0.iconScale = iconScale }
             iconScaleWorkItem?.cancel()
             let work = DispatchWorkItem { [weak self] in self?.triggerGridRefresh() }
             iconScaleWorkItem = work
@@ -1753,6 +2354,7 @@ final class AppStore: ObservableObject {
 
     func configure(modelContext: ModelContext) {
         self.modelContext = modelContext
+        evaluateOnboardingGate()
         
         // 立即尝试加载持久化数据（如果已有数据）——不要过早设置标记，等待加载完成时设置
         if !hasAppliedOrderFromStore {
@@ -1784,6 +2386,53 @@ final class AppStore: ObservableObject {
             .store(in: &cancellables)
     }
 
+    func completeOnboarding() {
+        UserDefaults.standard.set(Self.currentOnboardingVersion, forKey: Self.onboardingVersionKey)
+        shouldShowOnboarding = false
+    }
+
+    func forceShowOnboarding() {
+        guard isFullscreenMode else { return }
+
+        if isSetting {
+            isSetting = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+                guard let self else { return }
+                self.shouldShowOnboarding = false
+                self.shouldShowOnboarding = true
+            }
+            return
+        }
+
+        shouldShowOnboarding = false
+        DispatchQueue.main.async { [weak self] in
+            self?.shouldShowOnboarding = true
+        }
+    }
+
+    private func evaluateOnboardingGate() {
+        let shownVersion = UserDefaults.standard.object(forKey: Self.onboardingVersionKey) as? Int ?? 0
+        guard shownVersion < Self.currentOnboardingVersion else {
+            shouldShowOnboarding = false
+            return
+        }
+
+        if isExistingUserForOnboarding() {
+            UserDefaults.standard.set(Self.currentOnboardingVersion, forKey: Self.onboardingVersionKey)
+            shouldShowOnboarding = false
+            return
+        }
+
+        shouldShowOnboarding = true
+    }
+
+    private func isExistingUserForOnboarding() -> Bool {
+        if !hiddenAppPaths.isEmpty { return true }
+        if !customTitles.isEmpty { return true }
+        if hasPersistedOrderData() { return true }
+        return false
+    }
+
     // MARK: - Order Persistence
     func applyOrderAndFolders() {
         self.loadAllOrder()
@@ -1791,6 +2440,8 @@ final class AppStore: ObservableObject {
 
     // MARK: - Initial scan (once)
     func performInitialScanIfNeeded() {
+        guard !hasPerformedInitialScan else { return }
+
         // 先尝试加载持久化数据，避免被扫描覆盖（不提前设置标记）
         if !hasAppliedOrderFromStore {
             loadAllOrder()
@@ -2689,6 +3340,7 @@ final class AppStore: ObservableObject {
         self.items = filteredItemsRemovingHidden(from: newItems)
         // 单页内自动补位：将该页内的空槽移到页尾
         compactItemsWithinPages()
+        removeEmptyPages()
 
         // 触发文件夹更新，通知所有相关视图刷新图标
         DispatchQueue.main.async { [weak self] in
@@ -2725,6 +3377,7 @@ final class AppStore: ObservableObject {
             items[pos] = .empty(UUID().uuidString)
             // 单页内自动补位
             compactItemsWithinPages()
+            removeEmptyPages()
         } else {
             // 若未找到则回退到重建
             rebuildItems()
@@ -2849,6 +3502,76 @@ final class AppStore: ObservableObject {
         rebuildItems()
         saveAllOrder()
     }
+
+    @discardableResult
+    func dissolveFolder(_ folder: FolderInfo) -> Bool {
+        let folderID = folder.id
+
+        let resolvedFolder: FolderInfo
+        if let index = folders.firstIndex(where: { $0.id == folderID }) {
+            resolvedFolder = folders[index]
+            folders.remove(at: index)
+        } else if let itemIndex = items.firstIndex(where: {
+            if case .folder(let f) = $0 { return f.id == folderID }
+            return false
+        }), case .folder(let fallbackFolder) = items[itemIndex] {
+            resolvedFolder = fallbackFolder
+        } else {
+            return false
+        }
+
+        let folderApps = resolvedFolder.apps
+        let folderAppPaths = Set(folderApps.map { standardizedFilePath($0.url.path) })
+        var newItems = items
+
+        // Remove stale duplicates first; the folder slot will be reused for the first restored app.
+        if !folderAppPaths.isEmpty {
+            for idx in newItems.indices {
+                if case .app(let app) = newItems[idx],
+                   folderAppPaths.contains(standardizedFilePath(app.url.path)) {
+                    newItems[idx] = .empty(UUID().uuidString)
+                }
+            }
+        }
+
+        if let folderItemIndex = newItems.firstIndex(where: {
+            if case .folder(let f) = $0 { return f.id == folderID }
+            return false
+        }) {
+            newItems[folderItemIndex] = .empty(UUID().uuidString)
+            var insertIndex = folderItemIndex
+            for app in folderApps {
+                newItems = cascadeInsert(into: newItems, item: .app(app), at: insertIndex)
+                insertIndex += 1
+            }
+        } else if !folderApps.isEmpty {
+            newItems.append(contentsOf: folderApps.map { .app($0) })
+        }
+
+        var existingTopLevelPaths = Set(apps.map { standardizedFilePath($0.url.path) })
+        for app in folderApps {
+            let normalized = standardizedFilePath(app.url.path)
+            if !existingTopLevelPaths.contains(normalized) {
+                apps.append(app)
+                existingTopLevelPaths.insert(normalized)
+            }
+        }
+        apps.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        pruneHiddenAppsFromAppList()
+
+        items = filteredItemsRemovingHidden(from: newItems)
+        if openFolder?.id == folderID {
+            openFolder = nil
+        }
+
+        compactItemsWithinPages()
+        removeEmptyPages()
+        triggerFolderUpdate()
+        triggerGridRefresh()
+        refreshCacheAfterFolderOperation()
+        saveAllOrder()
+        return true
+    }
     
     // 一键重置布局：完全重新扫描应用，删除所有文件夹、排序和empty填充
     func resetLayout() {
@@ -2892,13 +3615,18 @@ final class AppStore: ObservableObject {
     /// 单页内自动补位：将每页的 .empty 槽位移动到该页尾部，保持非空项的相对顺序
     func compactItemsWithinPages() {
         guard !items.isEmpty else { return }
+        items = filteredItemsRemovingHidden(from: compactedItemsWithinPages(items))
+    }
+
+    private func compactedItemsWithinPages(_ source: [LaunchpadItem]) -> [LaunchpadItem] {
+        guard !source.isEmpty else { return source }
         let itemsPerPage = self.itemsPerPage // 使用计算属性
         var result: [LaunchpadItem] = []
-        result.reserveCapacity(items.count)
+        result.reserveCapacity(source.count)
         var index = 0
-        while index < items.count {
-            let end = min(index + itemsPerPage, items.count)
-            let pageSlice = Array(items[index..<end])
+        while index < source.count {
+            let end = min(index + itemsPerPage, source.count)
+            let pageSlice = Array(source[index..<end])
             var nonEmpty: [LaunchpadItem] = []
             var emptyTokens: [String] = []
             nonEmpty.reserveCapacity(pageSlice.count)
@@ -2923,10 +3651,60 @@ final class AppStore: ObservableObject {
 
             index = end
         }
-        items = filteredItemsRemovingHidden(from: result)
+        return result
     }
 
     // MARK: - 跨页拖拽：级联插入（满页则将最后一个推入下一页）
+    func moveSelectedAppsAcrossPagesWithCascade(appPathsOrdered: [String], to targetIndex: Int) {
+        guard !appPathsOrdered.isEmpty else { return }
+
+        var seenPaths = Set<String>()
+        let normalizedOrderedPaths: [String] = appPathsOrdered.compactMap { raw in
+            let normalized = standardizedFilePath(raw)
+            guard seenPaths.insert(normalized).inserted else { return nil }
+            return normalized
+        }
+        guard !normalizedOrderedPaths.isEmpty else { return }
+        let movingPathSet = Set(normalizedOrderedPaths)
+
+        var movingItemsByPath: [String: LaunchpadItem] = [:]
+        for item in items {
+            guard case .app(let app) = item else { continue }
+            let path = standardizedFilePath(app.url.path)
+            if movingPathSet.contains(path), movingItemsByPath[path] == nil {
+                movingItemsByPath[path] = .app(app)
+            }
+        }
+
+        let orderedMovingItems = normalizedOrderedPaths.compactMap { movingItemsByPath[$0] }
+        guard !orderedMovingItems.isEmpty else { return }
+
+        var result = items
+        let sourceIndexes = result.indices.filter { index in
+            guard case .app(let app) = result[index] else { return false }
+            return movingPathSet.contains(standardizedFilePath(app.url.path))
+        }
+        guard !sourceIndexes.isEmpty else { return }
+
+        for index in sourceIndexes {
+            result[index] = .empty(UUID().uuidString)
+        }
+
+        result = compactedItemsWithinPages(result)
+        var insertionIndex = max(0, min(targetIndex, result.count))
+
+        for movingItem in orderedMovingItems {
+            result = cascadeInsert(into: result, item: movingItem, at: insertionIndex)
+            insertionIndex += 1
+        }
+
+        items = filteredItemsRemovingHidden(from: result)
+        compactItemsWithinPages()
+        removeEmptyPages()
+        triggerGridRefresh()
+        saveAllOrder()
+    }
+
     func moveItemAcrossPagesWithCascade(item: LaunchpadItem, to targetIndex: Int) {
         guard items.indices.contains(targetIndex) || targetIndex == items.count else {
             return
@@ -4059,6 +4837,11 @@ final class AppStore: ObservableObject {
         if let existing = apps.first(where: { $0.url.path == path }) {
             return existing
         }
+        for folder in folders {
+            if let existing = folder.apps.first(where: { $0.url.path == path }) {
+                return existing
+            }
+        }
 
         let url = URL(fileURLWithPath: path)
         if FileManager.default.fileExists(atPath: url.path) {
@@ -4083,6 +4866,94 @@ final class AppStore: ObservableObject {
             return url.deletingPathExtension().lastPathComponent
         }
         return AppInfo.from(url: url, customTitle: nil, loadIcon: PerformanceMode.current == .full).name
+    }
+
+    var uninstallToolAppURL: URL? {
+        let trimmed = uninstallToolAppPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let resolved = URL(fileURLWithPath: trimmed).resolvingSymlinksInPath()
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDir), isDir.boolValue else { return nil }
+        guard resolved.pathExtension.caseInsensitiveCompare("app") == .orderedSame else { return nil }
+        return resolved
+    }
+
+    var uninstallToolAppDisplayName: String {
+        guard let url = uninstallToolAppURL else { return "" }
+        return AppInfo.from(url: url, loadIcon: false).name
+    }
+
+    var uninstallToolBundleIdentifier: String {
+        guard let url = uninstallToolAppURL else { return "" }
+        return Bundle(url: url)?.bundleIdentifier ?? ""
+    }
+
+    var uninstallToolVersionText: String {
+        guard let url = uninstallToolAppURL,
+              let info = Bundle(url: url)?.infoDictionary else { return "" }
+
+        let shortVersion = (info["CFBundleShortVersionString"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let buildVersion = (info["CFBundleVersion"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        if !shortVersion.isEmpty && !buildVersion.isEmpty && shortVersion != buildVersion {
+            return "\(shortVersion) (\(buildVersion))"
+        }
+        if !shortVersion.isEmpty { return shortVersion }
+        return buildVersion
+    }
+
+    var uninstallToolAppIcon: NSImage {
+        let icon: NSImage
+        if let url = uninstallToolAppURL {
+            icon = NSWorkspace.shared.icon(forFile: url.path)
+        } else {
+            if let appType = UTType(filenameExtension: "app") {
+                icon = NSWorkspace.shared.icon(for: appType)
+            } else {
+                icon = NSWorkspace.shared.icon(forFile: "/Applications")
+            }
+        }
+        let rendered = (icon.copy() as? NSImage) ?? icon
+        rendered.size = NSSize(width: 64, height: 64)
+        return rendered
+    }
+
+    var uninstallToolConfiguredButMissing: Bool {
+        let trimmed = uninstallToolAppPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && uninstallToolAppURL == nil
+    }
+
+    @discardableResult
+    func setUninstallToolApplication(url: URL?) -> Bool {
+        guard let url else {
+            uninstallToolAppPath = ""
+            return true
+        }
+
+        let resolved = url.resolvingSymlinksInPath()
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDir), isDir.boolValue else { return false }
+        guard resolved.pathExtension.caseInsensitiveCompare("app") == .orderedSame else { return false }
+        uninstallToolAppPath = resolved.path
+        return true
+    }
+
+    @discardableResult
+    func openConfiguredUninstallTool() -> Bool {
+        guard let helper = uninstallToolAppURL else { return false }
+        return NSWorkspace.shared.open(helper)
+    }
+
+    @discardableResult
+    func openConfiguredUninstallTool(for app: AppInfo) -> Bool {
+        guard let helper = uninstallToolAppURL else { return false }
+        let target = app.url.resolvingSymlinksInPath()
+        guard FileManager.default.fileExists(atPath: target.path) else { return false }
+        let configuration = NSWorkspace.OpenConfiguration()
+        NSWorkspace.shared.open([target], withApplicationAt: helper, configuration: configuration) { _, _ in }
+        return true
     }
 
     @discardableResult
@@ -4353,6 +5224,196 @@ final class AppStore: ObservableObject {
         } catch {
             return false
         }
+    }
+
+    @discardableResult
+    func applyMacOS26PresetLayout() -> Bool {
+        let candidates = presetCandidateAppsInCurrentOrder()
+        guard !candidates.isEmpty else { return false }
+
+        let candidateByPath = Dictionary(uniqueKeysWithValues: candidates.map { ($0.path, $0) })
+        var unusedPaths = Set(candidates.map(\.path))
+        var rebuiltItems: [LaunchpadItem] = []
+        rebuiltItems.reserveCapacity(candidates.count + 1)
+        var rebuiltFolders: [FolderInfo] = []
+
+        for slot in LayoutPresetCatalog.macOS26Default.slots {
+            switch slot {
+            case let .app(bundleIdentifiers, aliases):
+                guard let matchedPath = matchPresetSlot(bundleIdentifiers: bundleIdentifiers,
+                                                        aliases: aliases,
+                                                        candidates: candidates,
+                                                        unusedPaths: unusedPaths),
+                      let matched = candidateByPath[matchedPath] else {
+                    continue
+                }
+                unusedPaths.remove(matchedPath)
+                rebuiltItems.append(.app(matched.app))
+            case .utilitiesFolder:
+                let folderApps = candidates
+                    .filter { unusedPaths.contains($0.path) && shouldIncludeInPresetOtherFolder($0) }
+                    .map(\.app)
+
+                guard !folderApps.isEmpty else { continue }
+                for app in folderApps {
+                    unusedPaths.remove(standardizedFilePath(app.url.path))
+                }
+
+                let folder = FolderInfo(name: localized(.layoutPresetOtherFolderTitle), apps: folderApps)
+                rebuiltFolders.append(folder)
+                rebuiltItems.append(.folder(folder))
+            }
+        }
+
+        let remainingApps = candidates
+            .filter { unusedPaths.contains($0.path) }
+            .map(\.app)
+        rebuiltItems.append(contentsOf: remainingApps.map { .app($0) })
+
+        guard !rebuiltItems.isEmpty else { return false }
+
+        apps = candidates.map(\.app)
+        pruneHiddenAppsFromAppList()
+        folders = sanitizedFolders(rebuiltFolders)
+        items = filteredItemsRemovingHidden(from: rebuiltItems)
+        openFolder = nil
+        compactItemsWithinPages()
+        removeEmptyPages()
+        currentPage = 0
+        if !searchText.isEmpty { searchText = "" }
+        refreshMissingPlaceholders()
+        triggerFolderUpdate()
+        triggerGridRefresh()
+        updateCacheAfterChanges()
+        saveAllOrder()
+        return true
+    }
+
+    private struct PresetAppCandidate {
+        let app: AppInfo
+        let path: String
+        let bundleIdentifier: String?
+        let normalizedNames: Set<String>
+    }
+
+    private func presetCandidateAppsInCurrentOrder() -> [PresetAppCandidate] {
+        var orderedApps: [AppInfo] = []
+        orderedApps.reserveCapacity(items.count + apps.count + folders.reduce(0) { $0 + $1.apps.count })
+
+        for item in items {
+            switch item {
+            case .app(let app):
+                orderedApps.append(app)
+            case .folder(let folder):
+                orderedApps.append(contentsOf: folder.apps)
+            case .empty:
+                break
+            case .missingApp:
+                break
+            }
+        }
+        orderedApps.append(contentsOf: apps)
+        for folder in folders {
+            orderedApps.append(contentsOf: folder.apps)
+        }
+
+        var seenPaths = Set<String>()
+        var result: [PresetAppCandidate] = []
+        result.reserveCapacity(orderedApps.count)
+
+        for app in orderedApps {
+            let path = standardizedFilePath(app.url.path)
+            guard !seenPaths.contains(path) else { continue }
+            guard !hiddenAppPaths.contains(path) && !hiddenAppPaths.contains(app.url.path) else { continue }
+            guard path.lowercased().hasSuffix(".app") else { continue }
+            guard FileManager.default.fileExists(atPath: path) else { continue }
+            seenPaths.insert(path)
+            result.append(presetCandidate(from: app, path: path))
+        }
+
+        return result
+    }
+
+    private func presetCandidate(from app: AppInfo, path: String) -> PresetAppCandidate {
+        let appURL = URL(fileURLWithPath: path)
+        let bundle = Bundle(url: appURL)
+        let bundleIdentifier = bundle?.bundleIdentifier?.lowercased()
+
+        var nameCandidates: [String] = [
+            app.name,
+            appURL.deletingPathExtension().lastPathComponent
+        ]
+        if let bundleDisplayName = bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String {
+            nameCandidates.append(bundleDisplayName)
+        }
+        if let bundleName = bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String {
+            nameCandidates.append(bundleName)
+        }
+
+        let normalizedNames = Set(nameCandidates.map(normalizedPresetToken).filter { !$0.isEmpty })
+        return PresetAppCandidate(app: app,
+                                  path: path,
+                                  bundleIdentifier: bundleIdentifier,
+                                  normalizedNames: normalizedNames)
+    }
+
+    private func matchPresetSlot(bundleIdentifiers: [String],
+                                 aliases: [String],
+                                 candidates: [PresetAppCandidate],
+                                 unusedPaths: Set<String>) -> String? {
+        let normalizedBundleIDs = Set(bundleIdentifiers.map { $0.lowercased() }.filter { !$0.isEmpty })
+        if !normalizedBundleIDs.isEmpty {
+            for candidate in candidates where unusedPaths.contains(candidate.path) {
+                if let bundleIdentifier = candidate.bundleIdentifier,
+                   normalizedBundleIDs.contains(bundleIdentifier) {
+                    return candidate.path
+                }
+            }
+        }
+
+        let normalizedAliases = Set(aliases.map(normalizedPresetToken).filter { !$0.isEmpty })
+        guard !normalizedAliases.isEmpty else { return nil }
+
+        for candidate in candidates where unusedPaths.contains(candidate.path) {
+            if !normalizedAliases.isDisjoint(with: candidate.normalizedNames) {
+                return candidate.path
+            }
+        }
+
+        return nil
+    }
+
+    private func normalizedPresetToken(_ rawValue: String) -> String {
+        let folded = rawValue.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
+                                      locale: .current)
+        let scalars = folded.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }
+        return String(String.UnicodeScalarView(scalars)).lowercased()
+    }
+
+    private func shouldIncludeInPresetOtherFolder(_ candidate: PresetAppCandidate) -> Bool {
+        if isAppInPresetUtilitiesFolders(candidate.path) {
+            return true
+        }
+        let lowerPath = candidate.path.lowercased()
+        if LayoutPresetCatalog.otherExtraPathSuffixes.contains(where: { lowerPath.hasSuffix($0) }) {
+            return true
+        }
+        if let bundleIdentifier = candidate.bundleIdentifier,
+           LayoutPresetCatalog.otherExtraBundleIDs.contains(bundleIdentifier) {
+            return true
+        }
+        let normalizedAliases = Set(LayoutPresetCatalog.otherExtraAliases.map(normalizedPresetToken))
+        return !normalizedAliases.isDisjoint(with: candidate.normalizedNames)
+    }
+
+    private func isAppInPresetUtilitiesFolders(_ path: String) -> Bool {
+        let normalizedPath = standardizedFilePath(path)
+        for root in LayoutPresetCatalog.utilityRootPaths {
+            if normalizedPath == root || normalizedPath.hasPrefix(root + "/") {
+                return true
+            }
+        }
+        return false
     }
 
     /// 从原生 macOS Launchpad 导入布局

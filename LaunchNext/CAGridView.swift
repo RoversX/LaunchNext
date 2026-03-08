@@ -38,6 +38,7 @@ final class CAGridView: NSView, CALayerDelegate {
     var showLabels: Bool = true { didSet { updateLabelVisibility() } }
     var isLayoutLocked: Bool = false
     var folderDropZoneScale: CGFloat = CGFloat(AppStore.defaultFolderDropZoneScale)
+    var folderPreviewScale: CGFloat = 1
     var contentInsets: NSEdgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) { didSet { updateLayout() } }
     var pageSpacing: CGFloat = 0 { didSet { updateLayout() } }
 
@@ -45,6 +46,7 @@ final class CAGridView: NSView, CALayerDelegate {
     var items: [LaunchpadItem] = [] {
         didSet {
             needsLayoutRefresh = true
+            syncBatchSelectionWithItems()
             rebuildLayers()
             if enableIconPreload {
                 preloadIcons()
@@ -64,6 +66,7 @@ final class CAGridView: NSView, CALayerDelegate {
     var scrollVelocity: CGFloat = 0
     var isScrollAnimating = false
     var scrollSensitivity: Double = AppStore.defaultScrollSensitivity
+    var reverseWheelPagingDirection: Bool = false
     var animationsEnabled: Bool = true
     var animationDuration: Double = 0.3
     var scrollAnimationStartTime: CFTimeInterval = 0
@@ -99,10 +102,34 @@ final class CAGridView: NSView, CALayerDelegate {
     var onPageChanged: ((Int) -> Void)?
     var onFPSUpdate: ((Double) -> Void)?
     var onEmptyAreaClicked: (() -> Void)?
+    var onHideApp: ((AppInfo) -> Void)?
+    var onDissolveFolder: ((FolderInfo) -> Void)?
+    var onUninstallWithTool: ((AppInfo) -> Void)?
     var onCreateFolder: ((AppInfo, AppInfo, Int) -> Void)?  // (拖拽的app, 目标app, 位置)
     var onMoveToFolder: ((AppInfo, FolderInfo) -> Void)?    // 移动到已有文件夹
     var onReorderItems: ((Int, Int) -> Void)?               // 重新排序 (fromIndex, toIndex)
+    var onReorderAppBatch: (([String], Int) -> Void)?       // 批量重排（按路径顺序）
     var onRequestNewPage: (() -> Void)?                     // 请求创建新页面
+    var hideAppMenuTitle: String = "Hide application"
+    var dissolveFolderMenuTitle: String = "Dissolve folder"
+    var uninstallWithToolMenuTitle: String = "Uninstall with configured tool"
+    var batchSelectAppsMenuTitle: String = "Batch Select Apps"
+    var finishBatchSelectionMenuTitle: String = "Finish Batch Selection"
+    var canUseConfiguredUninstallTool: Bool = false
+    var contextMenuTargetApp: AppInfo?
+    var contextMenuTargetFolder: FolderInfo?
+    var allowsBatchSelectionMode: Bool = true {
+        didSet {
+            if !allowsBatchSelectionMode {
+                disableBatchSelectionMode()
+            }
+        }
+    }
+    var isBatchSelectionMode = false
+    var batchSelectedAppPathsOrdered: [String] = []
+    var batchSelectedAppPathSet: Set<String> = []
+    var batchDraggingAppPathsOrdered: [String] = []
+    var batchHiddenCompanionIndices: [Int] = []
 
     // 拖拽状态
     var isDraggingItem = false
@@ -137,10 +164,14 @@ final class CAGridView: NSView, CALayerDelegate {
     var scrollEventMonitor: Any?
     var wasWindowVisible = false  // 跟踪窗口可见状态
     
-    // 鼠标滚轮跟手效果
+    // 鼠标滚轮分页状态（仅用于非精准滚动设备）
     var wheelAccumulatedDelta: CGFloat = 0
-    var wheelSnapTimer: Timer?
-    let wheelSnapDelay: TimeInterval = 0.15  // 停止滚动后多久触发 snap
+    var wheelLastDirection: Int = 0
+    var wheelLastFlipAt: Date?
+    let wheelFlipCooldown: TimeInterval = 0.15
+    // Legacy reference:
+    // var wheelSnapTimer: Timer?
+    // let wheelSnapDelay: TimeInterval = 0.15  // 停止滚动后多久触发 snap
     let debugScrollMismatch = false
     var externalDragActive = false
     var hoveredIndex: Int?
@@ -581,6 +612,98 @@ final class CAGridView: NSView, CALayerDelegate {
     }
 
     // MARK: - Public Methods
+
+    var isBatchDragging: Bool { !batchDraggingAppPathsOrdered.isEmpty }
+
+    func enableBatchSelectionMode() {
+        guard allowsBatchSelectionMode else {
+            NSSound.beep()
+            return
+        }
+        isBatchSelectionMode = true
+        syncBatchSelectionWithItems()
+        refreshBatchSelectionUI()
+    }
+
+    func disableBatchSelectionMode() {
+        if isDraggingItem && isBatchDragging {
+            cancelDragging()
+        }
+        let hadState = isBatchSelectionMode ||
+            !batchSelectedAppPathsOrdered.isEmpty ||
+            !batchDraggingAppPathsOrdered.isEmpty
+        isBatchSelectionMode = false
+        batchSelectedAppPathsOrdered.removeAll()
+        batchSelectedAppPathSet.removeAll()
+        batchDraggingAppPathsOrdered.removeAll()
+        restoreBatchHiddenCompanionLayers()
+        if hadState {
+            refreshBatchSelectionUI()
+        }
+    }
+
+    func toggleBatchSelection(forAppPath path: String) {
+        guard isBatchSelectionMode else { return }
+        if batchSelectedAppPathSet.contains(path) {
+            batchSelectedAppPathSet.remove(path)
+            batchSelectedAppPathsOrdered.removeAll { $0 == path }
+        } else {
+            batchSelectedAppPathSet.insert(path)
+            batchSelectedAppPathsOrdered.append(path)
+        }
+        refreshBatchSelectionUI()
+    }
+
+    func orderedBatchDragPaths(leadingAppPath path: String) -> [String] {
+        guard batchSelectedAppPathSet.contains(path) else { return [] }
+        var ordered: [String] = [path]
+        ordered.append(contentsOf: batchSelectedAppPathsOrdered.filter { $0 != path })
+        return ordered
+    }
+
+    func appPath(at index: Int) -> String? {
+        guard items.indices.contains(index), case .app(let app) = items[index] else { return nil }
+        return app.url.path
+    }
+
+    func syncBatchSelectionWithItems() {
+        guard isBatchSelectionMode else { return }
+        let currentPaths = Set(items.compactMap { item -> String? in
+            guard case .app(let app) = item else { return nil }
+            return app.url.path
+        })
+        let oldCount = batchSelectedAppPathSet.count
+        batchSelectedAppPathSet = batchSelectedAppPathSet.intersection(currentPaths)
+        batchSelectedAppPathsOrdered = batchSelectedAppPathsOrdered.filter { batchSelectedAppPathSet.contains($0) }
+        if batchSelectedAppPathSet.count != oldCount {
+            refreshBatchSelectionUI()
+        }
+    }
+
+    func globalIndex(forAppPath path: String) -> Int? {
+        for (index, item) in items.enumerated() {
+            if case .app(let app) = item, app.url.path == path {
+                return index
+            }
+        }
+        return nil
+    }
+
+    func setOpacity(_ opacity: Float, forGlobalIndex index: Int) {
+        let pageIndex = index / itemsPerPage
+        let localIndex = index % itemsPerPage
+        guard pageIndex < iconLayers.count, localIndex < iconLayers[pageIndex].count else { return }
+        iconLayers[pageIndex][localIndex].opacity = opacity
+    }
+
+    func restoreBatchHiddenCompanionLayers() {
+        guard !batchHiddenCompanionIndices.isEmpty else { return }
+        for index in batchHiddenCompanionIndices {
+            setOpacity(1.0, forGlobalIndex: index)
+        }
+        batchHiddenCompanionIndices.removeAll()
+        batchDraggingAppPathsOrdered.removeAll()
+    }
 
     func clearIconCache() {
         iconCacheLock.lock()

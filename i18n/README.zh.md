@@ -15,7 +15,7 @@
 
 macOS Tahoe 移除了 Launchpad，新的界面很难用，也不能充分利用你的 Bio GPU。苹果，至少给用户一个切换回去的选项吧。在此之前，这里是 LaunchNext。
 
-*基于 [LaunchNow](https://github.com/ggkevinnnn/LaunchNow) (作者 ggkevinnnn) 开发 - 非常感谢原项目！希望这个增强版本能合并回原仓库*
+*基于 [LaunchNow](https://github.com/ggkevinnnn/LaunchNow)（作者 ggkevinnnn）开发——非常感谢原项目！❤️*
 
 *LaunchNow 选择了 GPL 3 许可证，LaunchNext 遵循相同的许可条款。*
 

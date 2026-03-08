@@ -13,10 +13,49 @@ struct SettingsView: View {
         case launchpad
         // case aiOverlay
     }
+    private enum LayoutModePreviewScope: CaseIterable, Identifiable {
+        case fullscreen
+        case compact
+
+        var id: String {
+            switch self {
+            case .fullscreen: return "fullscreen"
+            case .compact: return "compact"
+            }
+        }
+
+        var localizationKey: LocalizationKey {
+            switch self {
+            case .fullscreen: return .layoutModeScopeFullscreen
+            case .compact: return .layoutModeScopeCompact
+            }
+        }
+
+        var appStoreMode: AppStore.AppearanceLayoutMode {
+            switch self {
+            case .fullscreen: return .fullscreen
+            case .compact: return .compact
+            }
+        }
+    }
     @State private var showResetConfirm = false
     @State private var selectedSection: SettingsSection = .general
     @State private var titleSearch: String = ""
+    @State private var hasHiddenAppEntries: Bool = false
+    @State private var hasNotHiddenAppEntries: Bool = false
     @State private var hiddenSearch: String = ""
+    @State private var notHiddenSearch: String = ""
+    @State private var hiddenSearchDebounceID: Int = 0
+    @State private var notHiddenSearchDebounceID: Int = 0
+    @State private var hasHiddenAppEntriesSearchResult: Bool = false
+    @State private var hasNotHiddenAppEntriesSearchResult: Bool = false
+    @State private var cachedHiddenAppEntries: [AppEntry] = []
+    @State private var cachedNotHiddenAppEntries: [AppEntry] = []
+    @State private var showHiddenApps = true
+    @State private var showNotHiddenApps = false
+    @State private var hiddenVisibleLimit: Int = 10
+    @State private var notHiddenVisibleLimit: Int = 10
+    private let listPageSize = 10
     @State private var editingDrafts: [String: String] = [:]
     @State private var editingEntries: Set<String> = []
     @State private var iconImportError: String? = nil
@@ -31,6 +70,19 @@ struct SettingsView: View {
     @State private var capturingShortcutTarget: ShortcutTarget? = nil
     @State private var shortcutCaptureMonitor: Any?
     @State private var pendingShortcut: AppStore.HotKeyConfiguration?
+    @State private var cachedAllAppEntries: [AppEntry] = []
+    @State private var allAppsVisibleLimit: Int = 10
+    @State private var allAppsSearch: String = ""
+    @State private var allAppsSearchDebounceID: Int = 0
+    @State private var hasAllAppEntries:Bool = false
+    @State private var hasAllAppEntriesSearchResult: Bool = false
+    @State private var showOnlyEditedTittleApps: Bool = true
+    @State private var showCLIInfoPopover = false
+    @State private var showCLIRemoveInfoPopover = false
+    @State private var showCLIFullPathCommand = false
+    @State private var copiedCLICommand: String? = nil
+    @State private var cliCommandActionMessage: String? = nil
+    @State private var layoutModePreviewScope: LayoutModePreviewScope = .fullscreen
 
     // Sidebar sizing presets
     private var sidebarIconFrame: CGFloat {
@@ -85,7 +137,7 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    .padding(.bottom, 17)
+                    .padding(.bottom, 10)
                     .listRowInsets(EdgeInsets(top: 0, leading: -4, bottom: 15, trailing: 10))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
@@ -178,6 +230,10 @@ struct SettingsView: View {
         .onDisappear {
             stopShortcutCapture(cancel: false)
         }
+        .onChange(of: appStore.isFullscreenMode) { _ in
+            guard selectedSection == .appearance else { return }
+            syncLayoutModePreviewScopeToRuntime()
+        }
     }
 
     private var systemVersionText: String {
@@ -216,6 +272,113 @@ private func getVersion(fallback: String) -> String {
     Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? fallback
 }
 
+private var selectedAppearanceLayoutMode: AppStore.AppearanceLayoutMode {
+    layoutModePreviewScope.appStoreMode
+}
+
+private var selectedScopePerDisplayEnabled: Bool {
+    appStore.scopedPageIndicatorPerDisplayEnabled(for: selectedAppearanceLayoutMode)
+}
+
+private func syncLayoutModePreviewScopeToRuntime() {
+    let target: LayoutModePreviewScope = appStore.isFullscreenMode ? .fullscreen : .compact
+    guard layoutModePreviewScope != target else { return }
+    layoutModePreviewScope = target
+}
+
+private func scopedIconScaleBinding() -> Binding<Double> {
+    Binding(
+        get: { appStore.scopedIconScale(for: selectedAppearanceLayoutMode) },
+        set: { appStore.setScopedIconScale($0, for: selectedAppearanceLayoutMode) }
+    )
+}
+
+private func scopedIconLabelFontSizeBinding() -> Binding<Double> {
+    Binding(
+        get: { appStore.scopedIconLabelFontSize(for: selectedAppearanceLayoutMode) },
+        set: { appStore.setScopedIconLabelFontSize($0, for: selectedAppearanceLayoutMode) }
+    )
+}
+
+private func scopedFolderDropZoneScaleBinding() -> Binding<Double> {
+    Binding(
+        get: { appStore.scopedFolderDropZoneScale(for: selectedAppearanceLayoutMode) },
+        set: { appStore.setScopedFolderDropZoneScale($0, for: selectedAppearanceLayoutMode) }
+    )
+}
+
+private func scopedPageIndicatorOffsetBinding() -> Binding<Double> {
+    Binding(
+        get: { appStore.scopedPageIndicatorOffset(for: selectedAppearanceLayoutMode) },
+        set: { appStore.setScopedPageIndicatorOffset($0, for: selectedAppearanceLayoutMode) }
+    )
+}
+
+private func scopedPageIndicatorTopPaddingBinding() -> Binding<Double> {
+    Binding(
+        get: { appStore.scopedPageIndicatorTopPadding(for: selectedAppearanceLayoutMode) },
+        set: { appStore.setScopedPageIndicatorTopPadding($0, for: selectedAppearanceLayoutMode) }
+    )
+}
+
+private func scopedPerDisplayIndicatorBinding() -> Binding<Bool> {
+    Binding(
+        get: { appStore.scopedPageIndicatorPerDisplayEnabled(for: selectedAppearanceLayoutMode) },
+        set: { appStore.setScopedPageIndicatorPerDisplayEnabled($0, for: selectedAppearanceLayoutMode) }
+    )
+}
+
+private func layoutModeScopeControl(width: CGFloat = 130) -> some View {
+    let outerShape = Capsule(style: .continuous)
+
+    return HStack(spacing: 3) {
+        ForEach(LayoutModePreviewScope.allCases) { scope in
+            Button {
+                withAnimation(.easeInOut(duration: 0.12)) {
+                    layoutModePreviewScope = scope
+                }
+            } label: {
+                Text(appStore.localized(scope.localizationKey))
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(layoutModePreviewScope == scope ? Color.primary : Color.secondary.opacity(0.9))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                    .frame(maxWidth: .infinity, minHeight: 18)
+                    .background {
+                        if layoutModePreviewScope == scope {
+                            Capsule(style: .continuous)
+                                .fill(
+                                    colorScheme == .dark
+                                    ? Color.white.opacity(0.12)
+                                    : Color.white.opacity(0.34)
+                                )
+                                .liquidGlass(in: Capsule(style: .continuous))
+                                .overlay(
+                                    Capsule(style: .continuous)
+                                        .stroke(Color.white.opacity(colorScheme == .dark ? 0.10 : 0.30), lineWidth: 0.5)
+                                )
+                        }
+                    }
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+    }
+    .padding(2)
+    .frame(width: width, height: 24)
+    .background {
+        outerShape
+            .fill(Color.white.opacity(colorScheme == .dark ? 0.03 : 0.10))
+            .liquidGlass(in: outerShape)
+    }
+    .overlay {
+        outerShape
+            .stroke(Color.white.opacity(colorScheme == .dark ? 0.05 : 0.16), lineWidth: 0.6)
+    }
+}
+
 private enum SettingsSection: String, CaseIterable, Identifiable {
     case general
     case appearance
@@ -223,6 +386,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     case titles
     case appSources
     case hiddenApps
+    case uninstall
+    case shortcuts
     case backup
     case development
     // case aiOverlay
@@ -236,6 +401,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     var iconName: String {
         switch self {
         case .general: return "gearshape"
+        case .shortcuts: return "keyboard"
         case .appSources: return "externaldrive"
         case .gameController: return "gamecontroller"
         case .sound: return "speaker.wave.2"
@@ -243,6 +409,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .performance: return "speedometer"
         case .titles: return "text.badge.plus"
         case .hiddenApps: return "eye.slash"
+        case .uninstall: return "trash"
         case .backup: return "clock.arrow.trianglehead.counterclockwise.rotate.90"
         case .development: return "hammer"
         // case .aiOverlay: return "sparkles"
@@ -256,6 +423,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general:
             colors = [Color(red: 0.12, green: 0.52, blue: 0.96), Color(red: 0.22, green: 0.72, blue: 0.94)]
+        case .shortcuts:
+            colors = [Color(red: 0.22, green: 0.31, blue: 0.43), Color(red: 0.33, green: 0.55, blue: 0.72)]
         case .appSources:
             colors = [Color(nsColor: .systemGray), Color(nsColor: .lightGray)]
         case .sound:
@@ -270,6 +439,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             colors = [Color(red: 0.95, green: 0.37, blue: 0.32), Color(red: 0.98, green: 0.55, blue: 0.44)]
         case .hiddenApps:
             colors = [Color(red: 0.29, green: 0.39, blue: 0.96), Color(red: 0.11, green: 0.67, blue: 0.91)]
+        case .uninstall:
+            colors = [Color(red: 0.94, green: 0.22, blue: 0.27), Color(red: 0.78, green: 0.04, blue: 0.18)]
         case .backup:
             colors = [Color(red: 0.12, green: 0.80, blue: 0.46), Color(red: 0.10, green: 0.62, blue: 0.34)]
         case .development:
@@ -287,6 +458,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     var localizationKey: LocalizationKey {
         switch self {
         case .general: return .settingsSectionGeneral
+        case .shortcuts: return .globalShortcutTitle
         case .appSources: return .settingsSectionAppSources
         case .sound: return .settingsSectionSound
         case .gameController: return .settingsSectionGameController
@@ -294,6 +466,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .performance: return .settingsSectionPerformance
         case .titles: return .settingsSectionTitles
         case .hiddenApps: return .settingsSectionHiddenApps
+        case .uninstall: return .settingsSectionUninstall
         case .backup: return .settingsSectionBackup
         case .development: return .settingsSectionDevelopment
         // case .aiOverlay: return .settingsSectionAIOverlay
@@ -324,22 +497,33 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         .font(.title3.bold())
 
                     ScrollView(showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 24) {
-                            content(for: section)
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.vertical, 12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        scrollContent(for: section)
                     }
                     .scrollDisabled(section == .about || section == .general)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .scrollBounceBehavior(.basedOnSize)
                 }
                 .padding(.horizontal, 24)
-                .padding(.vertical, 16)
+                .padding(.top, 16)
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
             }
             .background(.ultraThinMaterial)
+        }
+    }
+
+    @ViewBuilder
+    private func scrollContent(for section: SettingsSection) -> some View {
+        if section == .appearance {
+            appearanceSection
+            .padding(.top, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: 24) {
+                content(for: section)
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -358,6 +542,10 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             appSourcesSection
         case .hiddenApps:
             hiddenAppsSection
+        case .uninstall:
+            uninstallSection
+        case .shortcuts:
+            shortcutsSection
         case .backup:
             backupSection
         case .development:
@@ -791,7 +979,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             try exportDataFolder(to: destParent)
             backupRefreshToken = UUID()
         } catch {
-            // ignore for now
+            showBackupExportError(error)
         }
     }
 
@@ -873,6 +1061,49 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             Text(appStore.localized(.developmentPlaceholderSubtitle))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+
+            updateControlButton(
+                title: appStore.localized(.developmentForceOnboardingButton),
+                systemImage: "rectangle.stack.badge.play",
+                isPrimary: true
+            ) {
+                appStore.forceShowOnboarding()
+            }
+            .disabled(!appStore.isFullscreenMode)
+            .opacity(appStore.isFullscreenMode ? 1 : 0.45)
+            Text(appStore.localized(.developmentForceOnboardingHint))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Screenshot background")
+                    .font(.headline)
+
+                updateControlButton(
+                    title: "Pure White",
+                    systemImage: "sun.max.fill"
+                ) {
+                    appStore.developmentBackgroundOverride = .solidWhite
+                }
+
+                updateControlButton(
+                    title: "Pure Black",
+                    systemImage: "moon.fill"
+                ) {
+                    appStore.developmentBackgroundOverride = .solidBlack
+                }
+
+                updateControlButton(
+                    title: "Clear",
+                    systemImage: "arrow.counterclockwise"
+                ) {
+                    appStore.developmentBackgroundOverride = .none
+                }
+
+                Text("Development-only preview override, not persisted.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             HStack(spacing: 6) {
                 Image(systemName: "memorychip")
@@ -1056,49 +1287,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         }
     }
 
-    private var titlesSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Button {
-                    presentCustomTitlePicker()
-                } label: {
-                    Label(appStore.localized(.customTitleAddButton), systemImage: "plus")
-                }
-                Spacer()
-            }
-
-            let allEntries = customTitleEntries
-            let filtered = filteredCustomTitleEntries
-
-            if allEntries.isEmpty {
-                customTitleEmptyState
-            } else {
-                Text(appStore.localized(.customTitleHint))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                TextField("", text: $titleSearch, prompt: Text(appStore.localized(.renameSearchPlaceholder)))
-                    .textFieldStyle(.roundedBorder)
-
-                if filtered.isEmpty {
-                    Text(appStore.localized(.customTitleNoResults))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
-                } else {
-                    VStack(spacing: 12) {
-                        ForEach(filtered) { entry in
-                            customTitleRow(for: entry)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     private var hiddenAppsSection: some View {
-        let entries = hiddenAppEntries
-        return VStack(alignment: .leading, spacing: 16) {
+        return LazyVStack(alignment: .leading, spacing: 16) {
             HStack {
                 Button {
                     presentHiddenAppPicker()
@@ -1108,55 +1298,163 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 Spacer()
             }
 
-            if entries.isEmpty {
-                hiddenAppsEmptyState
-            } else {
-                Text(appStore.localized(.hiddenAppsHint))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                TextField("", text: $hiddenSearch, prompt: Text(appStore.localized(.hiddenAppsSearchPlaceholder)))
-                    .textFieldStyle(.roundedBorder)
-
-                let filtered = filteredHiddenAppEntries
-                if filtered.isEmpty {
-                    Text(appStore.localized(.customTitleNoResults))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
-                } else {
-                    VStack(spacing: 12) {
-                        ForEach(filtered) { entry in
-                            hiddenAppRow(for: entry)
+            DisclosureGroup(isExpanded: $showHiddenApps) {
+                LazyVStack(alignment: .leading, spacing: 16){
+                    if hasHiddenAppEntries {
+                        Text(appStore.localized(.hiddenAppsHint))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        
+                        TextField("", text: $hiddenSearch, prompt: Text(appStore.localized(.hiddenAppsSearchPlaceholder)))
+                            .textFieldStyle(.roundedBorder)
+                            .padding(3)
+                        
+                        if hasHiddenAppEntriesSearchResult {
+                            LazyVStack(spacing: 12) {
+                                ForEach(cachedHiddenAppEntries.prefix(hiddenVisibleLimit)) { entry in
+                                    hiddenAppRow(for: entry)
+                                }
+                                if cachedHiddenAppEntries.count > hiddenVisibleLimit {
+                                    Button(appStore.localized(.loadMore)) {
+                                        hiddenVisibleLimit = min(hiddenVisibleLimit + listPageSize,
+                                                                 cachedHiddenAppEntries.count)
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                        } else {
+                            Text(appStore.localized(.customTitleNoResults))
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
+                        }
+                    } else {
+                        hiddenAppsEmptyState
+                    }
+                }
+            } label: {
+                Label(appStore.localized(.settingsSectionHiddenApps), systemImage: "eye.slash")
+                    .font(.headline)
+            }
+                
+            DisclosureGroup(isExpanded: $showNotHiddenApps) {
+                LazyVStack(alignment: .leading, spacing: 16){
+                    if hasNotHiddenAppEntries{
+                        Spacer()
+                        Text(appStore.localized(.notHiddenAppsHint))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        
+                        TextField("", text: $notHiddenSearch, prompt: Text(appStore.localized(.notHiddenAppsSearchPlaceholder)))
+                            .textFieldStyle(.roundedBorder)
+                            .padding(3)
+                        
+                        if hasNotHiddenAppEntriesSearchResult{
+                            LazyVStack(spacing: 12) {
+                                ForEach(cachedNotHiddenAppEntries.prefix(notHiddenVisibleLimit)) { entry in
+                                    notHiddenAppRow(for: entry)
+                                }
+                                if cachedNotHiddenAppEntries.count > notHiddenVisibleLimit {
+                                    Button(appStore.localized(.loadMore)) {
+                                        notHiddenVisibleLimit = min(notHiddenVisibleLimit + listPageSize,
+                                                                    cachedNotHiddenAppEntries.count)
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                        } else {
+                            Text(appStore.localized(.customTitleNoResults))
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
                         }
                     }
                 }
+            } label: {
+                Label(appStore.localized(.notHiddenAppsTitle), systemImage: "eye")
+                    .font(.headline)
+            }
+                
+        }
+        .onAppear(perform: updateCachedHiddenAndNotHiddenAppEntries)
+        .onChange(of: hiddenSearch, initial: false) { _, _ in
+            hiddenVisibleLimit = listPageSize
+            scheduleHiddenSearchUpdate()
+        }
+        .onChange(of: notHiddenSearch, initial: false) { _, _ in
+            notHiddenVisibleLimit = listPageSize
+            if showNotHiddenApps {
+                scheduleNotHiddenSearchUpdate()
             }
         }
+        .onChange(of: showNotHiddenApps, initial: false) { _, isExpanded in
+            if isExpanded {
+                notHiddenVisibleLimit = listPageSize
+                updateCachedNotHiddenAppEntries()
+            }
+        }
+        .onChange(of: appStore.apps, initial: false, updateCachedHiddenAndNotHiddenAppEntries)
+        .onChange(of: appStore.folders, initial: false, updateCachedHiddenAndNotHiddenAppEntries)
+        .onChange(of: appStore.hiddenAppPaths, initial: false, updateCachedHiddenAndNotHiddenAppEntries)
     }
 
-    private var hiddenAppEntries: [HiddenAppEntry] {
+    private var hiddenAppEntries: [AppEntry] {
         appStore.hiddenAppPaths
             .map { path in
                 let info = appStore.appInfoForCustomTitle(path: path)
                 let defaultName = appStore.defaultDisplayName(for: path)
-                return HiddenAppEntry(id: path, appInfo: info, defaultName: defaultName)
+                return AppEntry(id: path, appInfo: info, defaultName: defaultName)
+            }
+            .sorted { lhs, rhs in
+                lhs.appInfo.name.localizedCaseInsensitiveCompare(rhs.appInfo.name) == .orderedAscending
+            }
+    }
+    
+    private var notHiddenAppEntries: [AppEntry] {
+        visibleNonHiddenApps
+            .map { info in
+                let path = info.url.path
+                let defaultName = appStore.defaultDisplayName(for: path)
+                return AppEntry(id: path, appInfo: info, defaultName: defaultName)
             }
             .sorted { lhs, rhs in
                 lhs.appInfo.name.localizedCaseInsensitiveCompare(rhs.appInfo.name) == .orderedAscending
             }
     }
 
-    private var filteredHiddenAppEntries: [HiddenAppEntry] {
-        let base = hiddenAppEntries
-        let trimmed = hiddenSearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return base }
-        let query = trimmed.lowercased()
+    private var visibleNonHiddenApps: [AppInfo] {
+        var dedupedByPath: [String: AppInfo] = [:]
+        for app in appStore.apps {
+            dedupedByPath[standardizePath(app.url.path)] = app
+        }
+        for folder in appStore.folders {
+            for app in folder.apps {
+                let key = standardizePath(app.url.path)
+                if dedupedByPath[key] == nil {
+                    dedupedByPath[key] = app
+                }
+            }
+        }
+        return Array(dedupedByPath.values)
+    }
+    
+    private func matches(_ entry: AppEntry, query: String) -> Bool {
+        let options: String.CompareOptions = [
+            .caseInsensitive,
+            .diacriticInsensitive,
+            .widthInsensitive
+        ]
+            
+        return entry.appInfo.name.range(of: query, options: options) != nil
+            || entry.defaultName.range(of: query, options: options) != nil
+            || entry.id.range(of: query, options: options) != nil
+    }
+    
+    private func filter(_ base: [AppEntry], by rawQuery: String) -> [AppEntry] {
+        let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return base }
         return base.filter { entry in
-            if entry.appInfo.name.lowercased().contains(query) { return true }
-            if entry.defaultName.lowercased().contains(query) { return true }
-            if entry.id.lowercased().contains(query) { return true }
-            return false
+            matches(entry, query: query)
         }
     }
 
@@ -1164,22 +1462,13 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         VStack(alignment: .leading, spacing: 12) {
             Text(appStore.localized(.hiddenAppsEmptyTitle))
                 .font(.headline)
-            Text(appStore.localized(.hiddenAppsEmptySubtitle))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-            Button {
-                presentHiddenAppPicker()
-            } label: {
-                Label(appStore.localized(.hiddenAppsAddButton), systemImage: "eye.slash")
-            }
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .liquidGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private func hiddenAppRow(for entry: HiddenAppEntry) -> some View {
+    private func hiddenAppRow(for entry: AppEntry) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Image(nsImage: IconStore.shared.icon(for: entry.appInfo))
                 .resizable()
@@ -1212,60 +1501,341 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+    
+    private func notHiddenAppRow(for entry: AppEntry) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(nsImage: IconStore.shared.icon(for: entry.appInfo))
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 40, height: 40)
+                .cornerRadius(10)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(entry.appInfo.name)
+                    .font(.callout.weight(.semibold))
+                Text(entry.defaultName)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Text(entry.id)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            
+            Spacer()
+            
+            Button {
+                appStore.hideApp(atPath: entry.id)
+            } label: {
+                Text(appStore.localized(.hiddenAppsAddButton))
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(14)
+        .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
-    private struct HiddenAppEntry: Identifiable {
+    private struct AppEntry: Identifiable {
         let id: String
         let appInfo: AppInfo
         let defaultName: String
     }
+    
+    private func updateCachedHiddenAppEntries() {
+        cachedHiddenAppEntries.removeAll()
+        hasHiddenAppEntries = !hiddenAppEntries.isEmpty
+        let filteredHiddenAppEntries = filter(hiddenAppEntries, by: hiddenSearch)
+        hasHiddenAppEntriesSearchResult = !filteredHiddenAppEntries.isEmpty
+        cachedHiddenAppEntries.append(contentsOf: filteredHiddenAppEntries)
+    }
+    
+    private func updateCachedNotHiddenAppEntries() {
+        guard showNotHiddenApps else {
+            cachedNotHiddenAppEntries.removeAll()
+            hasNotHiddenAppEntries = false
+            hasNotHiddenAppEntriesSearchResult = false
+            return
+        }
 
-    private var customTitleEntries: [CustomTitleEntry] {
+        cachedNotHiddenAppEntries.removeAll()
+        hasNotHiddenAppEntries = !notHiddenAppEntries.isEmpty
+        let filteredNotHiddenAppEntries = filter(notHiddenAppEntries, by: notHiddenSearch)
+        hasNotHiddenAppEntriesSearchResult = !filteredNotHiddenAppEntries.isEmpty
+        cachedNotHiddenAppEntries.append(contentsOf: filteredNotHiddenAppEntries)
+    }
+    
+    private func updateCachedHiddenAndNotHiddenAppEntries() {
+        updateCachedHiddenAppEntries()
+        updateCachedNotHiddenAppEntries()
+    }
+
+    private func scheduleHiddenSearchUpdate() {
+        hiddenSearchDebounceID += 1
+        let token = hiddenSearchDebounceID
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            if hiddenSearchDebounceID == token {
+                updateCachedHiddenAppEntries()
+            }
+        }
+    }
+
+    private func scheduleNotHiddenSearchUpdate() {
+        notHiddenSearchDebounceID += 1
+        let token = notHiddenSearchDebounceID
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            if notHiddenSearchDebounceID == token {
+                updateCachedNotHiddenAppEntries()
+            }
+        }
+    }
+
+    private var uninstallSection: some View {
+        let rawPath = appStore.uninstallToolAppPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let toolURL = appStore.uninstallToolAppURL
+        let hasSelection = !rawPath.isEmpty
+        let fallbackName = rawPath.isEmpty ? "" : URL(fileURLWithPath: rawPath).deletingPathExtension().lastPathComponent
+        let displayName = toolURL == nil ? fallbackName : appStore.uninstallToolAppDisplayName
+
+        return VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(appStore.localized(.uninstallToolPathLabel))
+                    .font(.subheadline.weight(.semibold))
+
+                HStack(alignment: .top, spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.red.opacity(0.14), Color.orange.opacity(0.10)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+
+                        Image(nsImage: appStore.uninstallToolAppIcon)
+                            .resizable()
+                            .interpolation(.high)
+                            .antialiased(true)
+                            .frame(width: 30, height: 30)
+                            .cornerRadius(7)
+                    }
+                    .frame(width: 42, height: 42)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        if hasSelection {
+                            Text(displayName.isEmpty ? rawPath : displayName)
+                                .font(.headline)
+                                .lineLimit(1)
+
+                            if !appStore.uninstallToolBundleIdentifier.isEmpty {
+                                Label(appStore.uninstallToolBundleIdentifier, systemImage: "number")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+
+                            if !appStore.uninstallToolVersionText.isEmpty {
+                                Label(appStore.uninstallToolVersionText, systemImage: "tag")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Text(rawPath)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .textSelection(.enabled)
+                        } else {
+                            Text(appStore.localized(.uninstallToolNotConfigured))
+                                .font(.callout.weight(.semibold))
+                            Text(appStore.localized(.uninstallSectionDescription))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.red.opacity(0.07))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.red.opacity(0.18), lineWidth: 1)
+                )
+
+                if appStore.uninstallToolConfiguredButMissing {
+                    Text(appStore.localized(.uninstallToolMissing))
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                HStack(spacing: 10) {
+                    Button(appStore.localized(.uninstallToolChooseButton)) {
+                        presentUninstallToolPicker()
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button(appStore.localized(.uninstallToolClearButton)) {
+                        _ = appStore.setUninstallToolApplication(url: nil)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(appStore.uninstallToolAppPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Spacer()
+
+                    Button(appStore.localized(.uninstallToolOpenButton)) {
+                        if !appStore.openConfiguredUninstallTool() {
+                            NSSound.beep()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(appStore.uninstallToolAppURL == nil)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(appStore.localized(.uninstallSectionDescription))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
+    
+    private var titlesSection: some View {
+        LazyVStack(alignment: .leading, spacing: 16){
+            HStack {
+                Button {
+                    presentCustomTitlePicker()
+                } label: {
+                    Label(appStore.localized(.customTitleAddFromFolder), systemImage: "plus")
+                }
+                Spacer()
+            }
+
+            Text(appStore.localized(.customTitleHint))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            
+            HStack(){
+                Text(appStore.localized(.customTitleOnly))
+                    .font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Toggle("", isOn: $showOnlyEditedTittleApps)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .disabled(appStore.customTitles.isEmpty)
+                    .onChange(of: appStore.customTitles.isEmpty, initial: true) { _, isEmply in
+                        if isEmply {
+                            showOnlyEditedTittleApps = false
+                        }
+                    }
+            }
+
+            if hasAllAppEntries{
+                TextField("", text: $allAppsSearch, prompt: Text(appStore.localized(.renameSearchPlaceholder)))
+                    .textFieldStyle(.roundedBorder)
+                    .padding(3)
+                
+                if hasAllAppEntriesSearchResult{
+                    let visibleEntries: [AppEntry] = showOnlyEditedTittleApps
+                        ? cachedAllAppEntries
+                        : Array(cachedAllAppEntries.prefix(allAppsVisibleLimit))
+                    LazyVStack(spacing: 12) {
+                        ForEach(visibleEntries){ entry in
+                            customTitleRow(for: entry)
+                        }
+                        if !showOnlyEditedTittleApps && cachedAllAppEntries.count > allAppsVisibleLimit {
+                            Button(appStore.localized(.loadMore)) {
+                                allAppsVisibleLimit = min(allAppsVisibleLimit + listPageSize,
+                                                          cachedAllAppEntries.count)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                } else {
+                    Text(appStore.localized(.customTitleNoResults))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
+                }
+            }
+        }
+        .onAppear(perform: updateCachedAllAppEntries)
+        .onChange(of: allAppsSearch, initial: false) { _, _ in
+            allAppsVisibleLimit = listPageSize
+            scheduleAllAppsSearchUpdate()
+        }
+        .onChange(of: showOnlyEditedTittleApps, initial: false) { _, _ in
+            allAppsVisibleLimit = listPageSize
+            updateCachedAllAppEntries()
+        }
+        .onChange(of: appStore.customTitles, initial: false, updateCachedAllAppEntries)
+        .onChange(of: appStore.apps, initial: false, updateCachedAllAppEntries)
+        .onChange(of: appStore.folders, initial: false, updateCachedAllAppEntries)
+        .onChange(of: appStore.hiddenAppPaths, initial: false, updateCachedAllAppEntries)
+    }
+    
+    private var customTitleEntries: [AppEntry] {
         appStore.customTitles
             .map { (path, _) in
                 let info = appStore.appInfoForCustomTitle(path: path)
                 let defaultName = appStore.defaultDisplayName(for: path)
-                return CustomTitleEntry(id: path, appInfo: info, defaultName: defaultName)
+                return AppEntry(id: path, appInfo: info, defaultName: defaultName)
             }
             .sorted { lhs, rhs in
                 lhs.appInfo.name.localizedCaseInsensitiveCompare(rhs.appInfo.name) == .orderedAscending
             }
     }
-
-    private var filteredCustomTitleEntries: [CustomTitleEntry] {
-        let base = customTitleEntries
-        let trimmed = titleSearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return base }
-        let query = trimmed.lowercased()
-        return base.filter { entry in
-            let custom = entry.appInfo.name.lowercased()
-            if custom.contains(query) { return true }
-            if entry.defaultName.lowercased().contains(query) { return true }
-            if entry.id.lowercased().contains(query) { return true }
-            return false
+    
+    private var allAppEntries: [AppEntry] {
+        var allEntries: [AppEntry] = []
+        allEntries.append(contentsOf: notHiddenAppEntries)
+        allEntries.append(contentsOf: hiddenAppEntries)
+        allEntries.sort { lhs, rhs in
+            lhs.appInfo.name.localizedCaseInsensitiveCompare(rhs.appInfo.name) == .orderedAscending
+        }
+        return allEntries
+    }
+    
+    private func updateCachedAllAppEntries() {
+        cachedAllAppEntries.removeAll()
+        
+        if (showOnlyEditedTittleApps){
+            hasAllAppEntries = !customTitleEntries.isEmpty
+            let filteredCustomTitleEntries = filter(customTitleEntries, by: allAppsSearch)
+            hasAllAppEntriesSearchResult = !filteredCustomTitleEntries.isEmpty
+            cachedAllAppEntries.append(contentsOf: filteredCustomTitleEntries)
+        } else {
+            hasAllAppEntries = !allAppEntries.isEmpty
+            let filteredAllAppEntries = filter(allAppEntries, by: allAppsSearch)
+            hasAllAppEntriesSearchResult = !filteredAllAppEntries.isEmpty
+            cachedAllAppEntries.append(contentsOf: filteredAllAppEntries)
         }
     }
 
-    private var customTitleEmptyState: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(appStore.localized(.customTitleEmptyTitle))
-                .font(.headline)
-            Text(appStore.localized(.customTitleEmptySubtitle))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-            Button {
-                presentCustomTitlePicker()
-            } label: {
-                Label(appStore.localized(.customTitleAddButton), systemImage: "plus")
+    private func scheduleAllAppsSearchUpdate() {
+        allAppsSearchDebounceID += 1
+        let token = allAppsSearchDebounceID
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            if allAppsSearchDebounceID == token {
+                updateCachedAllAppEntries()
             }
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     @ViewBuilder
-    private func customTitleRow(for entry: CustomTitleEntry) -> some View {
+    private func customTitleRow(for entry: AppEntry) -> some View {
         let isEditing = editingEntries.contains(entry.id)
         let currentDraft = editingDrafts[entry.id] ?? appStore.customTitles[entry.id] ?? entry.appInfo.name
         let trimmedDraft = currentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1293,14 +1863,13 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
                 Spacer()
 
-                HStack(spacing: 10) {
+                VStack(alignment: .trailing, spacing: 10) {
                     if isEditing {
                         Button(appStore.localized(.customTitleSave)) {
                             saveCustomTitle(entry)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(trimmedDraft.isEmpty || trimmedDraft == originalValue)
-
                         Button(appStore.localized(.customTitleCancel)) {
                             cancelEditing(entry)
                         }
@@ -1310,10 +1879,11 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                             Button(role: .destructive) {
                                 removeCustomTitle(entry)
                             } label: {
-                                Text(appStore.localized(.customTitleDelete))
+                                Text(appStore.localized(.customTitleReset))
                             }
                             .buttonStyle(.bordered)
                         }
+
                     } else {
                         Button(appStore.localized(.customTitleEdit)) {
                             beginEditing(entry)
@@ -1324,7 +1894,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                             Button(role: .destructive) {
                                 removeCustomTitle(entry)
                             } label: {
-                                Text(appStore.localized(.customTitleDelete))
+                                Text(appStore.localized(.customTitleReset))
                             }
                             .buttonStyle(.bordered)
                         }
@@ -1358,6 +1928,22 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         }
     }
 
+    private func presentUninstallToolPicker() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.title = appStore.localized(.uninstallToolPanelTitle)
+        panel.prompt = appStore.localized(.uninstallToolChooseButton)
+
+        if panel.runModal() == .OK, let url = panel.url {
+            if !appStore.setUninstallToolApplication(url: url) {
+                NSSound.beep()
+            }
+        }
+    }
+
     private func presentCustomTitlePicker() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
@@ -1372,6 +1958,10 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             let path = info.url.path
             editingEntries.insert(path)
             editingDrafts[path] = appStore.customTitles[path] ?? info.name
+            if !showOnlyEditedTittleApps {
+                showOnlyEditedTittleApps = true
+                allAppsSearch = ""
+            }
         }
     }
 
@@ -1459,23 +2049,23 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         )
     }
 
-    private struct CustomTitleEntry: Identifiable {
-        let id: String
-        let appInfo: AppInfo
-        let defaultName: String
-    }
+//    private struct CustomTitleEntry: Identifiable {
+//        let id: String
+//        let appInfo: AppInfo
+//        let defaultName: String
+//    }
 
-    private func beginEditing(_ entry: CustomTitleEntry) {
+    private func beginEditing(_ entry: AppEntry) {
         editingEntries.insert(entry.id)
         editingDrafts[entry.id] = appStore.customTitles[entry.id] ?? entry.appInfo.name
     }
 
-    private func cancelEditing(_ entry: CustomTitleEntry) {
+    private func cancelEditing(_ entry: AppEntry) {
         editingEntries.remove(entry.id)
         editingDrafts.removeValue(forKey: entry.id)
     }
 
-    private func saveCustomTitle(_ entry: CustomTitleEntry) {
+    private func saveCustomTitle(_ entry: AppEntry) {
         let draft = (editingDrafts[entry.id] ?? appStore.customTitles[entry.id] ?? entry.appInfo.name)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !draft.isEmpty else { return }
@@ -1490,7 +2080,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         editingDrafts.removeValue(forKey: entry.id)
     }
 
-    private func removeCustomTitle(_ entry: CustomTitleEntry) {
+    private func removeCustomTitle(_ entry: AppEntry) {
         appStore.clearCustomTitle(for: entry.appInfo)
         editingEntries.remove(entry.id)
         editingDrafts.removeValue(forKey: entry.id)
@@ -1502,12 +2092,17 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         stopShortcutCapture(cancel: false)
         pendingShortcut = nil
         capturingShortcutTarget = target
+        if target == .launchpad {
+            // Temporarily disable active hotkey while user is recording a new one.
+            AppDelegate.shared?.updateGlobalHotKey(configuration: nil)
+        }
         shortcutCaptureMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
             handleShortcutCapture(event: event)
         }
     }
 
     private func stopShortcutCapture(cancel: Bool) {
+        let hadCaptureTarget = capturingShortcutTarget
         if let monitor = shortcutCaptureMonitor {
             NSEvent.removeMonitor(monitor)
             shortcutCaptureMonitor = nil
@@ -1517,6 +2112,9 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             if capturingShortcutTarget != nil { NSSound.beep() }
         }
         capturingShortcutTarget = nil
+        if hadCaptureTarget == .launchpad {
+            appStore.syncGlobalHotKeyRegistration()
+        }
     }
 
     private func handleShortcutCapture(event: NSEvent) -> NSEvent? {
@@ -2020,14 +2618,27 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private var loginLayoutCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(appStore.localized(.launchAtLoginTitle))
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Toggle("", isOn: $appStore.isStartOnLogin)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .disabled(!appStore.canConfigureStartOnLogin)
+            HStack(alignment: .center, spacing: 24) {
+                HStack {
+                    Text(appStore.localized(.launchAtLoginTitle))
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Toggle("", isOn: $appStore.isStartOnLogin)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .disabled(!appStore.canConfigureStartOnLogin)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack {
+                    Text(appStore.localized(.showQuickRefreshButton))
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Toggle("", isOn: $appStore.showQuickRefreshButton)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Divider()
@@ -2044,10 +2655,98 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack {
-                    Text(appStore.localized(.showQuickRefreshButton))
+                    Text(appStore.localized(.developmentEnableCLICodeTitle))
                         .font(.subheadline.weight(.semibold))
+                    Button {
+                        if !showCLIInfoPopover {
+                            copiedCLICommand = nil
+                            cliCommandActionMessage = nil
+                            showCLIRemoveInfoPopover = false
+                            showCLIFullPathCommand = false
+                        }
+                        showCLIInfoPopover.toggle()
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .font(.subheadline.weight(.regular))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showCLIInfoPopover, arrowEdge: .top) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(appStore.localized(.commandLineInterfaceHelpTitle))
+                                .font(.headline)
+                            Text(appStore.localized(.commandLineInterfaceHelpBody))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(appStore.localized(.commandLineInterfaceAgentHint))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Divider()
+                            cliCommandRow("LaunchNext --cli help")
+                            cliCommandRow("LaunchNext --tui")
+                            DisclosureGroup(
+                                isExpanded: $showCLIFullPathCommand,
+                                content: {
+                                    cliCommandRow("/Applications/LaunchNext.app/Contents/MacOS/LaunchNext --tui")
+                                        .padding(.top, 4)
+                                },
+                                label: {
+                                    Text(appStore.localized(.commandLineInterfaceShowFullPathCommand))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            )
+                            Divider()
+                            HStack(spacing: 8) {
+                                Button(role: .destructive) {
+                                    if appStore.developmentEnableCLICode {
+                                        appStore.developmentEnableCLICode = false
+                                        cliCommandActionMessage = appStore.localized(.commandLineInterfaceRemoveCommandDone)
+                                    } else {
+                                        let removed = appStore.removeInstalledCLICommand()
+                                        cliCommandActionMessage = removed
+                                            ? appStore.localized(.commandLineInterfaceRemoveCommandDone)
+                                            : appStore.localized(.commandLineInterfaceRemoveCommandMissing)
+                                    }
+                                } label: {
+                                    Label(appStore.localized(.commandLineInterfaceRemoveCommandButton), systemImage: "trash")
+                                }
+                                .buttonStyle(.bordered)
+
+                                Button {
+                                    showCLIRemoveInfoPopover.toggle()
+                                } label: {
+                                    Image(systemName: "info.circle")
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .popover(isPresented: $showCLIRemoveInfoPopover, arrowEdge: .bottom) {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text(appStore.localized(.commandLineInterfaceRemoveCommandInfoTitle))
+                                            .font(.headline)
+                                        Text(appStore.localized(.commandLineInterfaceRemoveCommandInfoBody))
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                            .textSelection(.enabled)
+                                    }
+                                    .padding(12)
+                                    .frame(width: 390, alignment: .leading)
+                                }
+                            }
+                            if let cliCommandActionMessage {
+                                Text(cliCommandActionMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(12)
+                        .frame(width: 360, alignment: .leading)
+                    }
                     Spacer()
-                    Toggle("", isOn: $appStore.showQuickRefreshButton)
+                    Toggle("", isOn: $appStore.developmentEnableCLICode)
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }
@@ -2111,6 +2810,38 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         )
     }
 
+    @ViewBuilder
+    private func cliCommandRow(_ command: String) -> some View {
+        HStack(spacing: 8) {
+            Text(command)
+                .font(.system(size: 12, weight: .regular, design: .monospaced))
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+            Spacer(minLength: 6)
+            Button {
+                copyCLICommand(command)
+            } label: {
+                Image(systemName: copiedCLICommand == command ? "checkmark.circle.fill" : "doc.on.doc")
+                    .foregroundStyle(copiedCLICommand == command ? Color.green : Color.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(appStore.localized(.backupCleanupCopyButton))
+        }
+    }
+
+    private func copyCLICommand(_ command: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(command, forType: .string)
+        copiedCLICommand = command
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            if copiedCLICommand == command {
+                copiedCLICommand = nil
+            }
+        }
+    }
+
     private var dataManagementCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center) {
@@ -2136,6 +2867,13 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 }
                 .buttonStyle(.bordered)
                 .help(appStore.localized(.importTip))
+
+                Button {
+                    applyMacOS26PresetLayout()
+                } label: {
+                    Label(appStore.localized(.layoutPresetApplyButton), systemImage: "square.grid.3x3.topleft.filled")
+                }
+                .buttonStyle(.bordered)
             }
         }
         .padding(12)
@@ -2460,14 +3198,14 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                                                 isConnected: true))
         }
 
-        let offlineIDs = appStore.pageIndicatorOverrides.keys
+        let offlineIDs = appStore.scopedPageIndicatorOverrides(for: selectedAppearanceLayoutMode).keys
             .filter { !connectedIDs.contains($0) }
             .sorted()
 
         for id in offlineIDs {
             entries.append(IndicatorScreenEntry(id: id,
-                                                name: "Offline Display",
-                                                sizeText: "ID \(id)",
+                                                name: appStore.localized(.indicatorOfflineDisplay),
+                                                sizeText: String(format: appStore.localized(.indicatorScreenIDFormat), id),
                                                 isConnected: false))
         }
 
@@ -2482,13 +3220,13 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private func indicatorCustomBinding(for screenID: String) -> Binding<Bool> {
         Binding(
-            get: { appStore.pageIndicatorOverride(for: screenID) != nil },
+            get: { appStore.scopedPageIndicatorOverride(for: screenID, mode: selectedAppearanceLayoutMode) != nil },
             set: { isCustom in
                 scheduleIndicatorOverrideUpdate {
                     if isCustom {
-                        appStore.applyIndicatorDefaults(to: screenID)
+                        appStore.applyIndicatorDefaults(to: screenID, mode: selectedAppearanceLayoutMode)
                     } else {
-                        appStore.setPageIndicatorOverride(nil, for: screenID)
+                        appStore.setScopedPageIndicatorOverride(nil, for: screenID, mode: selectedAppearanceLayoutMode)
                     }
                 }
             }
@@ -2497,15 +3235,19 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private func indicatorOffsetBinding(for screenID: String) -> Binding<Double> {
         Binding(
-            get: { appStore.pageIndicatorOverride(for: screenID)?.offset ?? appStore.pageIndicatorOffset },
+            get: {
+                appStore.scopedPageIndicatorOverride(for: screenID, mode: selectedAppearanceLayoutMode)?.offset
+                ?? appStore.scopedPageIndicatorOffset(for: selectedAppearanceLayoutMode)
+            },
             set: { newValue in
                 scheduleIndicatorOverrideUpdate {
-                    let current = appStore.pageIndicatorOverride(for: screenID)
-                        ?? AppStore.PageIndicatorOverride(offset: appStore.pageIndicatorOffset,
-                                                          topPadding: appStore.pageIndicatorTopPadding)
-                    appStore.setPageIndicatorOverride(AppStore.PageIndicatorOverride(offset: newValue,
-                                                                                    topPadding: current.topPadding),
-                                                      for: screenID)
+                    let current = appStore.scopedPageIndicatorOverride(for: screenID, mode: selectedAppearanceLayoutMode)
+                        ?? AppStore.PageIndicatorOverride(offset: appStore.scopedPageIndicatorOffset(for: selectedAppearanceLayoutMode),
+                                                          topPadding: appStore.scopedPageIndicatorTopPadding(for: selectedAppearanceLayoutMode))
+                    appStore.setScopedPageIndicatorOverride(AppStore.PageIndicatorOverride(offset: newValue,
+                                                                                           topPadding: current.topPadding),
+                                                            for: screenID,
+                                                            mode: selectedAppearanceLayoutMode)
                 }
             }
         )
@@ -2513,15 +3255,19 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private func indicatorTopPaddingBinding(for screenID: String) -> Binding<Double> {
         Binding(
-            get: { appStore.pageIndicatorOverride(for: screenID)?.topPadding ?? appStore.pageIndicatorTopPadding },
+            get: {
+                appStore.scopedPageIndicatorOverride(for: screenID, mode: selectedAppearanceLayoutMode)?.topPadding
+                ?? appStore.scopedPageIndicatorTopPadding(for: selectedAppearanceLayoutMode)
+            },
             set: { newValue in
                 scheduleIndicatorOverrideUpdate {
-                    let current = appStore.pageIndicatorOverride(for: screenID)
-                        ?? AppStore.PageIndicatorOverride(offset: appStore.pageIndicatorOffset,
-                                                          topPadding: appStore.pageIndicatorTopPadding)
-                    appStore.setPageIndicatorOverride(AppStore.PageIndicatorOverride(offset: current.offset,
-                                                                                    topPadding: newValue),
-                                                      for: screenID)
+                    let current = appStore.scopedPageIndicatorOverride(for: screenID, mode: selectedAppearanceLayoutMode)
+                        ?? AppStore.PageIndicatorOverride(offset: appStore.scopedPageIndicatorOffset(for: selectedAppearanceLayoutMode),
+                                                          topPadding: appStore.scopedPageIndicatorTopPadding(for: selectedAppearanceLayoutMode))
+                    appStore.setScopedPageIndicatorOverride(AppStore.PageIndicatorOverride(offset: current.offset,
+                                                                                           topPadding: newValue),
+                                                            for: screenID,
+                                                            mode: selectedAppearanceLayoutMode)
                 }
             }
         )
@@ -2571,8 +3317,10 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     @ViewBuilder
     private func indicatorOverrideCard(for entry: IndicatorScreenEntry) -> some View {
         let useCustom = indicatorCustomBinding(for: entry.id)
-        let offsetValue = appStore.pageIndicatorOverride(for: entry.id)?.offset ?? appStore.pageIndicatorOffset
-        let topPaddingValue = appStore.pageIndicatorOverride(for: entry.id)?.topPadding ?? appStore.pageIndicatorTopPadding
+        let offsetValue = appStore.scopedPageIndicatorOverride(for: entry.id, mode: selectedAppearanceLayoutMode)?.offset
+            ?? appStore.scopedPageIndicatorOffset(for: selectedAppearanceLayoutMode)
+        let topPaddingValue = appStore.scopedPageIndicatorOverride(for: entry.id, mode: selectedAppearanceLayoutMode)?.topPadding
+            ?? appStore.scopedPageIndicatorTopPadding(for: selectedAppearanceLayoutMode)
 
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 12) {
@@ -2585,13 +3333,13 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 }
                 Spacer()
                 if !entry.isConnected {
-                    Text("Offline")
+                    Text(appStore.localized(.indicatorOfflineBadge))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Picker("", selection: useCustom) {
-                    Text("Default").tag(false)
-                    Text("Custom").tag(true)
+                    Text(appStore.localized(.defaultOption)).tag(false)
+                    Text(appStore.localized(.customOption)).tag(true)
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 160)
@@ -2600,7 +3348,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             if useCustom.wrappedValue {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text("Indicator offset")
+                        Text(appStore.localized(.pageIndicatorOffsetLabel))
                             .font(.caption)
                         Spacer()
                         Text(String(format: "%.0f", offsetValue))
@@ -2618,7 +3366,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     }
 
                     HStack {
-                        Text("Indicator top padding")
+                        Text(appStore.localized(.pageIndicatorTopPaddingLabel))
                             .font(.caption)
                         Spacer()
                         Text(String(format: "%.0f", topPaddingValue))
@@ -2687,474 +3435,586 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         appStore.saveAllOrder()
     }
 
-    private var appearanceSection: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Text(appStore.localized(.classicMode))
-                    Spacer()
-                    Toggle("", isOn: $appStore.isFullscreenMode)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
+    private var shortcutsSection: some View {
+        let isCapturing = isCapturingShortcut(.launchpad)
+        let canSave = isCapturing && pendingShortcut != nil
+        let canClear = isCapturing || appStore.globalHotKey != nil
 
-                HStack {
-                    Text(appStore.localized(.showLabels))
-                    Spacer()
-                    Toggle("", isOn: $appStore.showLabels)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-
-                HStack {
-                    Text(appStore.localized(.useLocalizedThirdPartyTitles))
-                    Spacer()
-                    Toggle("", isOn: $appStore.useLocalizedThirdPartyTitles)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-
-                HStack {
-                    Text(appStore.localized(.predictDrop))
-                    Spacer()
-                    Toggle("", isOn: $appStore.enableDropPrediction)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-                .disabled(appStore.useCAGridRenderer)
-                .opacity(appStore.useCAGridRenderer ? 0.5 : 1)
-                HStack {
-                    Text(appStore.localized(.enableAnimations))
-                    Spacer()
-                    Toggle("", isOn: $appStore.enableAnimations)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-
-                HStack {
-                    Text(appStore.localized(.followScrollPagingTitle))
-                    Spacer()
-                    Toggle("", isOn: $appStore.followScrollPagingEnabled)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-                .disabled(appStore.useCAGridRenderer)
-                .opacity(appStore.useCAGridRenderer ? 0.5 : 1)
-
-                HStack {
-                    Text(appStore.localized(.hideDockOption))
-                    Spacer()
-                    Toggle("", isOn: $appStore.hideDock)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-
-                HStack {
-                    Text(appStore.localized(.rememberPageTitle))
-                    Spacer()
-                    Toggle("", isOn: $appStore.rememberLastPage)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-
-
-                HStack {
-                    Text(appStore.localized(.hoverMagnification))
-                    Spacer()
-                    Toggle("", isOn: $appStore.enableHoverMagnification)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-
-                HStack {
-                    Text(appStore.localized(.activePressEffect))
-                    Spacer()
-                    Toggle("", isOn: $appStore.enableActivePressEffect)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-
-                HStack {
-                    Text("Background mask")
-                    Spacer()
-                    Toggle("", isOn: $appStore.backgroundMaskEnabled)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-
-                if appStore.backgroundMaskEnabled {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ColorPicker("Light appearance mask", selection: backgroundMaskColorBinding(isDark: false), supportsOpacity: true)
-                        ColorPicker("Dark appearance mask", selection: backgroundMaskColorBinding(isDark: true), supportsOpacity: true)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.backgroundStyleTitle))
-                        .font(.headline)
-                    Picker("", selection: $appStore.launchpadBackgroundStyle) {
-                        ForEach(AppStore.BackgroundStyle.allCases) { style in
-                            Text(appStore.localized(style.localizationKey)).tag(style)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                }
-
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    let durationEnabled = appStore.enableAnimations && !appStore.useCAGridRenderer
-                    Text(appStore.localized(.animationDurationLabel))
-                        .font(.headline)
-                    Slider(value: $appStore.animationDuration, in: 0.1...1.0, step: 0.05)
-                        .disabled(!durationEnabled)
-                        .opacity(durationEnabled ? 1 : 0.5)
-                    HStack {
-                        Text("0.1s").font(.footnote)
-                        Spacer()
-                        Text(String(format: "%.2fs", appStore.animationDuration))
-                            .font(.footnote)
-                        Spacer()
-                        Text("1.0s").font(.footnote)
-                    }
-                    .foregroundStyle(durationEnabled ? .primary : .secondary)
-                    .opacity(durationEnabled ? 1 : 0.6)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.iconLabelFontWeight))
-                        .font(.headline)
-                    Picker("", selection: $appStore.iconLabelFontWeight) {
-                        ForEach(AppStore.IconLabelFontWeightOption.allCases) { option in
-                            Text(option.displayName).tag(option)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.sidebarIconSizeTitle))
-                        .font(.headline)
-                    Picker("", selection: $appStore.sidebarIconPreset) {
-                        Text(appStore.localized(.sidebarIconSizeLarge)).tag(AppStore.SidebarIconPreset.large)
-                        Text(appStore.localized(.sidebarIconSizeMedium)).tag(AppStore.SidebarIconPreset.medium)
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.iconSize))
-                        .font(.headline)
-                    Slider(value: $appStore.iconScale, in: 0.8...1.1)
-                    HStack {
-                        Text(appStore.localized(.smaller)).font(.footnote)
-                        Spacer()
-                        Text(appStore.localized(.larger)).font(.footnote)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(appStore.localized(.folderWindowWidth))
-                            .font(.headline)
-                        Spacer()
-                        Text(String(format: "%.0f%%", appStore.folderPopoverWidthFactor * 100))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    Slider(value: $appStore.folderPopoverWidthFactor,
-                           in: AppStore.folderPopoverWidthRange)
-                        .disabled(appStore.isFullscreenMode)
-                    HStack {
-                        Text(String(format: "%.0f%%", AppStore.folderPopoverWidthRange.lowerBound * 100))
-                            .font(.footnote)
-                        Spacer()
-                        Text(String(format: "%.0f%%", AppStore.folderPopoverWidthRange.upperBound * 100))
-                            .font(.footnote)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(appStore.localized(.folderWindowHeight))
-                            .font(.headline)
-                        Spacer()
-                        Text(String(format: "%.0f%%", appStore.folderPopoverHeightFactor * 100))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    Slider(value: $appStore.folderPopoverHeightFactor,
-                           in: AppStore.folderPopoverHeightRange)
-                        .disabled(appStore.isFullscreenMode)
-                    HStack {
-                        Text(String(format: "%.0f%%", AppStore.folderPopoverHeightRange.lowerBound * 100))
-                            .font(.footnote)
-                        Spacer()
-                        Text(String(format: "%.0f%%", AppStore.folderPopoverHeightRange.upperBound * 100))
-                            .font(.footnote)
-                    }
-                }
-
-                Text(appStore.localized(.folderWindowSizeHint))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.hoverMagnificationScale))
-                        .font(.headline)
-                    Slider(value: $appStore.hoverMagnificationScale,
-                           in: AppStore.hoverMagnificationRange)
-                        .disabled(!appStore.enableHoverMagnification)
-                    HStack {
-                        Text(String(format: "%.2fx", AppStore.hoverMagnificationRange.lowerBound))
-                            .font(.footnote)
-                        Spacer()
-                        Text(String(format: "%.2fx", appStore.hoverMagnificationScale))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(String(format: "%.2fx", AppStore.hoverMagnificationRange.upperBound))
-                            .font(.footnote)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.activePressScale))
-                        .font(.headline)
-                    Slider(value: $appStore.activePressScale,
-                           in: AppStore.activePressScaleRange)
-                        .disabled(!appStore.enableActivePressEffect)
-                    HStack {
-                        Text(String(format: "%.2fx", AppStore.activePressScaleRange.lowerBound))
-                            .font(.footnote)
-                        Spacer()
-                        Text(String(format: "%.2fx", appStore.activePressScale))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(String(format: "%.2fx", AppStore.activePressScaleRange.upperBound))
-                            .font(.footnote)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(appStore.localized(.iconsPerRow))
-                            .font(.headline)
-                        Spacer()
-                        Stepper(value: $appStore.gridColumnsPerPage, in: AppStore.gridColumnRange) {
-                            Text("\(appStore.gridColumnsPerPage)")
-                                .font(.callout.monospacedDigit())
-                        }
-                        .controlSize(.small)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(appStore.localized(.rowsPerPage))
-                            .font(.headline)
-                        Spacer()
-                        Stepper(value: $appStore.gridRowsPerPage, in: AppStore.gridRowRange) {
-                            Text("\(appStore.gridRowsPerPage)")
-                                .font(.callout.monospacedDigit())
-                        }
-                        .controlSize(.small)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(appStore.localized(.iconHorizontalSpacing))
-                            .font(.headline)
-                        Spacer()
-                        Text("\(Int(appStore.iconColumnSpacing)) pt")
-                            .font(.callout.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                    Slider(value: $appStore.iconColumnSpacing,
-                           in: AppStore.columnSpacingRange,
-                           step: 1)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(appStore.localized(.iconVerticalSpacing))
-                            .font(.headline)
-                        Spacer()
-                        Text("\(Int(appStore.iconRowSpacing)) pt")
-                            .font(.callout.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                    Slider(value: $appStore.iconRowSpacing,
-                           in: AppStore.rowSpacingRange,
-                           step: 1)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(appStore.localized(.gridSizeChangeWarning))
-                    Text(appStore.localized(.pageIndicatorHint))
-                        .foregroundStyle(.tertiary)
-                }
+        return VStack(alignment: .leading, spacing: 16) {
+            Text(appStore.localized(.globalShortcutDescription))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-                .padding(.top, 2)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.globalShortcutTitle))
+            if isCapturing {
+                Text(appStore.localized(.shortcutCapturePrompt))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: "keyboard")
                         .font(.headline)
-                    HStack(spacing: 12) {
-                        Button {
-                            if isCapturingShortcut(.launchpad) {
-                                stopShortcutCapture(cancel: true)
-                            } else {
-                                startShortcutCapture(for: .launchpad)
-                            }
-                        } label: {
-                            Text(isCapturingShortcut(.launchpad) ? appStore.localized(.cancel) : appStore.localized(.shortcutSetButton))
-                        }
-
-                        Button(appStore.localized(.shortcutSaveButton)) {
-                            savePendingShortcut()
-                        }
-                        .disabled(!(isCapturingShortcut(.launchpad) && pendingShortcut != nil))
-
-                        Button(appStore.localized(.shortcutClearButton)) {
-                            if isCapturingShortcut(.launchpad) {
-                                stopShortcutCapture(cancel: false)
-                                pendingShortcut = nil
-                            }
-                            appStore.clearGlobalHotKey()
-                        }
-                        .disabled(!isCapturingShortcut(.launchpad) && appStore.globalHotKey == nil)
-                    }
-
+                        .foregroundStyle(.secondary)
                     Text(shortcutStatusText(for: .launchpad))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.labelFontSize))
-                        .font(.headline)
-                    Slider(value: $appStore.iconLabelFontSize, in: 9...16, step: 0.5)
-                    HStack {
-                        Text("9pt").font(.footnote)
-                        Spacer()
-                        Text("16pt").font(.footnote)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.scrollSensitivity))
-                        .font(.headline)
-                    Slider(value: $appStore.scrollSensitivity, in: 0.01...0.99)
-                    HStack {
-                        Text(appStore.localized(.low)).font(.footnote)
-                        Spacer()
-                        Text(appStore.localized(.high)).font(.footnote)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(String(format: appStore.localized(.folderDropZoneSizeWithDefault), AppStore.defaultFolderDropZoneScale))
-                    Slider(value: $appStore.folderDropZoneScale,
-                           in: AppStore.folderDropZoneScaleRange,
-                           step: 0.05)
-                    HStack {
-                        Text(String(format: "%.1fx", AppStore.folderDropZoneScaleRange.lowerBound))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(String(format: "%.2fx", appStore.folderDropZoneScale))
-                            .font(.footnote.monospacedDigit())
-                        Spacer()
-                        Text(String(format: "%.1fx", AppStore.folderDropZoneScaleRange.upperBound))
-                            .font(.footnote)
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .textSelection(.enabled)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    if isCapturing {
+                        Text(appStore.localized(.shortcutListening))
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                     }
-                    Text(appStore.localized(.folderDropZoneSizeHint))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
                 }
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.pageIndicatorOffsetLabel))
-                        .font(.headline)
-                    Slider(value: $appStore.pageIndicatorOffset, in: 0...80)
-                    HStack {
-                        Text("0").font(.footnote)
-                        Spacer()
-                        Text(String(format: "%.0f", appStore.pageIndicatorOffset)).font(.footnote)
-                        Spacer()
-                        Text("80").font(.footnote)
-                    }
-                }
-                .disabled(appStore.pageIndicatorPerDisplayEnabled)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(appStore.localized(.pageIndicatorTopPaddingLabel))
-                        .font(.headline)
-                    Slider(value: $appStore.pageIndicatorTopPadding,
-                           in: AppStore.pageIndicatorTopPaddingRange)
-                    HStack {
-                        Text(String(format: "%.0f", AppStore.pageIndicatorTopPaddingRange.lowerBound)).font(.footnote)
-                        Spacer()
-                        Text(String(format: "%.0f", appStore.pageIndicatorTopPadding)).font(.footnote)
-                        Spacer()
-                        Text(String(format: "%.0f", AppStore.pageIndicatorTopPaddingRange.upperBound)).font(.footnote)
-                    }
-                }
-                .disabled(appStore.pageIndicatorPerDisplayEnabled)
-
-                VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
                     Button {
-                        appStore.pageIndicatorPerDisplayEnabled.toggle()
+                        if isCapturing {
+                            stopShortcutCapture(cancel: true)
+                        } else {
+                            startShortcutCapture(for: .launchpad)
+                        }
                     } label: {
-                        HStack(spacing: 8) {
-                            Text("Per-display indicator position")
-                                .font(.headline)
-                            Spacer()
-                            Toggle("", isOn: $appStore.pageIndicatorPerDisplayEnabled)
-                                .labelsHidden()
-                                .toggleStyle(.switch)
-                                .allowsHitTesting(false)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
+                        Label(isCapturing ? appStore.localized(.cancel) : appStore.localized(.shortcutSetButton),
+                              systemImage: isCapturing ? "xmark.circle" : "keyboard")
                     }
-                    .buttonStyle(PressFeedbackRowButtonStyle(enabled: true, pressScale: 0.98))
-                    Text("Use different values for each display.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    .buttonStyle(.borderedProminent)
 
-                    if appStore.pageIndicatorPerDisplayEnabled {
-                        HStack {
-                            Button("Apply defaults to current display") {
-                                if let screenID = currentIndicatorScreenID {
-                                    appStore.applyIndicatorDefaults(to: screenID)
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            Spacer()
-                        }
+                    Button(appStore.localized(.shortcutSaveButton)) {
+                        savePendingShortcut()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!canSave)
 
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(indicatorScreenEntries) { entry in
-                                indicatorOverrideCard(for: entry)
-                            }
+                    Button(appStore.localized(.shortcutClearButton), role: .destructive) {
+                        if isCapturing {
+                            stopShortcutCapture(cancel: false)
+                            pendingShortcut = nil
                         }
+                        appStore.clearGlobalHotKey()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!canClear)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
+
+    private var appearanceSection: some View {
+        LazyVStack(alignment: .leading, spacing: 0) {
+            appearancePrimarySection
+            Divider()
+                .padding(.vertical, 24)
+            appearanceSecondarySection
+            appearanceTertiarySection
+                .padding(.top, 16)
+            appearanceQuaternarySection
+                .padding(.top, 16)
+        }
+        .onAppear {
+            syncLayoutModePreviewScopeToRuntime()
+        }
+    }
+
+    private var appearancePrimarySection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text(appStore.localized(.classicMode))
+                Spacer()
+                Toggle("", isOn: $appStore.isFullscreenMode)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            HStack {
+                Text(appStore.localized(.showLabels))
+                Spacer()
+                Toggle("", isOn: $appStore.showLabels)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            HStack {
+                Text(appStore.localized(.useLocalizedThirdPartyTitles))
+                Spacer()
+                Toggle("", isOn: $appStore.useLocalizedThirdPartyTitles)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            HStack {
+                Text(appStore.localized(.predictDrop))
+                Spacer()
+                Toggle("", isOn: $appStore.enableDropPrediction)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+            .disabled(appStore.useCAGridRenderer)
+            .opacity(appStore.useCAGridRenderer ? 0.5 : 1)
+
+            HStack {
+                Text(appStore.localized(.enableAnimations))
+                Spacer()
+                Toggle("", isOn: $appStore.enableAnimations)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            HStack {
+                Text(appStore.localized(.followScrollPagingTitle))
+                Spacer()
+                Toggle("", isOn: $appStore.followScrollPagingEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+            .disabled(appStore.useCAGridRenderer)
+            .opacity(appStore.useCAGridRenderer ? 0.5 : 1)
+
+            HStack {
+                Text(appStore.localized(.reverseWheelPagingTitle))
+                Spacer()
+                Toggle("", isOn: $appStore.reverseWheelPagingDirection)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            HStack {
+                Text(appStore.localized(.hideDockOption))
+                Spacer()
+                Toggle("", isOn: $appStore.hideDock)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            HStack {
+                Text(appStore.localized(.rememberPageTitle))
+                Spacer()
+                Toggle("", isOn: $appStore.rememberLastPage)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            HStack {
+                Text(appStore.localized(.hoverMagnification))
+                Spacer()
+                Toggle("", isOn: $appStore.enableHoverMagnification)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            HStack {
+                Text(appStore.localized(.activePressEffect))
+                Spacer()
+                Toggle("", isOn: $appStore.enableActivePressEffect)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(appStore.localized(.folderPreviewHighResTitle))
+                    Spacer()
+                    Toggle("", isOn: $appStore.enableHighResFolderPreviews)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+                Text(appStore.localized(.folderPreviewHighResHint))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Text(appStore.localized(.windowOpenAnimationTitle))
+                Spacer()
+                Toggle("", isOn: $appStore.enableWindowOpenAnimation)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            HStack {
+                Text(appStore.localized(.backgroundMaskTitle))
+                Spacer()
+                Toggle("", isOn: $appStore.backgroundMaskEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+
+            if appStore.backgroundMaskEnabled {
+                VStack(alignment: .leading, spacing: 8) {
+                    ColorPicker(appStore.localized(.backgroundMaskLightLabel), selection: backgroundMaskColorBinding(isDark: false), supportsOpacity: true)
+                    ColorPicker(appStore.localized(.backgroundMaskDarkLabel), selection: backgroundMaskColorBinding(isDark: true), supportsOpacity: true)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(appStore.localized(.backgroundStyleTitle))
+                    .font(.headline)
+                Picker("", selection: $appStore.launchpadBackgroundStyle) {
+                    ForEach(AppStore.BackgroundStyle.allCases) { style in
+                        Text(appStore.localized(style.localizationKey)).tag(style)
                     }
                 }
-
+                .pickerStyle(.segmented)
+                .labelsHidden()
             }
         }
+    }
+
+    private var appearanceSecondarySection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                let durationEnabled = appStore.enableAnimations && !appStore.useCAGridRenderer
+                Text(appStore.localized(.animationDurationLabel))
+                    .font(.headline)
+                Slider(value: $appStore.animationDuration, in: 0.1...1.0, step: 0.05)
+                    .disabled(!durationEnabled)
+                    .opacity(durationEnabled ? 1 : 0.5)
+                HStack {
+                    Text("0.1s").font(.footnote)
+                    Spacer()
+                    Text(String(format: "%.2fs", appStore.animationDuration))
+                        .font(.footnote)
+                    Spacer()
+                    Text("1.0s").font(.footnote)
+                }
+                .foregroundStyle(durationEnabled ? .primary : .secondary)
+                .opacity(durationEnabled ? 1 : 0.6)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(appStore.localized(.iconLabelFontWeight))
+                    .font(.headline)
+                Picker("", selection: $appStore.iconLabelFontWeight) {
+                    ForEach(AppStore.IconLabelFontWeightOption.allCases) { option in
+                        Text(option.displayName).tag(option)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(appStore.localized(.sidebarIconSizeTitle))
+                    .font(.headline)
+                Picker("", selection: $appStore.sidebarIconPreset) {
+                    Text(appStore.localized(.sidebarIconSizeLarge)).tag(AppStore.SidebarIconPreset.large)
+                    Text(appStore.localized(.sidebarIconSizeMedium)).tag(AppStore.SidebarIconPreset.medium)
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
+                    Text(appStore.localized(.iconSize))
+                        .font(.headline)
+                    Spacer()
+                    layoutModeScopeControl()
+                }
+                Slider(value: scopedIconScaleBinding(), in: 0.8...1.1)
+                HStack {
+                    Text(appStore.localized(.smaller)).font(.footnote)
+                    Spacer()
+                    Text(appStore.localized(.larger)).font(.footnote)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.folderWindowWidth))
+                        .font(.headline)
+                    Spacer()
+                    Text(String(format: "%.0f%%", appStore.folderPopoverWidthFactor * 100))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: $appStore.folderPopoverWidthFactor,
+                       in: AppStore.folderPopoverWidthRange)
+                    .disabled(appStore.isFullscreenMode)
+                HStack {
+                    Text(String(format: "%.0f%%", AppStore.folderPopoverWidthRange.lowerBound * 100))
+                        .font(.footnote)
+                    Spacer()
+                    Text(String(format: "%.0f%%", AppStore.folderPopoverWidthRange.upperBound * 100))
+                        .font(.footnote)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.folderWindowHeight))
+                        .font(.headline)
+                    Spacer()
+                    Text(String(format: "%.0f%%", appStore.folderPopoverHeightFactor * 100))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: $appStore.folderPopoverHeightFactor,
+                       in: AppStore.folderPopoverHeightRange)
+                    .disabled(appStore.isFullscreenMode)
+                HStack {
+                    Text(String(format: "%.0f%%", AppStore.folderPopoverHeightRange.lowerBound * 100))
+                        .font(.footnote)
+                    Spacer()
+                    Text(String(format: "%.0f%%", AppStore.folderPopoverHeightRange.upperBound * 100))
+                        .font(.footnote)
+                }
+            }
+
+            Text(appStore.localized(.folderWindowSizeHint))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var appearanceTertiarySection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(appStore.localized(.hoverMagnificationScale))
+                    .font(.headline)
+                Slider(value: $appStore.hoverMagnificationScale,
+                       in: AppStore.hoverMagnificationRange)
+                    .disabled(!appStore.enableHoverMagnification)
+                HStack {
+                    Text(String(format: "%.2fx", AppStore.hoverMagnificationRange.lowerBound))
+                        .font(.footnote)
+                    Spacer()
+                    Text(String(format: "%.2fx", appStore.hoverMagnificationScale))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(String(format: "%.2fx", AppStore.hoverMagnificationRange.upperBound))
+                        .font(.footnote)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(appStore.localized(.activePressScale))
+                    .font(.headline)
+                Slider(value: $appStore.activePressScale,
+                       in: AppStore.activePressScaleRange)
+                    .disabled(!appStore.enableActivePressEffect)
+                HStack {
+                    Text(String(format: "%.2fx", AppStore.activePressScaleRange.lowerBound))
+                        .font(.footnote)
+                    Spacer()
+                    Text(String(format: "%.2fx", appStore.activePressScale))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(String(format: "%.2fx", AppStore.activePressScaleRange.upperBound))
+                        .font(.footnote)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.iconsPerRow))
+                        .font(.headline)
+                    Spacer()
+                    Stepper(value: $appStore.gridColumnsPerPage, in: AppStore.gridColumnRange) {
+                        Text("\(appStore.gridColumnsPerPage)")
+                            .font(.callout.monospacedDigit())
+                    }
+                    .controlSize(.small)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.rowsPerPage))
+                        .font(.headline)
+                    Spacer()
+                    Stepper(value: $appStore.gridRowsPerPage, in: AppStore.gridRowRange) {
+                        Text("\(appStore.gridRowsPerPage)")
+                            .font(.callout.monospacedDigit())
+                    }
+                    .controlSize(.small)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.iconHorizontalSpacing))
+                        .font(.headline)
+                    Spacer()
+                    Text("\(Int(appStore.iconColumnSpacing)) pt")
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: $appStore.iconColumnSpacing,
+                       in: AppStore.columnSpacingRange,
+                       step: 1)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.iconVerticalSpacing))
+                        .font(.headline)
+                    Spacer()
+                    Text("\(Int(appStore.iconRowSpacing)) pt")
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: $appStore.iconRowSpacing,
+                       in: AppStore.rowSpacingRange,
+                       step: 1)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(appStore.localized(.gridSizeChangeWarning))
+                Text(appStore.localized(.pageIndicatorHint))
+                    .foregroundStyle(.tertiary)
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .padding(.top, 2)
+        }
+    }
+
+    private var appearanceQuaternarySection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.labelFontSize))
+                        .font(.headline)
+                    Spacer()
+                    layoutModeScopeControl()
+                }
+                Slider(value: scopedIconLabelFontSizeBinding(), in: 9...16, step: 0.5)
+                HStack {
+                    Text("9pt").font(.footnote)
+                    Spacer()
+                    Text("16pt").font(.footnote)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(appStore.localized(.scrollSensitivity))
+                    .font(.headline)
+                Slider(value: $appStore.scrollSensitivity, in: 0.01...0.99)
+                HStack {
+                    Text(appStore.localized(.low)).font(.footnote)
+                    Spacer()
+                    Text(appStore.localized(.high)).font(.footnote)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(String(format: appStore.localized(.folderDropZoneSizeWithDefault), AppStore.defaultFolderDropZoneScale))
+                    Spacer()
+                    layoutModeScopeControl()
+                }
+                Slider(value: scopedFolderDropZoneScaleBinding(),
+                       in: AppStore.folderDropZoneScaleRange,
+                       step: 0.05)
+                HStack {
+                    Text(String(format: "%.1fx", AppStore.folderDropZoneScaleRange.lowerBound))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(String(format: "%.2fx", appStore.scopedFolderDropZoneScale(for: selectedAppearanceLayoutMode)))
+                        .font(.footnote.monospacedDigit())
+                    Spacer()
+                    Text(String(format: "%.1fx", AppStore.folderDropZoneScaleRange.upperBound))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Text(appStore.localized(.folderDropZoneSizeHint))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.pageIndicatorOffsetLabel))
+                        .font(.headline)
+                    Spacer()
+                    if !selectedScopePerDisplayEnabled {
+                        layoutModeScopeControl()
+                    }
+                }
+                Slider(value: scopedPageIndicatorOffsetBinding(), in: 0...80)
+                HStack {
+                    Text("0").font(.footnote)
+                    Spacer()
+                    Text(String(format: "%.0f", appStore.scopedPageIndicatorOffset(for: selectedAppearanceLayoutMode))).font(.footnote)
+                    Spacer()
+                    Text("80").font(.footnote)
+                }
+            }
+            .disabled(selectedScopePerDisplayEnabled)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.pageIndicatorTopPaddingLabel))
+                        .font(.headline)
+                    Spacer()
+                    if !selectedScopePerDisplayEnabled {
+                        layoutModeScopeControl()
+                    }
+                }
+                Slider(value: scopedPageIndicatorTopPaddingBinding(),
+                       in: AppStore.pageIndicatorTopPaddingRange)
+                HStack {
+                    Text(String(format: "%.0f", AppStore.pageIndicatorTopPaddingRange.lowerBound)).font(.footnote)
+                    Spacer()
+                    Text(String(format: "%.0f", appStore.scopedPageIndicatorTopPadding(for: selectedAppearanceLayoutMode))).font(.footnote)
+                    Spacer()
+                    Text(String(format: "%.0f", AppStore.pageIndicatorTopPaddingRange.upperBound)).font(.footnote)
+                }
+            }
+            .disabled(selectedScopePerDisplayEnabled)
+
+            VStack(alignment: .leading, spacing: 8) {
+                let perDisplayBinding = scopedPerDisplayIndicatorBinding()
+                Button {
+                    perDisplayBinding.wrappedValue.toggle()
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(appStore.localized(.perDisplayIndicatorPositionTitle))
+                            .font(.headline)
+                        Spacer()
+                        layoutModeScopeControl(width: 116)
+                        Toggle("", isOn: perDisplayBinding)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .allowsHitTesting(false)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PressFeedbackRowButtonStyle(enabled: true, pressScale: 0.98))
+                Text(appStore.localized(.perDisplayIndicatorPositionDescription))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                if selectedScopePerDisplayEnabled {
+                    HStack {
+                        Button(appStore.localized(.applyDefaultsToCurrentDisplay)) {
+                            if let screenID = currentIndicatorScreenID {
+                                appStore.applyIndicatorDefaults(to: screenID, mode: selectedAppearanceLayoutMode)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        Spacer()
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(indicatorScreenEntries) { entry in
+                            indicatorOverrideCard(for: entry)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.bottom, 20)
     }
 
     // MARK: - Export / Import Application Support Data
@@ -3181,7 +4041,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 try exportDataFolder(to: destParent)
             }
         } catch {
-            // Ignore errors or surface a user-facing message if desired
+            showBackupExportError(error)
         }
     }
 
@@ -3192,8 +4052,34 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         formatter.dateFormat = "yyyy-MM-dd'_'HH.mm.ss"
         let folderName = "LaunchNext_" + formatter.string(from: Date()) + ".launchnext"
         let destDir = destParent.appendingPathComponent(folderName, isDirectory: true)
-        try copyDirectory(from: sourceDir, to: destDir)
-        exportPreferences(to: destDir)
+        let fm = FileManager.default
+
+        func performExport() throws {
+            try copyDirectory(from: sourceDir, to: destDir)
+            exportPreferences(to: destDir)
+            guard backupExportLooksComplete(destDir) else {
+                throw NSError(domain: "LaunchNextBackup",
+                              code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "Backup export is incomplete."])
+            }
+        }
+
+        do {
+            try performExport()
+        } catch {
+            try? fm.removeItem(at: destDir)
+
+            guard removeLegacyBackupSocketIfNeeded() else {
+                throw error
+            }
+
+            do {
+                try performExport()
+            } catch {
+                try? fm.removeItem(at: destDir)
+                throw error
+            }
+        }
     }
 
     private func importDataFolder() {
@@ -3295,6 +4181,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert("isStartOnLogin")
                     keys.insert(AppStore.showQuickRefreshButtonKey)
                     keys.insert(AppStore.lockLayoutKey)
+                    keys.insert(AppStore.uninstallToolAppPathKey)
                 }
                 if appearanceCheckbox.state == .on {
                     keys.insert(AppStore.sidebarIconPresetKey)
@@ -3307,8 +4194,10 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert("showLabels")
                     keys.insert("hideDock")
                     keys.insert("enableAnimations")
+                    keys.insert(AppStore.windowOpenAnimationKey)
                     keys.insert("useLocalizedThirdPartyTitles")
                     keys.insert("enableDropPrediction")
+                    keys.insert(AppStore.reverseWheelPagingKey)
                     keys.insert(AppStore.rememberPageKey)
                     keys.insert(AppStore.rememberedPageIndexKey)
                     keys.insert("iconScale")
@@ -3319,10 +4208,12 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert("gridColumnSpacing")
                     keys.insert("gridRowSpacing")
                     keys.insert("folderDropZoneScale")
+                    keys.insert(AppStore.folderPreviewHighResKey)
                     keys.insert("pageIndicatorOffset")
                     keys.insert(AppStore.pageIndicatorTopPaddingKey)
                     keys.insert(AppStore.pageIndicatorPerDisplayEnabledKey)
                     keys.insert(AppStore.pageIndicatorPerDisplayOverridesKey)
+                    keys.insert(AppStore.dualModeAppearanceSettingsKey)
                     keys.insert("folderPopoverWidthFactor")
                     keys.insert("folderPopoverHeightFactor")
                     keys.insert(AppStore.hoverMagnificationKey)
@@ -3423,7 +4314,103 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         if fm.fileExists(atPath: dst.path) {
             try fm.removeItem(at: dst)
         }
-        try fm.copyItem(at: src, to: dst)
+        try fm.createDirectory(at: dst, withIntermediateDirectories: true)
+        copyDirectoryMetadata(from: src, to: dst)
+
+        guard let enumerator = fm.enumerator(at: src,
+                                             includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+                                             options: [],
+                                             errorHandler: { _, _ in true }) else {
+            throw NSError(domain: "LaunchNextBackup",
+                          code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "Failed to enumerate backup source directory."])
+        }
+
+        for case let itemURL as URL in enumerator {
+            if isSocketFile(at: itemURL) {
+                continue
+            }
+
+            let relativePath = itemURL.path.replacingOccurrences(of: src.path + "/", with: "")
+            let targetURL = dst.appendingPathComponent(relativePath, isDirectory: false)
+            let values = try itemURL.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+
+            if values.isDirectory == true {
+                try fm.createDirectory(at: targetURL, withIntermediateDirectories: true)
+                copyDirectoryMetadata(from: itemURL, to: targetURL)
+                continue
+            }
+
+            let parentDirectory = targetURL.deletingLastPathComponent()
+            if !fm.fileExists(atPath: parentDirectory.path) {
+                try fm.createDirectory(at: parentDirectory, withIntermediateDirectories: true)
+            }
+
+            if fm.fileExists(atPath: targetURL.path) {
+                try fm.removeItem(at: targetURL)
+            }
+
+            if values.isSymbolicLink == true {
+                let destination = try fm.destinationOfSymbolicLink(atPath: itemURL.path)
+                try fm.createSymbolicLink(atPath: targetURL.path, withDestinationPath: destination)
+            } else {
+                try fm.copyItem(at: itemURL, to: targetURL)
+            }
+        }
+    }
+
+    private func copyDirectoryMetadata(from src: URL, to dst: URL) {
+        copyExtendedAttributes(from: src, to: dst)
+
+        let fm = FileManager.default
+        guard let attributes = try? fm.attributesOfItem(atPath: src.path) else { return }
+
+        var copied: [FileAttributeKey: Any] = [:]
+        if let permissions = attributes[.posixPermissions] {
+            copied[.posixPermissions] = permissions
+        }
+        if let immutability = attributes[.immutable] {
+            copied[.immutable] = immutability
+        }
+
+        if !copied.isEmpty {
+            try? fm.setAttributes(copied, ofItemAtPath: dst.path)
+        }
+    }
+
+    private func copyExtendedAttributes(from src: URL, to dst: URL) {
+        let options: Int32 = 0
+
+        src.path.withCString { srcPath in
+            dst.path.withCString { dstPath in
+                let size = listxattr(srcPath, nil, 0, options)
+                guard size > 0 else { return }
+
+                var nameBuffer = [CChar](repeating: 0, count: size)
+                let readSize = listxattr(srcPath, &nameBuffer, nameBuffer.count, options)
+                guard readSize > 0 else { return }
+
+                var index = 0
+                while index < Int(readSize) {
+                    let name = nameBuffer.withUnsafeBufferPointer { buffer -> String in
+                        String(cString: buffer.baseAddress!.advanced(by: index))
+                    }
+
+                    let valueSize = getxattr(srcPath, name, nil, 0, 0, options)
+                    if valueSize >= 0 {
+                        var valueBuffer = [UInt8](repeating: 0, count: valueSize)
+                        let actualSize = getxattr(srcPath, name, &valueBuffer, valueBuffer.count, 0, options)
+                        if actualSize >= 0 {
+                            valueBuffer.withUnsafeBytes { rawBuffer in
+                                _ = setxattr(dstPath, name, rawBuffer.baseAddress, actualSize, 0, options)
+                            }
+                        }
+                    }
+
+                    index += name.utf8.count + 1
+                }
+            }
+        }
     }
 
     private func replaceDirectory(with src: URL, at dst: URL) throws {
@@ -3437,6 +4424,52 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             try fm.removeItem(at: dst)
         }
         try fm.copyItem(at: src, to: dst)
+    }
+
+    private func backupExportLooksComplete(_ folder: URL) -> Bool {
+        let fm = FileManager.default
+        let requiredFiles = [
+            folder.appendingPathComponent("Data.store"),
+            folder.appendingPathComponent("LaunchNext.plist")
+        ]
+        return requiredFiles.allSatisfy { fm.fileExists(atPath: $0.path) }
+    }
+
+    private func removeLegacyBackupSocketIfNeeded() -> Bool {
+        guard let legacySocketURL = try? supportDirectoryURL().appendingPathComponent(LaunchNextCLIIPCConfig.socketFileName, isDirectory: false) as URL else {
+            return false
+        }
+        guard isSocketFile(at: legacySocketURL) else { return false }
+        do {
+            try FileManager.default.removeItem(at: legacySocketURL)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func isSocketFile(at url: URL) -> Bool {
+        var fileStat = stat()
+        let result = url.path.withCString { path in
+            Darwin.lstat(path, &fileStat)
+        }
+        guard result == 0 else { return false }
+        return (fileStat.st_mode & S_IFMT) == S_IFSOCK
+    }
+
+    private func showBackupExportError(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Backup Failed"
+        let message = (error as NSError).localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        alert.informativeText = message.isEmpty ? "LaunchNext could not create a complete backup." : message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: appStore.localized(.okButton))
+
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
     }
 
     private func isValidExportFolder(_ folder: URL) -> Bool {
@@ -3476,6 +4509,23 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 alert.runModal()
             }
         }
+    }
+
+    private func applyMacOS26PresetLayout() {
+        let success = appStore.applyMacOS26PresetLayout()
+
+        let alert = NSAlert()
+        if success {
+            alert.messageText = appStore.localized(.layoutPresetAppliedTitle)
+            alert.informativeText = appStore.localized(.layoutPresetAppliedMessage)
+            alert.alertStyle = .informational
+        } else {
+            alert.messageText = appStore.localized(.importFailedTitle)
+            alert.informativeText = appStore.localized(.layoutPresetApplyFailedMessage)
+            alert.alertStyle = .warning
+        }
+        alert.addButton(withTitle: appStore.localized(.okButton))
+        alert.runModal()
     }
 
     private func importLegacyArchive() {

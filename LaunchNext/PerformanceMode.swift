@@ -13,7 +13,7 @@ enum PerformanceMode: String, CaseIterable, Identifiable {
            let mode = PerformanceMode(rawValue: raw) {
             return mode
         }
-        return .full
+        return .lean
     }()
 
     static var current: PerformanceMode { activeMode }

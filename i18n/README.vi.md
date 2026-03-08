@@ -15,7 +15,7 @@
 
 macOS Tahoe đã loại bỏ launchpad, và rất khó sử dụng, nó không sử dụng GPU Bio của bạn. Xin lỗi Apple, ít nhất hãy cho mọi người một tùy chọn để chuyển đổi trở lại. Trước đó, đây là LaunchNext.
 
-*Được xây dựng dựa trên [LaunchNow](https://github.com/ggkevinnnn/LaunchNow) bởi ggkevinnnn - cảm ơn rất nhiều dự án gốc! Tôi hy vọng phiên bản cải tiến này có thể được hợp nhất trở lại kho lưu trữ gốc*
+*Được xây dựng dựa trên [LaunchNow](https://github.com/ggkevinnnn/LaunchNow) bởi ggkevinnnn — xin gửi lời cảm ơn rất lớn đến dự án gốc!❤️*
 
 *LaunchNow đã chọn giấy phép GPL 3. LaunchNext tuân theo các điều khoản cấp phép tương tự.*
 
