@@ -16,7 +16,7 @@
 macOS Tahoe는 런치패드가 사라졌고, 새로운 인터페이스는 비직관적이며 Bio GPU를 제대로 활용하지 못해요.
 Apple이 런치패드를 다시 제공하는날이 올때, 그때까지 LaunchNext를 사용해보세요.
 
-*[LaunchNow](https://github.com/ggkevinnnn/LaunchNow) (ggkevinnnn 제작)을 기반으로 개발되었습니다 — 원본 프로젝트에 진심으로 감사드립니다!❤️*
+*[LaunchNow](https://github.com/ggkevinnnn/LaunchNow) (ggkevinnnn 제작)을 기반으로 개발되었어요. — 원본 프로젝트에 진심으로 감사드려요!❤️*
 
 *LaunchNow는 GPL 3 라이선스를 선택했습니다. LaunchNext는 동일한 라이선스 조건을 따릅니다.*
 
@@ -167,7 +167,7 @@ Apple이 커스터마이징이 가능한 인터페이스에서 멀어지면서, 
 
 **LaunchNext** - 런치패드를 되찾으세요 🚀
 
-*커스터마이징에 타협따위는 하지 않는 macOS 사용자를 위해 제작되었어요.*
+*커스터마이징에 타협따위 안하는 macOS 사용자를 위해 제작되었어요.*
 
 ## 개발 도구
 
