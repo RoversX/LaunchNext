@@ -215,6 +215,25 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // Experimental tap behavior used by the low-level gesture monitor.
+    // If gesture support is removed later, this enum can be deleted together
+    // with the gesture keys and @Published fields below.
+    enum GestureTapAction: String, CaseIterable, Codable, Identifiable {
+        case off
+        case open
+        case toggle
+
+        var id: String { rawValue }
+
+        var localizationKey: LocalizationKey {
+            switch self {
+            case .off: return .gestureTapActionOff
+            case .open: return .gestureTapActionOpen
+            case .toggle: return .gestureTapActionToggle
+            }
+        }
+    }
+
     enum DevelopmentBackgroundOverride: String, CaseIterable, Identifiable {
         case none
         case solidWhite
@@ -307,6 +326,12 @@ final class AppStore: ObservableObject {
     static let hotCornerTriggerDelayKey = "hotCornerTriggerDelay"
     static let hotCornerHitboxSizeKey = "hotCornerHitboxSize"
     static let hotCornerToggleWhenOpenKey = "hotCornerToggleWhenOpen"
+    // Experimental gesture persistence keys.
+    // Safe to remove together with LaunchNext/Gesture/ and gesture UI wiring
+    // if the private multitouch feature is dropped later.
+    static let gestureEnabledKey = "gestureEnabled"
+    static let gestureCloseOnPinchOutKey = "gestureCloseOnPinchOut"
+    static let gestureTapActionKey = "gestureTapAction"
     private static let cliShimMarker = "# LaunchNext CLI shim"
     private static let cliPathSnippetHeader = "# >>> LaunchNext CLI >>>"
     private static let cliPathSnippetFooter = "# <<< LaunchNext CLI <<<"
@@ -1642,6 +1667,53 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // Experimental gesture settings consumed by LaunchpadApp gesture wiring.
+    // Remove these fields together with the gesture monitor/configuration flow
+    // if low-level multitouch support is no longer needed.
+    @Published var gestureEnabled: Bool = {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppStore.gestureEnabledKey) == nil {
+            defaults.set(false, forKey: AppStore.gestureEnabledKey)
+        }
+        return defaults.bool(forKey: AppStore.gestureEnabledKey)
+    }() {
+        didSet {
+            guard gestureEnabled != oldValue else { return }
+            UserDefaults.standard.set(gestureEnabled, forKey: Self.gestureEnabledKey)
+        }
+    }
+
+    @Published var gestureCloseOnPinchOut: Bool = {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppStore.gestureCloseOnPinchOutKey) == nil {
+            defaults.set(false, forKey: AppStore.gestureCloseOnPinchOutKey)
+        }
+        return defaults.bool(forKey: AppStore.gestureCloseOnPinchOutKey)
+    }() {
+        didSet {
+            guard gestureCloseOnPinchOut != oldValue else { return }
+            UserDefaults.standard.set(gestureCloseOnPinchOut, forKey: Self.gestureCloseOnPinchOutKey)
+        }
+    }
+
+    @Published var gestureTapAction: GestureTapAction = {
+        let defaults = UserDefaults.standard
+        if let rawValue = defaults.string(forKey: AppStore.gestureTapActionKey),
+           let action = GestureTapAction(rawValue: rawValue) {
+            return action
+        }
+        let legacyEnabled = defaults.object(forKey: "gestureTapEnabled") as? Bool ?? false
+        let legacyToggle = defaults.object(forKey: "gestureTapToggleWhenOpen") as? Bool ?? false
+        let migratedAction: GestureTapAction = legacyEnabled ? (legacyToggle ? .toggle : .open) : .off
+        defaults.set(migratedAction.rawValue, forKey: AppStore.gestureTapActionKey)
+        return migratedAction
+    }() {
+        didSet {
+            guard gestureTapAction != oldValue else { return }
+            UserDefaults.standard.set(gestureTapAction.rawValue, forKey: Self.gestureTapActionKey)
+        }
+    }
+
     // @Published var isAIEnabled: Bool = {
     //     if UserDefaults.standard.object(forKey: AppStore.aiFeatureEnabledKey) == nil { return false }
     //     return UserDefaults.standard.bool(forKey: AppStore.aiFeatureEnabledKey)
@@ -2202,6 +2274,20 @@ final class AppStore: ObservableObject {
         if defaults.object(forKey: Self.hotCornerToggleWhenOpenKey) == nil {
             defaults.set(false, forKey: Self.hotCornerToggleWhenOpenKey)
         }
+        if defaults.object(forKey: Self.gestureEnabledKey) == nil {
+            defaults.set(false, forKey: Self.gestureEnabledKey)
+        }
+        if defaults.object(forKey: Self.gestureCloseOnPinchOutKey) == nil {
+            defaults.set(false, forKey: Self.gestureCloseOnPinchOutKey)
+        }
+        // Keep a one-time migration path from the older tap booleans so users
+        // do not lose settings if gesture support remains enabled.
+        if defaults.object(forKey: Self.gestureTapActionKey) == nil {
+            let legacyEnabled = defaults.object(forKey: "gestureTapEnabled") as? Bool ?? false
+            let legacyToggle = defaults.object(forKey: "gestureTapToggleWhenOpen") as? Bool ?? false
+            let migratedAction: GestureTapAction = legacyEnabled ? (legacyToggle ? .toggle : .open) : .off
+            defaults.set(migratedAction.rawValue, forKey: Self.gestureTapActionKey)
+        }
         if defaults.object(forKey: Self.gameControllerMenuToggleKey) == nil {
             defaults.set(true, forKey: Self.gameControllerMenuToggleKey)
         }
@@ -2262,6 +2348,9 @@ final class AppStore: ObservableObject {
         self.hotCornerTriggerDelay = clampedHotCornerDelay
         self.hotCornerHitboxSize = clampedHotCornerHitboxSize
         self.hotCornerToggleWhenOpen = defaults.object(forKey: Self.hotCornerToggleWhenOpenKey) as? Bool ?? false
+        self.gestureEnabled = defaults.object(forKey: Self.gestureEnabledKey) as? Bool ?? false
+        self.gestureCloseOnPinchOut = defaults.object(forKey: Self.gestureCloseOnPinchOutKey) as? Bool ?? false
+        self.gestureTapAction = GestureTapAction(rawValue: defaults.string(forKey: Self.gestureTapActionKey) ?? "") ?? .off
         self.enableAnimations = UserDefaults.standard.object(forKey: "enableAnimations") as? Bool ?? true
         self.customIconFileURL = AppStore.customIconFileURL
 

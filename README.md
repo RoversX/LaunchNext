@@ -172,4 +172,8 @@ As Apple moves away from customizable interfaces, LaunchNext represents the comm
 - Google
 
 
+
+- Experimental gesture support is built on [OpenMultitouchSupport](https://github.com/Kyome22/OpenMultitouchSupport) and the fork by [KrishKrosh](https://github.com/KrishKrosh/OpenMultitouchSupport).❤️
+
+
 ![GitHub downloads](https://img.shields.io/github/downloads/RoversX/LaunchNext/total)

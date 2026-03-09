@@ -1,0 +1,8 @@
+// Experimental gesture support wiring.
+// If this feature is removed later, delete this file and remove the
+// OpenMultitouchSupport.xcconfig baseConfigurationReference lines from
+// LaunchNext.xcodeproj/project.pbxproj.
+FRAMEWORK_SEARCH_PATHS = $(inherited) /System/Library/PrivateFrameworks
+HEADER_SEARCH_PATHS = $(inherited) $(SRCROOT)/LaunchNext/ThirdParty/OpenMultitouchSupport/Framework
+OTHER_LDFLAGS = $(inherited) -framework MultitouchSupport
+SWIFT_INCLUDE_PATHS = $(inherited) $(SRCROOT)/LaunchNext/ThirdParty/OpenMultitouchSupport/Framework

@@ -1,0 +1,8 @@
+// Experimental gesture support module shim.
+// Remove this together with
+// LaunchNext/ThirdParty/OpenMultitouchSupport
+// if the private multitouch integration is dropped later.
+module OpenMultitouchSupportXCF [system] {
+  header "OpenMultitouchSupportXCF/OpenMultitouchSupportXCF.h"
+  export *
+}

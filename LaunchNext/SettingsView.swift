@@ -231,7 +231,7 @@ struct SettingsView: View {
         .onDisappear {
             stopShortcutCapture(cancel: false)
         }
-        .onChange(of: appStore.isFullscreenMode) { _ in
+        .onChange(of: appStore.isFullscreenMode) { _, _ in
             guard selectedSection == .appearance else { return }
             syncLayoutModePreviewScopeToRuntime()
         }
@@ -402,6 +402,47 @@ private var hotCornerToggleWhenOpenBinding: Binding<Bool> {
             guard appStore.hotCornerToggleWhenOpen != newValue else { return }
             DispatchQueue.main.async {
                 appStore.hotCornerToggleWhenOpen = newValue
+            }
+        }
+    )
+}
+
+// Experimental gesture bindings.
+// These async wrappers keep Settings updates out of the current SwiftUI update pass.
+// If gesture support is removed later, delete these bindings together with the
+// gesture card below, the AppStore gesture fields, LaunchpadApp gesture wiring,
+// and LaunchNext/Gesture/.
+private var gestureEnabledBinding: Binding<Bool> {
+    Binding(
+        get: { appStore.gestureEnabled },
+        set: { newValue in
+            guard appStore.gestureEnabled != newValue else { return }
+            DispatchQueue.main.async {
+                appStore.gestureEnabled = newValue
+            }
+        }
+    )
+}
+
+private var gestureCloseOnPinchOutBinding: Binding<Bool> {
+    Binding(
+        get: { appStore.gestureCloseOnPinchOut },
+        set: { newValue in
+            guard appStore.gestureCloseOnPinchOut != newValue else { return }
+            DispatchQueue.main.async {
+                appStore.gestureCloseOnPinchOut = newValue
+            }
+        }
+    )
+}
+
+private var gestureTapActionBinding: Binding<AppStore.GestureTapAction> {
+    Binding(
+        get: { appStore.gestureTapAction },
+        set: { newValue in
+            guard appStore.gestureTapAction != newValue else { return }
+            DispatchQueue.main.async {
+                appStore.gestureTapAction = newValue
             }
         }
     )
@@ -644,6 +685,10 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private var gameControllerSection: some View {
         VStack(alignment: .leading, spacing: 18) {
+            // Experimental gesture UI.
+            // Remove this card together with the gesture AppStore fields,
+            // LaunchpadApp gesture wiring, and LaunchNext/Gesture/ if the
+            // low-level multitouch feature is removed later.
             VStack(alignment: .leading, spacing: 12) {
                 Text(appStore.localized(.gameControllerPlaceholderTitle))
                     .font(.headline.weight(.semibold))
@@ -1356,7 +1401,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             .frame(maxWidth: .infinity, alignment: .leading)
             .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .onChange(of: appStore.performanceMode) { _ in
+        .onChange(of: appStore.performanceMode) { _, _ in
             showPerformanceRestartPrompt = true
         }
         .alert(appStore.localized(.performanceModeRestartTitle), isPresented: $showPerformanceRestartPrompt) {
@@ -1793,6 +1838,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
         }
     }
 
@@ -3815,6 +3861,70 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(appStore.localized(.gestureSectionTitle), systemImage: "hand.raised")
+                            .font(.headline)
+                        Text(appStore.localized(.gestureSectionDescription))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 12)
+                    gesturePreview
+                }
+
+                HStack {
+                    Text(appStore.localized(.gestureEnabledTitle))
+                    Spacer()
+                    Toggle("", isOn: gestureEnabledBinding)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+
+                HStack {
+                    Text(appStore.localized(.gestureCloseOnPinchOutTitle))
+                    Spacer()
+                    Toggle("", isOn: gestureCloseOnPinchOutBinding)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+                .disabled(!appStore.gestureEnabled)
+                .opacity(appStore.gestureEnabled ? 1 : 0.45)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(appStore.localized(.gestureTapActionTitle))
+                        Spacer()
+                        Text(appStore.localized(appStore.gestureTapAction.localizationKey))
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack(spacing: 8) {
+                        ForEach(AppStore.GestureTapAction.allCases) { action in
+                            gestureTapActionButton(for: action)
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(appStore.localized(.gestureSystemHintTitle))
+                        .font(.footnote.weight(.semibold))
+                    Text(appStore.localized(.gestureSystemHintBody))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.accentColor.opacity(colorScheme == .dark ? 0.14 : 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }
 
@@ -3930,12 +4040,49 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         .buttonStyle(.plain)
     }
 
+    private func gestureTapActionButton(for action: AppStore.GestureTapAction) -> some View {
+        let isSelected = appStore.gestureTapAction == action
+
+        return Button {
+            gestureTapActionBinding.wrappedValue = action
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: gestureTapActionSymbol(for: action))
+                    .font(.caption.weight(.semibold))
+                Text(appStore.localized(action.localizationKey))
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(colorScheme == .dark ? 0.18 : 0.12)
+                                     : Color(nsColor: .windowBackgroundColor).opacity(colorScheme == .dark ? 0.25 : 0.75))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor.opacity(0.65) : Color.primary.opacity(0.08), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
     private func dockDragSideSymbol(for side: AppStore.DockDragSide) -> String {
         switch side {
         case .disabled: return "nosign"
         case .bottom: return "arrow.down.to.line"
         case .left: return "arrow.left.to.line"
         case .right: return "arrow.right.to.line"
+        }
+    }
+
+    private func gestureTapActionSymbol(for action: AppStore.GestureTapAction) -> String {
+        switch action {
+        case .off: return "nosign"
+        case .open: return "arrow.up.forward.app"
+        case .toggle: return "arrow.triangle.2.circlepath"
         }
     }
 
@@ -3958,6 +4105,78 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 .overlay(hotCornerPreviewHighlight.padding(16))
         }
         .frame(width: 118, height: 82)
+    }
+
+    private var gesturePreview: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor).opacity(colorScheme == .dark ? 0.28 : 0.82))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                )
+
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                )
+                .padding(16)
+                .overlay(gesturePreviewHighlight.padding(16))
+        }
+        .frame(width: 118, height: 82)
+    }
+
+    @ViewBuilder
+    private var gesturePreviewHighlight: some View {
+        if !appStore.gestureEnabled && appStore.gestureTapAction == .off {
+            Image(systemName: "slash.circle")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(.secondary)
+        } else {
+            GeometryReader { proxy in
+                let center = CGPoint(x: proxy.size.width / 2, y: proxy.size.height / 2)
+                let points = [
+                    CGPoint(x: center.x - 22, y: center.y - 12),
+                    CGPoint(x: center.x + 22, y: center.y - 12),
+                    CGPoint(x: center.x - 22, y: center.y + 12),
+                    CGPoint(x: center.x + 22, y: center.y + 12)
+                ]
+
+                ForEach(Array(points.enumerated()), id: \.offset) { _, point in
+                    Circle()
+                        .fill(Color.accentColor.opacity(0.95))
+                        .frame(width: 10, height: 10)
+                        .position(point)
+                }
+
+                if appStore.gestureEnabled {
+                    ForEach(Array(points.enumerated()), id: \.offset) { _, point in
+                        Path { path in
+                            path.move(to: point)
+                            path.addLine(to: CGPoint(
+                                x: center.x + ((point.x - center.x) * 0.42),
+                                y: center.y + ((point.y - center.y) * 0.42)
+                            ))
+                        }
+                        .stroke(Color.accentColor.opacity(0.45), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    }
+                }
+
+                Circle()
+                    .fill(Color.accentColor.opacity(appStore.gestureTapAction != .off ? 0.22 : 0.16))
+                    .frame(width: appStore.gestureTapAction != .off ? 26 : 18, height: appStore.gestureTapAction != .off ? 26 : 18)
+                    .position(center)
+
+                if appStore.gestureTapAction != .off {
+                    Circle()
+                        .stroke(Color.accentColor.opacity(0.55), lineWidth: 2)
+                        .frame(width: 34, height: 34)
+                        .position(center)
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -4715,6 +4934,12 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert(AppStore.hotCornerTriggerDelayKey)
                     keys.insert(AppStore.hotCornerHitboxSizeKey)
                     keys.insert(AppStore.hotCornerToggleWhenOpenKey)
+                    // Experimental gesture backup keys. Remove these together
+                    // with the gesture feature if low-level multitouch support
+                    // is dropped later.
+                    keys.insert(AppStore.gestureEnabledKey)
+                    keys.insert(AppStore.gestureCloseOnPinchOutKey)
+                    keys.insert(AppStore.gestureTapActionKey)
                 }
                 if appearanceCheckbox.state == .on {
                     keys.insert(AppStore.sidebarIconPresetKey)

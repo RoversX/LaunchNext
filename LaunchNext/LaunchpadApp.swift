@@ -51,6 +51,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     private var cliEndpointSocketPath: String?
     private var cliEndpointMonitorTimer: DispatchSourceTimer?
     private var hotCornerMonitor: HotCornerMonitor?
+    // Experimental low-level gesture monitor.
+    // Remove this property if gesture support is dropped together with
+    // bindGesturePreference()/updateGestureMonitor()/handleGestureTrigger().
+    private var gestureMonitor: GestureMonitor?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         if runHeadlessModeIfRequested() { return }
@@ -79,6 +83,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
         bindSystemUIVisibility()
         bindCLICodePreference()
         bindHotCornerPreference()
+        // Experimental gesture wiring entry point.
+        // Remove this call if the gesture feature is removed later.
+        bindGesturePreference()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.applyAppearancePreference(self.appStore.appearancePreference)
@@ -325,6 +332,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
         .store(in: &cancellables)
     }
 
+    private func bindGesturePreference() {
+        // Experimental gesture settings are funneled through one Combine pipeline
+        // so the monitor can be rebuilt from a single source of truth.
+        // If gesture support is removed later, delete this binder together with
+        // updateGestureMonitor()/handleGestureTrigger() and the Gesture folder.
+        Publishers.CombineLatest3(
+            appStore.$gestureEnabled.removeDuplicates(),
+            appStore.$gestureCloseOnPinchOut.removeDuplicates(),
+            appStore.$gestureTapAction.removeDuplicates()
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] enabled, closeOnPinchOut, tapAction in
+            self?.updateGestureMonitor(
+                enabled: enabled,
+                closeOnPinchOut: closeOnPinchOut,
+                tapAction: tapAction
+            )
+        }
+        .store(in: &cancellables)
+    }
+
     private func updateHotCornerMonitor(enabled: Bool,
                                         position: AppStore.HotCornerPosition,
                                         triggerDelay: Double,
@@ -360,6 +388,56 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
         }
 
         showWindow()
+    }
+
+    // Bridges Settings state into the experimental gesture monitor.
+    // If gesture support needs to be removed later, this is one of the main seams:
+    // delete LaunchNext/Gesture/, remove the Gesture settings/AppStore fields,
+    // then remove this method together with bindGesturePreference().
+    private func updateGestureMonitor(enabled: Bool,
+                                      closeOnPinchOut: Bool,
+                                      tapAction: AppStore.GestureTapAction) {
+        let configuration = GestureMonitor.Configuration(
+            isEnabled: enabled || tapAction != .off,
+            closeOnPinchOutEnabled: closeOnPinchOut,
+            tapEnabled: tapAction != .off,
+            tapTogglesWindow: tapAction == .toggle
+        )
+
+        if gestureMonitor == nil {
+            gestureMonitor = GestureMonitor(configuration: configuration) { [weak self] action in
+                DispatchQueue.main.async {
+                    self?.handleGestureTrigger(action: action)
+                }
+            }
+        }
+
+        gestureMonitor?.update(configuration: configuration)
+    }
+
+    // Maps recognized gesture actions onto the existing window flow.
+    // Keeping the behavior translation here avoids spreading experimental gesture
+    // branches into showWindow()/hideWindow() and makes later rollback simple:
+    // remove this handler and the gesture monitor callback wiring.
+    private func handleGestureTrigger(action: GestureTriggerAction) {
+        guard !isTerminating else { return }
+        guard !isPerformingExternalSystemDrag else { return }
+        guard !isAnimatingWindow else { return }
+
+        switch action {
+        case .open:
+            guard !windowIsVisible else { return }
+            showWindow()
+        case .close:
+            guard windowIsVisible else { return }
+            hideWindow()
+        case .toggle:
+            if windowIsVisible {
+                hideWindow()
+            } else {
+                showWindow()
+            }
+        }
     }
 
     private func updateCLIIPCServer(enabled: Bool) {
