@@ -1199,6 +1199,13 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            updateControlButton(
+                title: "Test update notification",
+                systemImage: "bell.badge"
+            ) {
+                appStore.sendTestUpdateNotification()
+            }
+
             VStack(alignment: .leading, spacing: 8) {
                 Text("Screenshot background")
                     .font(.headline)

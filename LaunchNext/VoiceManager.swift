@@ -1,14 +1,21 @@
-import AppKit
+import AVFoundation
 import Foundation
 
-final class VoiceManager {
+@MainActor
+final class VoiceManager: NSObject {
     static let shared = VoiceManager()
 
-    private let synthesizer = NSSpeechSynthesizer()
+    private let synthesizer = AVSpeechSynthesizer()
     private weak var appStore: AppStore?
     private var pendingAnnouncement: DispatchWorkItem?
+    private var isSynthesizerSpeaking = false
+    private var activePhrase: String?
+    private var queuedPhrase: String?
 
-    private init() {}
+    private override init() {
+        super.init()
+        synthesizer.delegate = self
+    }
 
     func bind(appStore: AppStore) {
         self.appStore = appStore
@@ -29,8 +36,10 @@ final class VoiceManager {
     func stop() {
         pendingAnnouncement?.cancel()
         pendingAnnouncement = nil
-        if synthesizer.isSpeaking {
-            synthesizer.stopSpeaking()
+        activePhrase = nil
+        queuedPhrase = nil
+        if isSynthesizerSpeaking {
+            synthesizer.stopSpeaking(at: .immediate)
         }
     }
 
@@ -48,10 +57,82 @@ final class VoiceManager {
         }
 
         guard let phrase, !phrase.isEmpty else { return }
+        guard phrase != activePhrase else { return }
 
-        if synthesizer.isSpeaking {
-            synthesizer.stopSpeaking()
+        if isSynthesizerSpeaking {
+            queuedPhrase = phrase
+            return
         }
-        synthesizer.startSpeaking(phrase)
+        speak(phrase: phrase)
+    }
+
+    private func speak(phrase: String) {
+        activePhrase = phrase
+        queuedPhrase = nil
+        let utterance = AVSpeechUtterance(string: phrase)
+        utterance.voice = preferredVoice()
+        synthesizer.speak(utterance)
+    }
+
+    private func preferredVoice() -> AVSpeechSynthesisVoice? {
+        if let localizedVoice = AVSpeechSynthesisVoice(language: Locale.current.identifier) {
+            return localizedVoice
+        }
+        if let languageCode = Locale.current.language.languageCode?.identifier,
+           let fallbackVoice = AVSpeechSynthesisVoice(language: languageCode) {
+            return fallbackVoice
+        }
+        return AVSpeechSynthesisVoice(language: "en-US")
+    }
+
+    private func handleSpeechDidStart(_ phrase: String) {
+        isSynthesizerSpeaking = true
+        activePhrase = phrase
+    }
+
+    private func handleSpeechDidFinish(_ phrase: String) {
+        isSynthesizerSpeaking = false
+        if activePhrase == phrase {
+            activePhrase = nil
+        }
+        speakQueuedPhraseIfNeeded()
+    }
+
+    private func speakQueuedPhraseIfNeeded() {
+        guard let store = appStore, store.voiceFeedbackEnabled else {
+            queuedPhrase = nil
+            return
+        }
+        guard let queuedPhrase, queuedPhrase != activePhrase else { return }
+        speak(phrase: queuedPhrase)
+    }
+}
+
+extension VoiceManager: AVSpeechSynthesizerDelegate {
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        let phrase = utterance.speechString
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                self?.handleSpeechDidStart(phrase)
+            }
+        }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        let phrase = utterance.speechString
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                self?.handleSpeechDidFinish(phrase)
+            }
+        }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        let phrase = utterance.speechString
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                self?.handleSpeechDidFinish(phrase)
+            }
+        }
     }
 }

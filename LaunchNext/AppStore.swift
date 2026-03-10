@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 import Carbon
 import Carbon.HIToolbox
 import ServiceManagement
+@preconcurrency import UserNotifications
 
 enum AppearancePreference: String, CaseIterable, Identifiable {
     case system
@@ -435,6 +436,9 @@ final class AppStore: ObservableObject {
     private static let defaultLaunchpadOpenSound = "Submarine"
     private static let defaultLaunchpadCloseSound = "Glass"
     private static let defaultNavigationSound = "Tink"
+    fileprivate static let updateNotificationCategoryIdentifier = "launchnext.update.category"
+    fileprivate static let updateNotificationDownloadActionIdentifier = "launchnext.update.download"
+    private var hasConfiguredUpdateNotifications = false
 
     private var lastUpdateCheck: Date? {
         get {
@@ -5326,8 +5330,6 @@ final class AppStore: ObservableObject {
                     items[itemIndex] = .folder(folder)
                     changed = true
                 }
-            case .folder:
-                break
             case .empty:
                 break
             case .missingApp:
@@ -6084,26 +6086,91 @@ final class AppStore: ObservableObject {
 
     @MainActor
     private func presentUpdateAlert(for release: UpdateRelease) {
-        let notification = NSUserNotification()
-        notification.title = localized(.updateAvailable)
-        notification.informativeText = "\(localized(.newVersion)) \(release.version)"
-        notification.hasActionButton = true
-        notification.actionButtonTitle = localized(.downloadUpdate)
-        notification.otherButtonTitle = localized(.cancel)
-        notification.userInfo = ["releaseURL": release.url.absoluteString]
-
-        NSUserNotificationCenter.default.delegate = notificationDelegate
-        NSUserNotificationCenter.default.deliver(notification)
+        enqueueUpdateNotification(
+            title: localized(.updateAvailable),
+            body: "\(localized(.newVersion)) \(release.version)",
+            releaseURL: release.url
+        )
     }
 
     @MainActor
     private func presentUpdateFailureAlert(_ message: String) {
-        let notification = NSUserNotification()
-        notification.title = localized(.updateCheckFailed)
-        notification.informativeText = message
+        enqueueUpdateNotification(
+            title: localized(.updateCheckFailed),
+            body: message,
+            releaseURL: nil
+        )
+    }
 
-        NSUserNotificationCenter.default.delegate = notificationDelegate
-        NSUserNotificationCenter.default.deliver(notification)
+    @MainActor
+    func sendTestUpdateNotification() {
+        enqueueUpdateNotification(
+            title: localized(.updateAvailable),
+            body: "\(localized(.newVersion)) 9.9.9-test",
+            releaseURL: URL(string: "https://closex.org/launchnext/")
+        )
+    }
+
+    @MainActor
+    private func ensureUpdateNotificationSetup() {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = notificationDelegate
+
+        guard !hasConfiguredUpdateNotifications else { return }
+
+        let downloadAction = UNNotificationAction(
+            identifier: Self.updateNotificationDownloadActionIdentifier,
+            title: localized(.downloadUpdate),
+            options: [.foreground]
+        )
+        let category = UNNotificationCategory(
+            identifier: Self.updateNotificationCategoryIdentifier,
+            actions: [downloadAction],
+            intentIdentifiers: [],
+            options: []
+        )
+        center.setNotificationCategories([category])
+        hasConfiguredUpdateNotifications = true
+    }
+
+    @MainActor
+    private func enqueueUpdateNotification(title: String, body: String, releaseURL: URL?) {
+        ensureUpdateNotificationSetup()
+
+        let releaseURLString = releaseURL?.absoluteString
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            let deliverNotification = {
+                let content = UNMutableNotificationContent()
+                content.title = title
+                content.body = body
+                content.sound = .default
+                if let releaseURLString {
+                    content.categoryIdentifier = Self.updateNotificationCategoryIdentifier
+                    content.userInfo = ["releaseURL": releaseURLString]
+                }
+
+                let request = UNNotificationRequest(
+                    identifier: UUID().uuidString,
+                    content: content,
+                    trigger: nil
+                )
+                UNUserNotificationCenter.current().add(request) { _ in }
+            }
+
+            switch settings.authorizationStatus {
+            case .notDetermined:
+                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+                    guard granted else { return }
+                    deliverNotification()
+                }
+            case .authorized, .provisional, .ephemeral:
+                deliverNotification()
+            case .denied:
+                break
+            @unknown default:
+                break
+            }
+        }
     }
 
     @MainActor
@@ -6240,20 +6307,26 @@ final class AppStore: ObservableObject {
     }
 }
 
-private final class UpdateNotificationDelegate: NSObject, NSUserNotificationCenterDelegate {
+private final class UpdateNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     private let openHandler: (URL) -> Void
 
     init(openHandler: @escaping (URL) -> Void) {
         self.openHandler = openHandler
     }
 
-    func userNotificationCenter(_ center: NSUserNotificationCenter, shouldPresent notification: NSUserNotification) -> Bool {
-        true
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list, .sound])
     }
 
-    func userNotificationCenter(_ center: NSUserNotificationCenter, didActivate notification: NSUserNotification) {
-        guard notification.activationType == .actionButtonClicked,
-              let urlString = notification.userInfo?["releaseURL"] as? String,
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        defer { completionHandler() }
+
+        guard response.actionIdentifier == AppStore.updateNotificationDownloadActionIdentifier,
+              let urlString = response.notification.request.content.userInfo["releaseURL"] as? String,
               let url = URL(string: urlString) else {
             return
         }

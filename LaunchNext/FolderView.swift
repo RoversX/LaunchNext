@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 
 struct FolderView: View {
     @ObservedObject var appStore: AppStore
@@ -93,6 +94,13 @@ struct FolderView: View {
             // 当应用列表变化时，强制刷新视图
             forceRefreshTrigger = UUID()
         }
+        .onChange(of: appStore.voiceFeedbackEnabled) { _, enabled in
+            if enabled {
+                announceSelectedAppIfNeeded()
+            } else {
+                VoiceManager.shared.stop()
+            }
+        }
         .onChange(of: folder.name) {
             // 监听文件夹名称变化，确保界面立即更新
             if !isEditingName {
@@ -112,6 +120,9 @@ struct FolderView: View {
             forceRefreshTrigger = UUID()
             // 触发视图重新渲染
             folderName = folder.name
+        }
+        .onReceive(ControllerInputManager.shared.commands.receive(on: RunLoop.main)) { command in
+            handleControllerCommand(command)
         }
         .onDisappear {
             if let monitor = keyMonitor {
@@ -579,6 +590,7 @@ extension FolderView {
                 isKeyboardNavigationActive = true
                 setSelectionToStart()
                 clampSelection()
+                announceSelectedAppIfNeeded()
                 return nil
             }
             if let idx = selectedIndex, folder.apps.indices.contains(idx) {
@@ -599,6 +611,7 @@ extension FolderView {
                 isKeyboardNavigationActive = true
                 setSelectionToStart()
                 clampSelection()
+                announceSelectedAppIfNeeded()
                 return nil
             }
             return event
@@ -610,6 +623,7 @@ extension FolderView {
                 isKeyboardNavigationActive = true
                 setSelectionToStart()
                 clampSelection()
+                announceSelectedAppIfNeeded()
                 return nil
             }
             moveSelection(dx: 0, dy: 1)
@@ -632,6 +646,58 @@ extension FolderView {
         let newIndex: Int = dy == 0 ? current + dx : current + dy * columnsCount
         guard folder.apps.indices.contains(newIndex) else { return }
         selectedIndex = newIndex
+        announceSelectedAppIfNeeded()
+    }
+
+    private func handleControllerCommand(_ command: ControllerCommand) {
+        guard appStore.gameControllerEnabled else { return }
+        guard ControllerInputManager.shared.isActive else { return }
+        guard !isEditingName else { return }
+
+        switch command {
+        case .move(let direction), .moveRepeat(let direction):
+            if !isKeyboardNavigationActive {
+                isKeyboardNavigationActive = true
+                setSelectionToStart()
+                clampSelection()
+                announceSelectedAppIfNeeded()
+                return
+            }
+
+            switch direction {
+            case .left:
+                moveSelection(dx: -1, dy: 0)
+            case .right:
+                moveSelection(dx: 1, dy: 0)
+            case .up:
+                moveSelection(dx: 0, dy: -1)
+            case .down:
+                moveSelection(dx: 0, dy: 1)
+            }
+        case .stop(_):
+            break
+        case .select:
+            if !isKeyboardNavigationActive {
+                isKeyboardNavigationActive = true
+                setSelectionToStart()
+                clampSelection()
+                announceSelectedAppIfNeeded()
+                return
+            }
+
+            if let idx = selectedIndex, folder.apps.indices.contains(idx) {
+                let targetApp = folder.apps[idx]
+                if canLaunch(targetApp) {
+                    onLaunchApp(targetApp)
+                } else {
+                    NSSound.beep()
+                }
+            }
+        case .cancel:
+            onClose()
+        case .menu:
+            break
+        }
     }
 
     private func setSelectionToStart() {
@@ -651,5 +717,12 @@ extension FolderView {
         } else {
             selectedIndex = 0
         }
+    }
+
+    private func announceSelectedAppIfNeeded() {
+        guard appStore.voiceFeedbackEnabled,
+              let index = selectedIndex,
+              folder.apps.indices.contains(index) else { return }
+        VoiceManager.shared.announceSelection(item: .app(folder.apps[index]))
     }
 }

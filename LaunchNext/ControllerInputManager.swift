@@ -98,10 +98,6 @@ final class ControllerInputManager: ObservableObject {
         let identifier = ObjectIdentifier(controller)
         directionStates[identifier] = DirectionState()
 
-        controller.controllerPausedHandler = { [weak self] _ in
-            self?.emit(.cancel)
-        }
-
         if let extended = controller.extendedGamepad {
             configure(gamepad: extended, controller: controller)
         }
@@ -120,24 +116,19 @@ final class ControllerInputManager: ObservableObject {
             }
         }
 
-        controller.controllerPausedHandler = nil
-
         if let extended = controller.extendedGamepad {
             extended.dpad.valueChangedHandler = nil
             extended.leftThumbstick.valueChangedHandler = nil
             extended.buttonA.valueChangedHandler = nil
             extended.buttonB.valueChangedHandler = nil
-            if #available(macOS 11.3, *) {
-                extended.buttonMenu.valueChangedHandler = nil
-            }
+            extended.buttonMenu.valueChangedHandler = nil
+            extended.buttonOptions?.valueChangedHandler = nil
         }
 
         if let micro = controller.microGamepad {
             micro.dpad.valueChangedHandler = nil
             micro.buttonA.valueChangedHandler = nil
-            if #available(macOS 11.3, *) {
-                micro.buttonMenu.valueChangedHandler = nil
-            }
+            micro.buttonMenu.valueChangedHandler = nil
         }
     }
 
@@ -162,11 +153,14 @@ final class ControllerInputManager: ObservableObject {
             self?.emit(.cancel)
         }
 
-        if #available(macOS 11.3, *) {
-            gamepad.buttonMenu.valueChangedHandler = { [weak self] _, _, pressed in
-                guard pressed else { return }
-                self?.emit(.menu)
-            }
+        gamepad.buttonMenu.valueChangedHandler = { [weak self] _, _, pressed in
+            guard pressed else { return }
+            self?.emit(.cancel)
+        }
+
+        gamepad.buttonOptions?.valueChangedHandler = { [weak self] _, _, pressed in
+            guard pressed else { return }
+            self?.emit(.menu)
         }
     }
 
@@ -183,11 +177,9 @@ final class ControllerInputManager: ObservableObject {
             self?.emit(.select)
         }
 
-        if #available(macOS 11.3, *) {
-            microGamepad.buttonMenu.valueChangedHandler = { [weak self] _, _, pressed in
-                guard pressed else { return }
-                self?.emit(.menu)
-            }
+        microGamepad.buttonMenu.valueChangedHandler = { [weak self] _, _, pressed in
+            guard pressed else { return }
+            self?.emit(.cancel)
         }
     }
 
