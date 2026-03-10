@@ -55,6 +55,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     // Remove this property if gesture support is dropped together with
     // bindGesturePreference()/updateGestureMonitor()/handleGestureTrigger().
     private var gestureMonitor: GestureMonitor?
+    // Wake recovery work items for the experimental gesture monitor.
+    // If gesture support is removed later, delete this together with
+    // bindGestureWakeRecovery()/scheduleGestureWakeRecovery().
+    private var gestureWakeRecoveryWorkItems: [DispatchWorkItem] = []
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         if runHeadlessModeIfRequested() { return }
@@ -86,6 +90,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
         // Experimental gesture wiring entry point.
         // Remove this call if the gesture feature is removed later.
         bindGesturePreference()
+        // Experimental wake recovery for low-level gesture input.
+        // Remove this call if gesture support is removed later.
+        bindGestureWakeRecovery()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.applyAppearancePreference(self.appStore.appearancePreference)
@@ -351,6 +358,54 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
             )
         }
         .store(in: &cancellables)
+    }
+
+    // Rebuilds the experimental gesture listener after sleep/wake.
+    // The low-level multitouch listener can become stale after wake even when
+    // its local "isListening" flag still looks healthy. If gesture support is
+    // removed later, delete this binder together with schedule/cancel helpers.
+    private func bindGestureWakeRecovery() {
+        let center = NSWorkspace.shared.notificationCenter
+
+        center.publisher(for: NSWorkspace.willSleepNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.cancelGestureWakeRecovery()
+            }
+            .store(in: &cancellables)
+
+        center.publisher(for: NSWorkspace.didWakeNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.scheduleGestureWakeRecovery()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func scheduleGestureWakeRecovery() {
+        guard appStore.gestureEnabled || appStore.gestureTapAction != .off else { return }
+        guard !isTerminating else { return }
+
+        cancelGestureWakeRecovery()
+
+        // Rebuild twice: once after the initial wake settles, then again as a
+        // fallback for longer sleep/wake paths where the trackpad comes back
+        // later than NSWorkspaceDidWakeNotification.
+        for delay in [0.8, 2.0] {
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                guard !self.isTerminating else { return }
+                guard self.appStore.gestureEnabled || self.appStore.gestureTapAction != .off else { return }
+                self.gestureMonitor?.restart()
+            }
+            gestureWakeRecoveryWorkItems.append(workItem)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+        }
+    }
+
+    private func cancelGestureWakeRecovery() {
+        gestureWakeRecoveryWorkItems.forEach { $0.cancel() }
+        gestureWakeRecoveryWorkItems.removeAll()
     }
 
     private func updateHotCornerMonitor(enabled: Bool,

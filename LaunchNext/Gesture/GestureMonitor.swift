@@ -54,6 +54,11 @@ final class GestureMonitor {
         }
     }
 
+    func restart() {
+        stop()
+        start()
+    }
+
     func stop() {
         monitorTask?.cancel()
         monitorTask = nil
