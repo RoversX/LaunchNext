@@ -60,7 +60,6 @@ struct SettingsView: View {
     @State private var editingEntries: Set<String> = []
     @State private var iconImportError: String? = nil
     @State private var showAppSourcesResetDialog = false
-    @State private var showUpdateNotes = false
     @State private var showCleanupCommand = false
     @State private var cleanupCommandCopied = false
     @State private var backupRootPath: String = UserDefaults.standard.string(forKey: "backupRootDirectory") ?? ""
@@ -83,6 +82,7 @@ struct SettingsView: View {
     @State private var copiedCLICommand: String? = nil
     @State private var cliCommandActionMessage: String? = nil
     @State private var layoutModePreviewScope: LayoutModePreviewScope = .fullscreen
+    @State private var lastUpdatesTabRefreshAt: Date? = nil
     private let dockDragSelectableSides: [AppStore.DockDragSide] = [.bottom, .left, .right]
 
     // Sidebar sizing presets
@@ -234,6 +234,19 @@ struct SettingsView: View {
         .onChange(of: appStore.isFullscreenMode) { _, _ in
             guard selectedSection == .appearance else { return }
             syncLayoutModePreviewScopeToRuntime()
+        }
+        .onChange(of: selectedSection) { _, newSection in
+            guard newSection == .updates else { return }
+            guard appStore.updateState != .checking else { return }
+
+            let now = Date()
+            if let lastRefresh = lastUpdatesTabRefreshAt,
+               now.timeIntervalSince(lastRefresh) < 300 {
+                return
+            }
+
+            lastUpdatesTabRefreshAt = now
+            appStore.checkForUpdates()
         }
     }
 
@@ -628,6 +641,13 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
             }
             .background(.ultraThinMaterial)
+            .overlay(alignment: .bottom) {
+                if section == .updates {
+                    updatesFloatingBar
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 16)
+                }
+            }
         }
     }
 
@@ -643,6 +663,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 Spacer(minLength: 0)
             }
             .padding(.top, 12)
+            .padding(.bottom, section == .updates ? 92 : 0)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -5355,6 +5376,10 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 }
                 return nil
             }()
+            let availableNotesModel: MarkdownRenderModel = {
+                guard let availableNotes, !availableNotes.isEmpty else { return .empty }
+                return SimpleMarkdownParser.parse(availableNotes)
+            }()
 
             Text(appStore.localized(.checkForUpdates))
                 .font(.headline)
@@ -5381,24 +5406,32 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
             case .updateAvailable(let release):
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "party.popper.fill")
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Label(appStore.localized(.updateAvailable), systemImage: "party.popper.fill")
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.orange)
-                        Text(appStore.localized(.updateAvailable))
-                            .font(.subheadline.weight(.medium))
+
+                        Text(appStore.localized(.newVersion) + " \(release.version)")
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(.secondary)
+
+                        Spacer(minLength: 0)
                     }
 
-                    Text(appStore.localized(.newVersion) + " \(release.version)")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    if !availableNotesModel.blocks.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Release Notes")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
 
-                    if let notes = release.notes, !notes.isEmpty {
-                        Text(linkifiedText(notes))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(3)
-                            .frame(maxHeight: updateNotesPreviewMaxHeight)
-                            .clipped()
+                            ReleaseNotesMarkdownView(model: availableNotesModel, mode: .full)
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Color.primary.opacity(0.04))
+                        )
                     }
                 }
 
@@ -5417,46 +5450,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 }
             }
 
-            if showUpdateNotes, let notes = availableNotes, !notes.isEmpty {
-                Text(linkifiedText(notes))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-            }
-
-            HStack(spacing: 12) {
-                updateControlButton(
-                    title: appStore.updateState == .idle
-                        ? appStore.localized(.checkForUpdatesButton)
-                        : appStore.localized(.updatesRefreshButton),
-                    systemImage: "arrow.clockwise",
-                    isPrimary: true
-                ) {
-                    appStore.checkForUpdates()
-                }
-                .disabled(appStore.updateState == .checking)
-
-                Spacer(minLength: 0)
-
-                if let release = availableRelease {
-                    updateControlButton(
-                        title: appStore.localized(.downloadUpdate),
-                        systemImage: "arrow.down.circle"
-                    ) {
-                        appStore.launchUpdater(for: release)
-                    }
-                }
-
-                if let notes = availableNotes, !notes.isEmpty {
-                    Button {
-                        showUpdateNotes.toggle()
-                    } label: {
-                        Image(systemName: showUpdateNotes ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -5464,6 +5457,63 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color(nsColor: .windowBackgroundColor))
         )
+    }
+
+    private var updatesFloatingBar: some View {
+        let floatingBarShape = Capsule(style: .continuous)
+        return HStack(spacing: 12) {
+            updateControlButton(
+                title: appStore.updateState == .idle
+                    ? appStore.localized(.checkForUpdatesButton)
+                    : appStore.localized(.updatesRefreshButton),
+                systemImage: "arrow.clockwise",
+                isPrimary: true,
+                minWidth: 136
+            ) {
+                appStore.checkForUpdates()
+            }
+            .disabled(appStore.updateState == .checking)
+
+            if let release = currentAvailableRelease {
+                updateControlButton(
+                    title: appStore.localized(.downloadUpdate),
+                    systemImage: "arrow.down.circle",
+                    minWidth: 136
+                ) {
+                    appStore.launchUpdater(for: release)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .modifier(ClearGlassBackground(shape: floatingBarShape))
+        .overlay(
+            floatingBarShape
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.08), radius: 18, x: 0, y: 8)
+    }
+
+    private struct ClearGlassBackground<S: Shape>: ViewModifier {
+        let shape: S
+
+        @ViewBuilder
+        func body(content: Content) -> some View {
+            if #available(macOS 26.0, iOS 18.0, *) {
+                content
+                    .glassEffect(.clear, in: shape)
+            } else {
+                content
+                    .background(.ultraThinMaterial, in: shape)
+            }
+        }
+    }
+
+    private var currentAvailableRelease: AppStore.UpdateRelease? {
+        if case .updateAvailable(let release) = appStore.updateState {
+            return release
+        }
+        return nil
     }
 
     private var updatesControlCard: some View {
@@ -5485,13 +5535,13 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         )
     }
 
-    private func updateControlButton(title: String, systemImage: String, isPrimary: Bool = false, action: @escaping () -> Void) -> some View {
+    private func updateControlButton(title: String, systemImage: String, isPrimary: Bool = false, minWidth: CGFloat = 160, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
                 .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .frame(minWidth: 160)
+                .frame(minWidth: minWidth)
         }
         .buttonStyle(.plain)
         .background(
@@ -5503,28 +5553,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 .stroke(isPrimary ? Color.accentColor.opacity(0.6) : Color.primary.opacity(0.08), lineWidth: 1)
         )
     }
-
-    private var updateNotesPreviewMaxHeight: CGFloat {
-        let size = NSFont.systemFontSize(for: .small)
-        return size * 1.2 * 3
-    }
-
-    private func linkifiedText(_ source: String) -> AttributedString {
-        var attributed = AttributedString(source)
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
-            return attributed
-        }
-        detector.enumerateMatches(in: source, options: [], range: NSRange(location: 0, length: (source as NSString).length)) { match, _, _ in
-            guard let match, let url = match.url,
-                  let range = Range(match.range, in: source),
-                  let attrRange = Range(range, in: attributed) else { return }
-            attributed[attrRange].link = url
-            attributed[attrRange].foregroundColor = .accentColor
-        }
-        return attributed
-    }
-
-
 
     private var updatesHero: some View {
         let statusText: String = {
