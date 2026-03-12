@@ -1347,7 +1347,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 Divider()
 
                 HStack(alignment: .center, spacing: 10) {
-                    HStack(spacing: 8) {
+                    HStack(alignment: .top, spacing: 8) {
                         Text(appStore.localized(.performanceRendererBadge))
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(Color.accentColor)
@@ -1374,6 +1374,12 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 if appStore.useCAGridRenderer {
                     Text(appStore.localized(.performanceRendererWarning))
                         .font(.footnote)
+                        .foregroundStyle(Color.accentColor)
+                }
+
+                if !appStore.useCAGridRenderer {
+                    Text(appStore.localized(.performanceRendererRecommendation))
+                        .font(.caption)
                         .foregroundStyle(Color.accentColor)
                 }
             }
