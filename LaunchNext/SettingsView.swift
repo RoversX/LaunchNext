@@ -200,6 +200,7 @@ struct SettingsView: View {
             .background(.ultraThinMaterial)
 
             Button {
+                appStore.stopAccessibilityPolling()
                 appStore.isSetting = false
             } label: {
                 Image(systemName: "xmark")
@@ -632,7 +633,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     ScrollView(showsIndicators: false) {
                         scrollContent(for: section)
                     }
-                    .scrollDisabled(section == .about || section == .general)
+                    .scrollDisabled(section == .about)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .scrollBounceBehavior(.basedOnSize)
                 }
@@ -2413,7 +2414,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 .padding(.vertical, 10)
 
             label
-                .glassEffect(.clear, in: Capsule())
+                .liquidGlass(.clear, in: Capsule())
                 .clipShape(Capsule())
                 .shadow(color: Color.black.opacity(shadowOpacity), radius: shadowRadius, x: 0, y: shadowOffsetY)
                 .scaleEffect(scale)
@@ -2566,7 +2567,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .liquidGlass(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     // MARK: - Inline Games
@@ -2959,6 +2960,72 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            Divider()
+
+            HStack(alignment: .center, spacing: 24) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(appStore.localized(.kioskModeTitle))
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Toggle("", isOn: $appStore.kioskMode)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                    }
+                    Text(appStore.localized(.kioskModeDescription))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(appStore.localized(.autoFullscreenTitle))
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Toggle("", isOn: $appStore.autoFullscreen)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .onAppear {
+                                appStore.startAccessibilityPolling()
+                            }
+                            .onDisappear {
+                                appStore.stopAccessibilityPolling()
+                            }
+                            .onChange(of: appStore.autoFullscreen) { newValue in
+                                if newValue && !appStore.isAccessibilityTrusted() {
+                                    appStore.autoFullscreen = false
+                                    appStore.promptAccessibilityPermission()
+                                }
+                            }
+                    }
+                    Text(appStore.localized(.autoFullscreenDescription))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
+
+            HStack(alignment: .center, spacing: 24) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(appStore.localized(.showInDockTitle))
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Toggle("", isOn: $appStore.showInDock)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                    }
+                    Text(appStore.localized(.showInDockDescription))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Spacer().frame(maxWidth: .infinity)
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -4440,6 +4507,32 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 .pickerStyle(.segmented)
                 .labelsHidden()
             }
+
+            if #available(macOS 26.0, iOS 26.0, *) {
+                let useGlass = appStore.launchpadBackgroundStyle == .glass
+                let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+
+                ZStack {
+                    Image("AboutBackground")
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fill)
+
+                    HStack(spacing: 16) {
+                        glassPreviewCard(label: "Regular", icon: "app.fill", style: .regular, useGlass: useGlass, shape: shape)
+                        glassPreviewCard(label: "Clear", icon: "app.fill", style: .clear, useGlass: useGlass, shape: shape)
+                        glassPreviewCard(label: "Identity", icon: "app.fill", style: .identity, useGlass: useGlass, shape: shape)
+                    }
+                    .padding(20)
+                }
+                .frame(height: 140)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color.white.opacity(0.18), lineWidth: 1.4)
+                )
+                .allowsHitTesting(false)
+            }
         }
     }
 
@@ -4796,6 +4889,39 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         .padding(.bottom, 20)
     }
 
+    @ViewBuilder
+    private func glassPreviewCard(label: String, icon: String, style: LiquidGlassStyle, useGlass: Bool, shape: some Shape) -> some View {
+        let content = VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.title)
+            Text(label)
+                .font(.subheadline.weight(.medium))
+        }
+        .foregroundStyle(.white)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 18)
+
+        if useGlass, #available(macOS 26.0, iOS 26.0, *) {
+            switch style {
+            case .regular:
+                content.glassEffect(.regular, in: shape)
+            case .clear:
+                content.glassEffect(.clear, in: shape)
+            case .identity:
+                content.glassEffect(.identity, in: shape)
+            }
+        } else {
+            switch style {
+            case .regular:
+                content.background(.regularMaterial, in: shape)
+            case .clear:
+                content.background(.ultraThinMaterial, in: shape)
+            case .identity:
+                content
+            }
+        }
+    }
+
     // MARK: - Export / Import Application Support Data
     private func supportDirectoryURL() throws -> URL {
         let fm = FileManager.default
@@ -4960,6 +5086,9 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert("isStartOnLogin")
                     keys.insert(AppStore.showQuickRefreshButtonKey)
                     keys.insert(AppStore.lockLayoutKey)
+                    keys.insert("kioskMode")
+                    keys.insert("autoFullscreen")
+                    keys.insert("showInDock")
                     keys.insert(AppStore.uninstallToolAppPathKey)
                     keys.insert(AppStore.dockDragSideKey)
                     keys.insert(AppStore.dockDragTriggerDistanceKey)

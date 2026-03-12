@@ -15,23 +15,59 @@ extension Font {
     }
 }
 
+// MARK: - Glass Effect Style
+
+enum LiquidGlassStyle {
+    case regular
+    case clear
+    case identity
+}
+
 // MARK: - View Extensions for Glass Effect
 extension View {
     @ViewBuilder
-    func liquidGlass<S: Shape>(in shape: S, isEnabled: Bool = true) -> some View {
-        if #available(macOS 26.0, iOS 18.0, *) {
-            self.glassEffect(.regular, in: shape)
+    func liquidGlass<S: Shape>(_ style: LiquidGlassStyle = .regular, in shape: S, isEnabled: Bool = true) -> some View {
+        if #available(macOS 26.0, iOS 26.0, *) {
+            switch style {
+            case .regular:
+                self.glassEffect(.regular, in: shape)
+            case .clear:
+                self.glassEffect(.clear, in: shape)
+            case .identity:
+                self.glassEffect(.identity, in: shape)
+            }
         } else {
-            self.background(.ultraThinMaterial, in: shape)
+            switch style {
+            case .regular:
+                self.background(.regularMaterial, in: shape)
+            case .clear:
+                self.background(.ultraThinMaterial, in: shape)
+            case .identity:
+                self
+            }
         }
     }
 
     @ViewBuilder
-    func liquidGlass(isEnabled: Bool = true) -> some View {
-        if #available(macOS 26.0, iOS 18.0, *) {
-            self.glassEffect(.regular)
+    func liquidGlass(_ style: LiquidGlassStyle = .regular, isEnabled: Bool = true) -> some View {
+        if #available(macOS 26.0, iOS 26.0, *) {
+            switch style {
+            case .regular:
+                self.glassEffect(.regular)
+            case .clear:
+                self.glassEffect(.clear)
+            case .identity:
+                self.glassEffect(.identity)
+            }
         } else {
-            self.background(.ultraThinMaterial)
+            switch style {
+            case .regular:
+                self.background(.regularMaterial)
+            case .clear:
+                self.background(.ultraThinMaterial)
+            case .identity:
+                self
+            }
         }
     }
 }

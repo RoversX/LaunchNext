@@ -100,7 +100,7 @@ sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
 ## Установка
 
 ### Требования
-- macOS 26 (Tahoe) или новее
+- macOS 15 (Sequoia) или новее
 - Процессор Apple Silicon или Intel
 - Xcode 26 (для сборки из исходного кода)
 
@@ -112,12 +112,17 @@ sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
    cd LaunchNext/LaunchNext
    ```
 
-2. **Открыть в Xcode**
+2. **Собрать обновлятор**
+   ```bash
+   swift build --package-path UpdaterScripts/SwiftUpdater --configuration release --arch arm64 --arch x86_64 --product SwiftUpdater
+   ```
+
+3. **Открыть в Xcode**
    ```bash
    open LaunchNext.xcodeproj
    ```
 
-3. **Собрать и запустить**
+4. **Собрать и запустить**
    - Выберите целевое устройство
    - Нажмите `⌘+R` для сборки и запуска
    - Или `⌘+B` только для сборки
@@ -170,7 +175,7 @@ xcodebuild -project LaunchNext.xcodeproj -scheme LaunchNext -configuration Relea
 ### Общие проблемы
 
 **В: Приложение не запускается?**
-О: Убедитесь в macOS 26.0+ и проверьте системные разрешения.
+О: Убедитесь в macOS 15.0+ и проверьте системные разрешения.
 
 **В: Кнопка импорта отсутствует?**
 О: Убедитесь, что SettingsView.swift включает функциональность импорта.

@@ -57,7 +57,7 @@ Reads directly from the system Launchpad database:
 ## Installation
 
 ### Requirements
-- macOS 26 (Tahoe) or later
+- macOS 15 (Sequoia) or later
 - Apple Silicon or Intel processor
 - Xcode 26 (for building from source)
 
@@ -69,12 +69,17 @@ Reads directly from the system Launchpad database:
    cd LaunchNext
    ```
 
-2. **Open in Xcode**
+2. **Build the updater**
+   ```bash
+   swift build --package-path UpdaterScripts/SwiftUpdater --configuration release --arch arm64 --arch x86_64 --product SwiftUpdater
+   ```
+
+3. **Open in Xcode**
    ```bash
    open LaunchNext.xcodeproj
    ```
 
-3. **Build and run**
+4. **Build and run**
    - Select your target device
    - Press `⌘+R` to build and run
    - Or `⌘+B` to build only
@@ -132,7 +137,7 @@ xcodebuild -project LaunchNext.xcodeproj -scheme LaunchNext -configuration Relea
 ### Common Issues
 
 **Q: App won't start?**
-A: Ensure macOS 26.0+ and check system permissions.
+A: Ensure macOS 15.0+ and check system permissions.
 
 ## Contributing
 
