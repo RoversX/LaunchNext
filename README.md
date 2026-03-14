@@ -6,6 +6,9 @@
 
 **[Download here](https://github.com/RoversX/LaunchNext/releases/latest)** - Get the latest release
 
+🌐 **Website**: [closex.org/launchnext](https://closex.org/launchnext/)  
+📚 **Docs**: [docs.closex.org/launchnext](https://docs.closex.org/launchnext/)
+
 ⭐ Consider starring [LaunchNext](https://github.com/RoversX/LaunchNext) and especially [LaunchNow](https://github.com/ggkevinnnn/LaunchNow)!
 
 | | |
@@ -28,11 +31,16 @@ sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
 ### What LaunchNext Delivers
 - ✅ **One-click import from old system Launchpad** - directly reads your native Launchpad SQLite database (`/private$(getconf DARWIN_USER_DIR)com.apple.dock.launchpad/db/db`) to perfectly recreate your existing folders, app positions, and layout
 - ✅ **Classic Launchpad experience** - works exactly like the beloved original interface
-- ✅ **Multi-language support** - full internationalization with English, Chinese, Japanese, French, Spanish, German, and Russian
+- ✅ **Multi-language support** - full internationalization with English, Chinese, Japanese, French, Spanish, German, Russian, and more
 - ✅ **Hide icon labels** - clean, minimalist view when you don't need app names
 - ✅ **Custom icon sizes** - adjust icon dimensions to fit your preferences
 - ✅ **Smart folder management** - create and organize folders just like before
 - ✅ **Instant search and keyboard navigation** - find apps quickly
+- ✅ **CLI / TUI support** - inspect and operate your layout from the terminal
+- ✅ **Hot Corner and native gesture support** - more ways to open LaunchNext quickly
+- ✅ **Drag apps directly to the Dock** - available in Next Engine + Core Animation
+- ✅ **Update tab with Markdown release notes** - richer in-app update experience
+- ✅ **Backup, controller, and voice support improvements** - better reliability and accessibility
 
 ### What We Lost in macOS Tahoe
 - ❌ No custom app organization
@@ -65,7 +73,7 @@ Reads directly from the system Launchpad database:
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/LaunchNext.git
+   git clone https://github.com/RoversX/LaunchNext.git
    cd LaunchNext
    ```
 
@@ -98,6 +106,7 @@ xcodebuild -project LaunchNext.xcodeproj -scheme LaunchNext -configuration Relea
 2. **Select**: Click to select apps, double-click to launch
 3. **Search**: Type to instantly filter applications
 4. **Organize**: Drag apps to create folders and custom layouts
+5. **Automate**: Enable CLI in Settings if you want terminal workflows
 
 ### Import Your Launchpad
 1. Open Settings (gear icon)
@@ -106,9 +115,10 @@ xcodebuild -project LaunchNext.xcodeproj -scheme LaunchNext -configuration Relea
 
 
 ### Display Modes
-- **Windowed**: Floating window with rounded corners
+- **Compact**: Floating window with rounded corners
 - **Fullscreen**: Full-screen mode for maximum visibility
-- Switch modes in Settings
+- **Legacy Engine** and **Next Engine + Core Animation** are available in Settings
+- LaunchNext can keep separate settings for fullscreen and compact
 
 ## Advanced Features
 
@@ -122,6 +132,17 @@ xcodebuild -project LaunchNext.xcodeproj -scheme LaunchNext -configuration Relea
 - **Lazy Loading**: Efficient memory usage
 - **Background Scanning**: Non-blocking app discovery
 
+### Automation and Activation
+- **CLI / TUI**: Manage LaunchNext from the terminal
+- **Hot Corner**: Open LaunchNext from a configurable screen corner
+- **Experimental native gestures**: Four-finger pinch / tap actions
+- **Dock drag**: Drag apps directly into the macOS Dock in Next Engine + Core Animation
+
+### Update and Backup Tools
+- **Update tab**: Check for updates and read Markdown release notes inside Settings
+- **Backup tools**: Create and restore backups more safely
+- **Notification update**: Modern notification API support
+
 ### Multi-Display Support
 - Automatic screen detection
 - Per-display positioning
@@ -133,6 +154,12 @@ xcodebuild -project LaunchNext.xcodeproj -scheme LaunchNext -configuration Relea
 
 **Q: App won't start?**
 A: Ensure macOS 26.0+ and check system permissions.
+
+**Q: Which engine should I use?**
+A: `Next Engine + Core Animation` is recommended for the best experience. `Legacy Engine` is still available if you need the older compatibility path.
+
+**Q: Why doesn't the CLI command exist yet?**
+A: Enable the command line interface in Settings first. LaunchNext can install and remove the managed `launchnext` command for you.
 
 ## Contributing
 
@@ -152,7 +179,7 @@ We welcome contributions! Please:
 
 ## The Future of App Management
 
-As Apple moves away from customizable interfaces, LaunchNext represents the community's commitment to user control and personalization. I hope apple cound bring launchpad back.
+As Apple moves away from customizable interfaces, LaunchNext represents a push toward user control and personalization. I still hope Apple brings Launchpad back.
 
 **LaunchNext** isn't just a Launchpad replacement—it's a statement that user choice matters.
 
@@ -167,7 +194,7 @@ As Apple moves away from customizable interfaces, LaunchNext represents the comm
 
 - Claude Code 
 - Cursor 
-- OpenAI Codex Cli
+- OpenAI Codex CLI
 - Perplexity
 - Google
 
