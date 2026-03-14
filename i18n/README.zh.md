@@ -6,7 +6,10 @@
 
 **[点此下载](https://github.com/RoversX/LaunchNext/releases/latest)** - 获取最新版本
 
-⭐ 请考虑为 [LaunchNext](https://github.com/RoversX/LaunchNext) 和原项目 [LaunchNow](https://github.com/ggkevinnnn/LaunchNow) 点star！
+🌐 **网站**: [closex.org/launchnext](https://closex.org/launchnext/)  
+📚 **文档**: [docs.closex.org/launchnext](https://docs.closex.org/launchnext/)
+
+⭐ 请考虑为 [LaunchNext](https://github.com/RoversX/LaunchNext) 和原项目 [LaunchNow](https://github.com/ggkevinnnn/LaunchNow) 点 star！
 
 | | |
 |:---:|:---:|
@@ -25,74 +28,41 @@ sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
 ```
 **原因**：我买不起苹果的开发者证书（$99/年），所以 macOS 会阻止未签名应用。这个命令移除隔离标记让应用正常运行。**仅对信任的应用使用此命令。**
 
-### LaunchNext 提供的功能
-- ✅ **一键导入老系统 Launchpad** - 直接读取你的原生 Launchpad SQLite 数据库 (`/private$(getconf DARWIN_USER_DIR)com.apple.dock.launchpad/db/db`) 完美重现你现有的文件夹、应用位置和布局
-- ✅ **经典 Launchpad 体验** - 与深受喜爱的原版界面完全一致
-- ✅ **多语言支持** - 完整国际化支持，包含英文、中文、日文、韩文、法文、西班牙文、意大利文、捷克文、德文、俄文、印地文和越南文
-- ✅ **隐藏图标标签** - 当你不需要应用名称时提供简洁的极简视图
-- ✅ **自定义图标大小** - 根据你的偏好调整图标尺寸
-- ✅ **智能文件夹管理** - 像以前一样创建和整理文件夹
-- ✅ **即时搜索和键盘导航** - 快速找到应用
+## LaunchNext 提供什么
 
-### macOS Tahoe 中我们失去的功能
+- ✅ **一键导入旧系统 Launchpad** - 直接读取你的原生 Launchpad SQLite 数据库，重建文件夹、应用位置和布局
+- ✅ **手动整理应用** - 移动应用、创建文件夹，并按你的方式保留布局
+- ✅ **两套渲染路径** - `Legacy Engine` 用于兼容性，`Next Engine + Core Animation` 提供最佳体验
+- ✅ **紧凑和全屏模式** - 支持分别保存设置
+- ✅ **键盘优先工作流** - 快速搜索、导航与启动
+- ✅ **CLI / TUI 自动化支持** - 可通过终端检查和管理布局
+- ✅ **Hot Corner 与原生手势激活** - 提供多种全局打开方式
+- ✅ **直接拖动应用到 Dock** - 在 Core Animation 引擎中可用
+- ✅ **支持 Markdown 发布说明的更新中心** - 更丰富的应用内更新体验
+- ✅ **备份与恢复工具** - 更安全的导出与恢复流程
+- ✅ **可访问性与控制器支持** - 语音反馈和手柄导航都有增强
+- ✅ **多语言支持** - 覆盖较广的本地化语言
+
+## macOS Tahoe 拿走了什么
+
 - ❌ 无法自定义应用组织
 - ❌ 无法创建用户文件夹
 - ❌ 无拖拽定制功能
 - ❌ 无可视化应用管理
 - ❌ 强制分类分组
 
-## 功能特性
+## 数据存储
 
-### 🎯 **即时应用启动**
-- 双击图标直接启动应用
-- 完整的键盘导航支持
-- 实时过滤的闪电搜索
+应用数据保存在：
 
-### 📁 **高级文件夹系统**
-- 通过拖拽应用创建文件夹
-- 内联编辑重命名文件夹
-- 自定义文件夹图标和组织
-- 无缝拖拽应用进出
-
-### 🔍 **智能搜索**
-- 实时模糊匹配
-- 搜索所有已安装应用
-- 快速访问键盘快捷键
-
-### 🎨 **现代界面设计**
-- **液态玻璃效果**: regularMaterial 加优雅阴影
-- 全屏和窗口显示模式
-- 流畅的动画和过渡
-- 简洁响应式布局
-
-### 🔄 **无缝数据迁移**
-- **一键 Launchpad 导入** 从原生 macOS 数据库
-- 自动应用发现和扫描
-- 通过 SwiftData 持久化布局存储
-- 系统更新期间零数据丢失
-
-### ⚙️ **系统集成**
-- 原生 macOS 应用
-- 多显示器感知定位
-- 与 Dock 和其他系统应用协同工作
-- 背景点击检测（智能关闭）
-
-## 技术架构
-
-### 采用现代技术构建
-- **SwiftUI**: 声明式、高性能 UI 框架
-- **SwiftData**: 强大的数据持久化层
-- **AppKit**: 深度 macOS 系统集成
-- **SQLite3**: 直接 Launchpad 数据库读取
-
-### 数据存储
-应用数据安全存储在：
-```
+```text
 ~/Library/Application Support/LaunchNext/Data.store
 ```
 
-### 原生 Launchpad 集成
-直接从系统 Launchpad 数据库读取：
+## 原生 Launchpad 集成
+
+LaunchNext 可以直接读取系统 Launchpad 数据库：
+
 ```bash
 /private$(getconf DARWIN_USER_DIR)com.apple.dock.launchpad/db/db
 ```
@@ -100,16 +70,17 @@ sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
 ## 安装
 
 ### 系统要求
-- macOS 26 (Tahoe) 或更高版本
+
+- macOS 26（Tahoe）或更高版本
 - Apple Silicon 或 Intel 处理器
-- Xcode 26（从源码构建）
+- Xcode 26（从源码构建时需要）
 
 ### 从源码构建
 
 1. **克隆仓库**
    ```bash
-   git clone https://github.com/yourusername/LaunchNext.git
-   cd LaunchNext/LaunchNext
+   git clone https://github.com/RoversX/LaunchNext.git
+   cd LaunchNext
    ```
 
 2. **在 Xcode 中打开**
@@ -117,107 +88,135 @@ sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
    open LaunchNext.xcodeproj
    ```
 
-3. **构建和运行**
+3. **构建并运行**
    - 选择目标设备
    - 按 `⌘+R` 构建并运行
    - 或按 `⌘+B` 仅构建
 
 ### 命令行构建
+
+**常规构建：**
 ```bash
 xcodebuild -project LaunchNext.xcodeproj -scheme LaunchNext -configuration Release
 ```
 
+**通用二进制构建（Intel + Apple Silicon）：**
+```bash
+xcodebuild -project LaunchNext.xcodeproj -scheme LaunchNext -configuration Release ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO clean build
+```
+
 ## 使用方法
 
-### 快速入门
-1. **首次启动**: LaunchNext 自动扫描所有已安装应用
-2. **选择**: 点击选择应用，双击启动
-3. **搜索**: 输入即时过滤应用
-4. **整理**: 拖拽应用创建文件夹和自定义布局
+### 快速开始
+
+1. LaunchNext 首次启动时会扫描所有已安装应用
+2. 导入旧 Launchpad 布局，或从空布局开始
+3. 通过搜索、键盘导航、鼠标拖拽和文件夹整理应用
+4. 在设置中配置引擎、布局模式、激活方式和自动化功能
 
 ### 导入你的 Launchpad
-1. 打开设置（齿轮图标）
-2. 点击 **"Import Launchpad"**
-3. 你现有的布局和文件夹将自动导入
 
-### 文件夹管理
-- **创建文件夹**: 将一个应用拖到另一个上面
-- **重命名文件夹**: 点击文件夹名称
-- **添加应用**: 将应用拖入文件夹
-- **移除应用**: 将应用从文件夹中拖出
+1. 打开设置
+2. 点击 **Import Launchpad**
+3. 现有布局和文件夹会自动导入
 
-### 显示模式
-- **窗口化**: 带圆角的浮动窗口
-- **全屏**: 最大可见性的全屏模式
-- 在设置中切换模式
+### 引擎与布局模式
 
-## 已知问题
+- **Legacy Engine** - 保留旧渲染路径，优先兼容性
+- **Next Engine + Core Animation** - 推荐，整体体验和新功能支持更好
+- **紧凑 / 全屏** - LaunchNext 支持两种模式，并可分别保存设置
 
-> **当前开发状态**
-> - 🔄 **滚动行为**: 某些场景下可能不稳定，特别是快速手势操作时
-> - 🎯 **文件夹创建**: 创建文件夹的拖拽命中检测有时不一致
-> - 🛠️ **积极开发中**: 这些问题将在即将发布的版本中积极解决
+## 关键功能
+
+### 激活与输入
+
+- **Hot Corner 支持** - 从可配置的屏幕角落打开 LaunchNext
+- **实验性原生手势支持** - 四指 pinch / tap 动作
+- **全局快捷键支持** - 从任何位置打开 LaunchNext
+- **拖动应用到 Dock** - 在 Core Animation 引擎中将应用直接交给 macOS Dock
+
+### 自动化与高级工作流
+
+- **CLI / TUI 支持** - 查看布局、搜索应用、创建文件夹、移动应用并自动化工作流
+- **对 agent 友好** - 适合终端型 AI agent 和 shell 自动化
+- **设置中启用命令行** - 可安装或移除托管的 `launchnext` 命令
+
+### 更新体验
+
+- **应用内更新中心** - 不离开应用即可检查更新
+- **Markdown 发布说明** - 在设置中直接显示更丰富的发布说明
+- **现代通知 API** - 适配更新后的 macOS 通知机制
+
+### 备份与恢复
+
+- 在设置中创建和恢复备份
+- 更可靠的备份导出行为
+- 更安全的临时文件和清理逻辑处理
+
+### 可访问性与导航
+
+- **语音反馈支持** - 导航时播报应用和文件夹名称
+- **控制器支持** - 可用游戏手柄操作 LaunchNext 和文件夹
+- **键盘优先交互** - 不依赖鼠标也能快速搜索和导航
+
+## 性能与稳定性
+
+- 智能图标缓存，保证浏览流畅
+- 延迟加载和后台扫描，适配大型应用库
+- 更好的设置和导航状态同步
+- 更新处理、备份导出和手势恢复的可靠性提升
 
 ## 故障排除
 
 ### 常见问题
 
-**问：应用无法启动？**
-答：确保 macOS 26.0+ 并检查系统权限。
+**问：应用无法启动？**  
+答：请确认系统版本为 macOS 26 或更高，必要时移除 quarantine，并确保你运行的是可信构建。
 
-**问：导入按钮缺失？**
-答：验证 SettingsView.swift 包含导入功能。
+**问：应该使用哪个引擎？**  
+答：推荐使用 `Next Engine + Core Animation`。如果你确实需要旧兼容路径，再使用 `Legacy Engine`。
 
-**问：搜索不工作？**
-答：尝试重新扫描应用或在设置中重置应用数据。
-
-**问：性能问题？**
-答：检查图标缓存设置并重启应用。
-
-## 为什么选择 LaunchNext？
-
-### 对比 Apple 的"Applications"界面
-| 功能 | Applications (Tahoe) | LaunchNext |
-|---------|---------------------|------------|
-| 自定义组织 | ❌ | ✅ |
-| 用户文件夹 | ❌ | ✅ |
-| 拖拽操作 | ❌ | ✅ |
-| 可视化管理 | ❌ | ✅ |
-| 导入现有数据 | ❌ | ✅ |
-| 性能 | 慢 | 快 |
-
-### 对比其他 Launchpad 替代品
-- **原生集成**: 直接 Launchpad 数据库读取
-- **现代架构**: 使用最新 SwiftUI/SwiftData 构建
-- **零依赖**: 纯 Swift，无外部库
-- **积极开发**: 定期更新和改进
-- **液态玻璃设计**: 高级视觉效果
+**问：为什么还没有 CLI 命令？**  
+答：先在设置中启用命令行接口。LaunchNext 可以为你安装和移除托管的 `launchnext` shim。
 
 ## 贡献
 
-我们欢迎贡献！请：
+欢迎贡献。
 
 1. Fork 仓库
-2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'Add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
+2. 创建功能分支（`git checkout -b feature/amazing-feature`）
+3. 提交更改（`git commit -m 'Add amazing feature'`）
+4. 推送分支（`git push origin feature/amazing-feature`）
 5. 打开 Pull Request
 
 ### 开发指南
-- 遵循 Swift 样式约定
+
+- 遵循 Swift 风格约定
 - 为复杂逻辑添加有意义的注释
-- 在多个 macOS 版本上测试
-- 保持向后兼容性
+- 尽可能在多个 macOS 版本上测试
+- 避免把实验性功能散落到无关文件中
+- 尽量隔离可移除的集成
 
 ## 应用管理的未来
 
-随着 Apple 逐渐远离可自定义界面，LaunchNext 代表了社区对用户控制和个性化的承诺。我们相信用户应该决定如何组织他们的数字工作空间。
+随着 Apple 逐渐远离可自定义的应用启动界面，LaunchNext 试图在现代 macOS 上保留手动组织、用户控制和高效访问。
 
-**LaunchNext** 不仅仅是 Launchpad 的替代品——它是用户选择很重要的声明。
-
+**LaunchNext** 不只是 Launchpad 的替代品，它是对工作流退化的一种实际回应。
 
 ---
 
 **LaunchNext** - 重新掌控你的应用启动器 🚀
 
-*为拒绝在自定义方面妥协的 macOS 用户而构建。*
+*为拒绝在定制化上妥协的 macOS 用户打造。*
+
+## 开发工具
+
+- Claude Code
+- Cursor
+- OpenAI Codex CLI
+- Perplexity
+- Google
+
+- 实验性手势支持基于 [OpenMultitouchSupport](https://github.com/Kyome22/OpenMultitouchSupport) 及其 [KrishKrosh](https://github.com/KrishKrosh/OpenMultitouchSupport) 分支。❤️
+
+![GitHub downloads](https://img.shields.io/github/downloads/RoversX/LaunchNext/total)
