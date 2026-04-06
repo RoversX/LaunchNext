@@ -4,7 +4,7 @@
 
 ## 📥 다운로드
 
-**[눌러서 다운받기](https://github.com/RoversX/LaunchNext/releases/latest)** - 여기서 최신 버전을 받을 수 있어요
+**[눌러서 다운받기](https://github.com/RoversX/LaunchNext/releases/latest)** - 여기서 최신버전을 받을 수 있어요
 
 🌐 **웹사이트**: [closex.org/launchnext](https://closex.org/launchnext/)  
 📚 **문서**: [docs.closex.org/launchnext](https://docs.closex.org/launchnext/)
@@ -27,9 +27,9 @@ Apple이 런치패드를 다시 제공하는날이 올때, 그때까지 LaunchNe
 ```bash
 sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
 ```
-**왜요?**: 저는 Apple의 개발자 인증서($99/년)를 살 여유가 없어서 macOS가 서명되지 않은 앱을 차단해요. 이 명령어는 격리 플래그를 제거해서 앱이 실행되도록 합니다. **반드시 신뢰할 수 있는 앱에만 사용하세요.**
+**왜요?**: 저는 Apple의 개발자 인증서($99/년)를 살 여유가 없어서 macOS가 서명되지 않은 앱을 차단해요. 이 명령어는 격리 플래그를 제거해서 앱이 실행되도록 해요 **반드시 신뢰할 수 있는 앱에만 사용하세요.**
 
-## LaunchNext가 제공하는 것
+## LaunchNext가 제공하는 것 😍
 
 - ✅ **기존 시스템 Launchpad 원클릭 가져오기** - 네이티브 Launchpad SQLite 데이터베이스를 직접 읽어 폴더, 앱 위치, 레이아웃을 복원해요
 - ✅ **수동 앱 정리** - 앱 이동, 폴더 생성, 원하는 레이아웃 유지가 가능해요
@@ -42,12 +42,12 @@ sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
 - ✅ **Markdown 릴리즈 노트를 지원하는 업데이트 센터** - 더 풍부한 인앱 업데이트 경험
 - ✅ **백업 / 복원 도구** - 더 안전한 내보내기와 복구 흐름
 - ✅ **접근성과 컨트롤러 지원** - 음성 피드백과 컨트롤러 탐색 강화
-- ✅ **다국어 지원** - 폭넓은 현지화 제공
+- ✅ **다국어 지원** - 폭넓은 현지화 제공!!
 
-## macOS Tahoe가 없애버린 것
+## macOS Tahoe가 없애버린 것 🤬
 
 - ❌ 커스텀 앱 정리 불가
-- ❌ 사용자 폴더 생성 불가
+- ❌ 커스텀 폴더 생성 불가
 - ❌ 드래그 앤 드롭 사용자화 불가
 - ❌ 시각적 앱 관리 불가
 - ❌ 강제 카테고리 그룹화
@@ -92,7 +92,7 @@ LaunchNext는 시스템 Launchpad 데이터베이스를 직접 읽을 수 있어
 3. **빌드 및 실행**
    - 타겟 디바이스 선택
    - `⌘+R`로 빌드 및 실행
-   - `⌘+B`로 빌드만 가능
+   - `⌘+B`로 빌드만 실행
 
 ### 명령줄 빌드
 
@@ -124,7 +124,7 @@ xcodebuild -project LaunchNext.xcodeproj -scheme LaunchNext -configuration Relea
 ### 엔진과 레이아웃 모드
 
 - **Legacy Engine** - 오래된 렌더링 경로를 유지해 호환성을 우선해요
-- **Next Engine + Core Animation** - 권장. 전체 경험과 신기능 지원이 더 좋아요
+- **Next Engine + Core Animation** - 권장해요! 전체 경험과 신기능 지원으로 더 나은 경험을 제공해요
 - **컴팩트 / 전체화면** - 두 모드를 모두 지원하며 각각 별도 설정을 저장할 수 있어요
 
 ## 주요 기능
@@ -171,7 +171,7 @@ xcodebuild -project LaunchNext.xcodeproj -scheme LaunchNext -configuration Relea
 
 ### 일반적인 문제
 
-**Q: 앱이 실행되지 않아요?**  
+**Q: 앱이 실행되지 않아요**  
 A: macOS 26 이상인지 확인하고, 필요하면 quarantine을 제거한 뒤, 신뢰할 수 있는 빌드를 사용하세요.
 
 **Q: 어떤 엔진을 써야 하나요?**  
@@ -192,23 +192,23 @@ A: 먼저 설정에서 명령줄 인터페이스를 활성화하세요. LaunchNe
 
 ### 개발 가이드라인
 
-- Swift 스타일 규칙 따르기
-- 복잡한 로직에 의미 있는 주석 추가
-- 가능하면 여러 macOS 버전에서 테스트
-- 실험적 기능을 관련 없는 파일에 흩뿌리지 않기
-- 제거 가능한 통합은 가능한 한 분리하기
+- Swift 스타일 규칙을 따라주세요.
+- 복잡한 로직에는 주석을 추가해주세요.
+- 가능하면 여러 macOS 버전에서 테스트해세요.
+- 실험적 기능을 관련없는 파일에 흩뿌리지 마세요.
+- 제거 가능한 통합은 가능하면 분리해주세요.
 
 ## 앱 관리의 미래
 
-Apple이 커스터마이징 가능한 앱 런처에서 멀어지는 동안, LaunchNext는 현대 macOS에서도 수동 정리, 사용자 제어, 빠른 접근을 유지하려고 합니다.
+Apple이 커스텀 런처에서 멀어지는 동안, LaunchNext는 현대 macOS에서도 수동 정리, 사용자 제어, 빠른 접근을 유지하려고 해요.
 
-**LaunchNext**는 단순한 Launchpad 대체제가 아니라, 퇴행한 워크플로우에 대한 실용적인 대응입니다.
+**LaunchNext**는 단순한 Launchpad 대체제가 아니라, 퇴행한 워크플로우에 대한 실용적인 대응이에요.
 
 ---
 
 **LaunchNext** - 앱 런처의 주도권을 되찾으세요 🚀
 
-*커스터마이징을 포기하고 싶지 않은 macOS 사용자를 위해.*
+*커스터마이징에 타협따위 안하는 macOS 사용자를 위해.*
 
 ## 개발 도구
 
