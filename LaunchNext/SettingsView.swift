@@ -2249,6 +2249,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color.secondary.opacity(0.08))
@@ -3208,6 +3209,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 12) {
                 Text(appStore.localized(.scanSourcesDefaultListTitle))
@@ -3216,6 +3218,9 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     appSourceRow(icon: "internaldrive", path: path, isAvailable: true, accessory: { EmptyView() })
                 }
             }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
@@ -3252,8 +3257,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                                         Button {
                                             toggleExpandedSource(path)
                                         } label: {
-                                            // Image(systemName: expandedSource == standardizePath(path) ? "chevron.down.circle" : "chevron.right.circle")
-                                            //     .foregroundStyle(.secondary)
                                             Image(systemName: "ellipsis.circle")
                                                 .foregroundStyle(.secondary)
                                         }
@@ -3289,18 +3292,18 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                                                             .antialiased(true)
                                                             .frame(width: 24, height: 24)
                                                             .cornerRadius(5)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(app.name)
-                                        .font(.callout)
+                                                        VStack(alignment: .leading, spacing: 2) {
+                                                            Text(app.name)
+                                                                .font(.callout)
                                                                 .lineLimit(1)
                                                             Text(app.path)
                                                                 .font(.caption2)
                                                                 .foregroundStyle(.secondary)
                                                                 .lineLimit(1)
                                                         }
-                                Spacer()
-                                Button(role: .destructive) {
-                                    removeAppFromLayout(app.path)
+                                                        Spacer()
+                                                        Button(role: .destructive) {
+                                                            removeAppFromLayout(app.path)
                                                         } label: {
                                                             Image(systemName: "trash")
                                                                 .foregroundStyle(Color.red)
@@ -3326,6 +3329,75 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     }
                 }
             }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .center, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "text.magnifyingglass")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(Color.accentColor)
+                            Text(appStore.localized(.scanSourcesFuzzySearchTitle))
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        Text(appStore.localized(.scanSourcesFuzzySearchDescription))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 20)
+
+                    Toggle("", isOn: $appStore.fuzzySearchEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 16)
+                .padding(.bottom, 14)
+
+                Divider()
+                    .padding(.horizontal, 18)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(appStore.localized(.scanSourcesSearchDelayTitle))
+                                .font(.subheadline.weight(.semibold))
+                            Text(appStore.localized(.scanSourcesSearchDelayDescription))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer(minLength: 12)
+
+                        Text("\(Int(appStore.searchDebounceMilliseconds.rounded())) ms")
+                            .font(.footnote.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Slider(
+                        value: $appStore.searchDebounceMilliseconds,
+                        in: AppStore.searchDebounceMillisecondsRange,
+                        step: 50
+                    )
+
+                    HStack {
+                        Text("\(Int(AppStore.searchDebounceMillisecondsRange.lowerBound)) ms")
+                        Spacer()
+                        Text("\(Int(AppStore.searchDebounceMillisecondsRange.upperBound)) ms")
+                    }
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 14)
+                .padding(.bottom, 16)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .confirmationDialog(appStore.localized(.scanSourcesResetButton), isPresented: $showAppSourcesResetDialog, titleVisibility: .visible) {
             Button(appStore.localized(.scanSourcesResetButton), role: .destructive) {

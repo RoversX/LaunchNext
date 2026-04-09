@@ -319,6 +319,8 @@ final class AppStore: ObservableObject {
     static let useCAGridRendererKey = "useCAGridRenderer"
     static let windowOpenAnimationKey = "windowOpenAnimationEnabled"
     static let developmentEnableCLICodeKey = "developmentEnableCLICode"
+    static let fuzzySearchEnabledKey = "fuzzySearchEnabled"
+    static let searchDebounceMillisecondsKey = "searchDebounceMilliseconds"
     static let dockDragEnabledKey = "dockDragEnabled"
     static let dockDragSideKey = "dockDragSide"
     static let dockDragTriggerDistanceKey = "dockDragTriggerDistance"
@@ -333,6 +335,7 @@ final class AppStore: ObservableObject {
     static let gestureEnabledKey = "gestureEnabled"
     static let gestureCloseOnPinchOutKey = "gestureCloseOnPinchOut"
     static let gestureTapActionKey = "gestureTapAction"
+    static let searchDebounceMillisecondsRange: ClosedRange<Double> = 100...600
     private static let cliShimMarker = "# LaunchNext CLI shim"
     private static let cliPathSnippetHeader = "# >>> LaunchNext CLI >>>"
     private static let cliPathSnippetFooter = "# <<< LaunchNext CLI <<<"
@@ -657,6 +660,10 @@ final class AppStore: ObservableObject {
         reverseWheelPagingDirection = UserDefaults.standard.object(forKey: Self.reverseWheelPagingKey) as? Bool ?? false
         useCAGridRenderer = UserDefaults.standard.object(forKey: Self.useCAGridRendererKey) as? Bool ?? useCAGridRenderer
         developmentEnableCLICode = UserDefaults.standard.object(forKey: Self.developmentEnableCLICodeKey) as? Bool ?? false
+        fuzzySearchEnabled = UserDefaults.standard.object(forKey: Self.fuzzySearchEnabledKey) as? Bool ?? true
+        searchDebounceMilliseconds = Self.clampedSearchDebounceMilliseconds(
+            UserDefaults.standard.object(forKey: Self.searchDebounceMillisecondsKey) as? Double ?? 300
+        )
 
         // Keep imported appearance/input settings in sync without requiring relaunch.
         iconScale = UserDefaults.standard.object(forKey: "iconScale") as? Double ?? iconScale
@@ -707,6 +714,33 @@ final class AppStore: ObservableObject {
     }
     @Published var searchText: String = ""
     @Published private(set) var searchQuery: String = ""
+    @Published var fuzzySearchEnabled: Bool = {
+        if UserDefaults.standard.object(forKey: AppStore.fuzzySearchEnabledKey) == nil { return true }
+        return UserDefaults.standard.bool(forKey: AppStore.fuzzySearchEnabledKey)
+    }() {
+        didSet {
+            guard fuzzySearchEnabled != oldValue else { return }
+            UserDefaults.standard.set(fuzzySearchEnabled, forKey: Self.fuzzySearchEnabledKey)
+        }
+    }
+    @Published var searchDebounceMilliseconds: Double = {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppStore.searchDebounceMillisecondsKey) == nil { return 300 }
+        return AppStore.clampedSearchDebounceMilliseconds(
+            defaults.object(forKey: AppStore.searchDebounceMillisecondsKey) as? Double ?? 300
+        )
+    }() {
+        didSet {
+            let clamped = Self.clampedSearchDebounceMilliseconds(searchDebounceMilliseconds)
+            if searchDebounceMilliseconds != clamped {
+                searchDebounceMilliseconds = clamped
+                return
+            }
+            guard searchDebounceMilliseconds != oldValue else { return }
+            UserDefaults.standard.set(searchDebounceMilliseconds, forKey: Self.searchDebounceMillisecondsKey)
+            scheduleSearchQueryUpdate(with: searchText)
+        }
+    }
     @Published var isStartOnLogin: Bool = {
         if #available(macOS 13.0, *) {
             return SMAppService.mainApp.status == .enabled
@@ -1797,6 +1831,7 @@ final class AppStore: ObservableObject {
     private var iconScaleWorkItem: DispatchWorkItem?
     private var rescanWorkItem: DispatchWorkItem?
     private var customTitleRefreshWorkItem: DispatchWorkItem?
+    private var searchQueryWorkItem: DispatchWorkItem?
     private let fsEventsQueue = DispatchQueue(label: "app.store.fsevents")
     private let customIconFileURL: URL
     private let defaultAppIcon: NSImage
@@ -2301,6 +2336,12 @@ final class AppStore: ObservableObject {
         if defaults.object(forKey: Self.developmentEnableCLICodeKey) == nil {
             defaults.set(false, forKey: Self.developmentEnableCLICodeKey)
         }
+        if defaults.object(forKey: Self.fuzzySearchEnabledKey) == nil {
+            defaults.set(true, forKey: Self.fuzzySearchEnabledKey)
+        }
+        if defaults.object(forKey: Self.searchDebounceMillisecondsKey) == nil {
+            defaults.set(300, forKey: Self.searchDebounceMillisecondsKey)
+        }
         if defaults.object(forKey: Self.backgroundMaskEnabledKey) == nil {
             defaults.set(false, forKey: Self.backgroundMaskEnabledKey)
         }
@@ -2379,10 +2420,9 @@ final class AppStore: ObservableObject {
         setupVolumeObservers()
 
         $searchText
-            .debounce(for: .milliseconds(500), scheduler: DispatchQueue.main)
             .removeDuplicates()
             .sink { [weak self] value in
-                self?.searchQuery = value
+                self?.scheduleSearchQueryUpdate(with: value)
             }
             .store(in: &cancellables)
 
@@ -2402,6 +2442,26 @@ final class AppStore: ObservableObject {
         }
 
         syncLoginItemStatusFromSystem()
+    }
+
+    private static func clampedSearchDebounceMilliseconds(_ value: Double) -> Double {
+        min(max(value, searchDebounceMillisecondsRange.lowerBound), searchDebounceMillisecondsRange.upperBound)
+    }
+
+    private func scheduleSearchQueryUpdate(with value: String) {
+        searchQueryWorkItem?.cancel()
+
+        let delayMilliseconds = Self.clampedSearchDebounceMilliseconds(searchDebounceMilliseconds)
+        guard delayMilliseconds > 0 else {
+            searchQuery = value
+            return
+        }
+
+        let work = DispatchWorkItem { [weak self] in
+            self?.searchQuery = value
+        }
+        searchQueryWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delayMilliseconds / 1000, execute: work)
     }
 
     func syncLoginItemStatusFromSystem() {

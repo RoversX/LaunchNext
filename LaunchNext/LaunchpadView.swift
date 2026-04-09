@@ -137,6 +137,7 @@ struct LaunchpadView: View {
     private static var geometryCache: [String: CGPoint] = [:]
     private static var lastGeometryUpdate: Date = Date.distantPast
     private let geometryCacheTimeout: TimeInterval = 0.1 // 100ms缓存超时
+    private let searchEngine = LaunchpadSearchEngine()
     
     // 性能监控
     @State private var performanceMetrics: [String: TimeInterval] = [:]
@@ -195,50 +196,9 @@ struct LaunchpadView: View {
     }
 
     var filteredItems: [LaunchpadItem] {
-        let query = appStore.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return appStore.items }
-
-        var result: [LaunchpadItem] = []
-        var searchedApps = Set<String>() // 用于去重，避免重复显示同一个应用
-        
-        // 首先搜索主界面上的项目
-        for item in appStore.items {
-            switch item {
-            case .app(let app):
-                if app.name.localizedCaseInsensitiveContains(query) {
-                    result.append(.app(app))
-                    searchedApps.insert(app.url.path)
-                }
-            case .missingApp(let placeholder):
-                if placeholder.displayName.localizedCaseInsensitiveContains(query) {
-                    if !searchedApps.contains(placeholder.bundlePath) {
-                        result.append(.missingApp(placeholder))
-                        searchedApps.insert(placeholder.bundlePath)
-                    }
-                }
-            case .folder(let folder):
-                // 检查文件夹名称
-                if folder.name.localizedCaseInsensitiveContains(query) {
-                    result.append(.folder(folder))
-                }
-                
-                // 检查文件夹内的应用，如果匹配则提取出来直接显示
-                let matchingApps = folder.apps.filter { app in
-                    app.name.localizedCaseInsensitiveContains(query)
-                }
-                for app in matchingApps {
-                    if !searchedApps.contains(app.url.path) {
-                        result.append(.app(app))
-                        searchedApps.insert(app.url.path)
-                    }
-                }
-                
-            case .empty:
-                break
-            }
-        }
-        
-        return result
+        searchEngine.filter(items: appStore.items,
+                            query: appStore.searchQuery,
+                            fuzzyEnabled: appStore.fuzzySearchEnabled)
     }
     
     var pages: [[LaunchpadItem]] {
@@ -2119,6 +2079,24 @@ extension LaunchpadView {
 
         if code == 36 { // return
             if isSearchFieldFocused, isIMEComposing() { return event }
+
+            let trimmedQuery = appStore.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedQuery.isEmpty {
+                if selectedIndex == nil || !(selectedIndex.map { filteredItems.indices.contains($0) } ?? false) {
+                    selectedIndex = filteredItems.indices.first
+                }
+                if let idx = selectedIndex, filteredItems.indices.contains(idx) {
+                    isKeyboardNavigationActive = true
+                    let sel = filteredItems[idx]
+                    if case .folder = sel {
+                        appStore.openFolderActivatedByKeyboard = true
+                    }
+                    handleItemTap(sel)
+                    return nil
+                }
+                return event
+            }
+
             if !isKeyboardNavigationActive {
                 isKeyboardNavigationActive = true
                 setSelectionToPageStart(appStore.currentPage)
