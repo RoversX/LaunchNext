@@ -13,7 +13,7 @@
 - (NSString *)description {
     NSMutableString *str = [[NSMutableString alloc] initWithString:@""];
     [str appendString:[NSString stringWithFormat:@"Touches: %@, ", _touches.description]];
-    [str appendString:[NSString stringWithFormat:@"Device ID: %i, ", _deviceID]];
+    [str appendString:[NSString stringWithFormat:@"Device ID: %@, ", _deviceID]];
     [str appendString:[NSString stringWithFormat:@"Frame ID: %i, ", _frameID]];
     [str appendString:[NSString stringWithFormat:@"Timestamp: %f", _timestamp]];
     return str;

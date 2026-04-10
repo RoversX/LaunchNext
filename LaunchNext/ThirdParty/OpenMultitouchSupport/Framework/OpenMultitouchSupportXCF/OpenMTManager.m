@@ -19,6 +19,7 @@
 
 - (instancetype)initWithDeviceRef:(MTDeviceRef)deviceRef {
     if (self = [super init]) {
+        BOOL isTrackpad = NO;
         // Get device ID
         uint64_t deviceID;
         OSStatus err = MTDeviceGetDeviceID(deviceRef, &deviceID);
@@ -36,30 +37,37 @@
         if (familyID == 98 || familyID == 99 || familyID == 100) {
             // Built-in trackpad (older models)
             _deviceName = @"MacBook Trackpad";
+            isTrackpad = YES;
         } else if (familyID == 101) {
             // Retina MacBook Pro trackpad
             _deviceName = @"MacBook Trackpad";
+            isTrackpad = YES;
         } else if (familyID == 102) {
             // Retina MacBook with Force Touch trackpad (2015)
             _deviceName = @"MacBook Trackpad";
+            isTrackpad = YES;
         } else if (familyID == 103) {
             // Retina MacBook Pro 13" with Force Touch trackpad (2015)
             _deviceName = @"MacBook Trackpad";
+            isTrackpad = YES;
         } else if (familyID == 104) {
             // MacBook trackpad variant
             _deviceName = @"MacBook Trackpad";
+            isTrackpad = YES;
         } else if (familyID == 105) {
             // MacBook with Touch Bar
             _deviceName = @"Touch Bar";
         } else if (familyID == 109) {
             // M4 Macbook Pro Trackpad
             _deviceName = @"MacBook Trackpad";
+            isTrackpad = YES;
         } else if (familyID == 112 || familyID == 113) {
             // Magic Mouse & Magic Mouse 2/3
             _deviceName = @"Magic Mouse";
         } else if (familyID == 128 || familyID == 129 || familyID == 130) {
             // Magic Trackpad, Magic Trackpad 2, Magic Trackpad 3
             _deviceName = @"Magic Trackpad";
+            isTrackpad = YES;
         } else {
             // Unknown device - use dimensions to make an educated guess
             int width = 0, height = 0;
@@ -72,11 +80,13 @@
             } else if (width > height && width > 50 && height > 20) {
                 // Likely a trackpad: wider than tall, reasonable dimensions
                 _deviceName = [NSString stringWithFormat:@"Unknown Trackpad (FamilyID: %d)", familyID];
+                isTrackpad = YES;
             } else {
                 // Probably not a trackpad
                 _deviceName = [NSString stringWithFormat:@"Unknown Device (FamilyID: %d)", familyID];
             }
         }
+        _isTrackpad = isTrackpad;
     }
     return self;
 }
@@ -87,6 +97,7 @@
 
 @property (strong, readwrite) NSMutableArray *listeners;
 @property (assign, readwrite) MTDeviceRef device;
+@property (strong, readwrite) NSMutableDictionary<NSString *, NSValue *> *listeningDevices;
 @property (strong, readwrite) NSArray<OpenMTDeviceInfo *> *availableDeviceInfos;
 @property (strong, readwrite) OpenMTDeviceInfo *currentDeviceInfo;
 
@@ -110,6 +121,7 @@
 - (instancetype)init {
     if (self = [super init]) {
         self.listeners = NSMutableArray.new;
+        self.listeningDevices = NSMutableDictionary.new;
         [self enumerateDevices];
         
         [NSWorkspace.sharedWorkspace.notificationCenter addObserver:self selector:@selector(willSleep:) name:NSWorkspaceWillSleepNotification object:nil];
@@ -121,6 +133,7 @@
 
 - (void)enumerateDevices {
     NSMutableArray<OpenMTDeviceInfo *> *devices = [NSMutableArray array];
+    NSString *previousDeviceID = self.currentDeviceInfo.deviceID;
     
     if (MTDeviceCreateList) {
         CFArrayRef deviceList = MTDeviceCreateList();
@@ -147,55 +160,82 @@
     }
     
     self.availableDeviceInfos = [devices copy];
-    if (devices.count > 0) {
-        self.currentDeviceInfo = devices[0];
-    }
-}
-
-- (void)makeDevice {
-    if (self.currentDeviceInfo && self.currentDeviceInfo.deviceID) {
-        // Always reacquire a fresh deviceRef for the selected deviceID
-        MTDeviceRef foundDevice = NULL;
-        if (MTDeviceCreateList) {
-            CFArrayRef deviceList = MTDeviceCreateList();
-            if (deviceList) {
-                CFIndex count = CFArrayGetCount(deviceList);
-                for (CFIndex i = 0; i < count; i++) {
-                    MTDeviceRef deviceRef = (MTDeviceRef)CFArrayGetValueAtIndex(deviceList, i);
-                    uint64_t deviceID = 0;
-                    OSStatus err = MTDeviceGetDeviceID(deviceRef, &deviceID);
-                    if (!err) {
-                        NSString *devID = [NSString stringWithFormat:@"%llu", deviceID];
-                        if ([devID isEqualToString:self.currentDeviceInfo.deviceID]) {
-                            foundDevice = deviceRef;
-                            CFRetain(foundDevice); // Retain for our use
-                            break;
-                        }
-                    }
-                }
-                CFRelease(deviceList);
+    OpenMTDeviceInfo *selectedDevice = nil;
+    if (previousDeviceID.length > 0) {
+        for (OpenMTDeviceInfo *deviceInfo in devices) {
+            if ([deviceInfo.deviceID isEqualToString:previousDeviceID]) {
+                selectedDevice = deviceInfo;
+                break;
             }
         }
-        if (!foundDevice && MTDeviceIsAvailable()) {
-            MTDeviceRef defaultDevice = MTDeviceCreateDefault();
-            if (defaultDevice) {
+    }
+    if (!selectedDevice) {
+        for (OpenMTDeviceInfo *deviceInfo in devices) {
+            if (deviceInfo.isTrackpad) {
+                selectedDevice = deviceInfo;
+                break;
+            }
+        }
+    }
+    if (!selectedDevice && devices.count > 0) {
+        selectedDevice = devices[0];
+    }
+    self.currentDeviceInfo = selectedDevice;
+}
+
+- (MTDeviceRef)copyDeviceRefForDeviceInfo:(OpenMTDeviceInfo *)deviceInfo {
+    if (!deviceInfo.deviceID.length) {
+        return NULL;
+    }
+    
+    MTDeviceRef foundDevice = NULL;
+    if (MTDeviceCreateList) {
+        CFArrayRef deviceList = MTDeviceCreateList();
+        if (deviceList) {
+            CFIndex count = CFArrayGetCount(deviceList);
+            for (CFIndex i = 0; i < count; i++) {
+                MTDeviceRef deviceRef = (MTDeviceRef)CFArrayGetValueAtIndex(deviceList, i);
                 uint64_t deviceID = 0;
-                OSStatus err = MTDeviceGetDeviceID(defaultDevice, &deviceID);
+                OSStatus err = MTDeviceGetDeviceID(deviceRef, &deviceID);
                 if (!err) {
                     NSString *devID = [NSString stringWithFormat:@"%llu", deviceID];
-                    if ([devID isEqualToString:self.currentDeviceInfo.deviceID]) {
-                        foundDevice = defaultDevice;
-                    } else {
-                        MTDeviceRelease(defaultDevice);
-                        defaultDevice = NULL;
+                    if ([devID isEqualToString:deviceInfo.deviceID]) {
+                        foundDevice = deviceRef;
+                        CFRetain(foundDevice);
+                        break;
                     }
+                }
+            }
+            CFRelease(deviceList);
+        }
+    }
+    
+    if (!foundDevice && MTDeviceIsAvailable()) {
+        MTDeviceRef defaultDevice = MTDeviceCreateDefault();
+        if (defaultDevice) {
+            uint64_t deviceID = 0;
+            OSStatus err = MTDeviceGetDeviceID(defaultDevice, &deviceID);
+            if (!err) {
+                NSString *devID = [NSString stringWithFormat:@"%llu", deviceID];
+                if ([devID isEqualToString:deviceInfo.deviceID]) {
+                    foundDevice = defaultDevice;
                 } else {
                     MTDeviceRelease(defaultDevice);
                     defaultDevice = NULL;
                 }
+            } else {
+                MTDeviceRelease(defaultDevice);
+                defaultDevice = NULL;
             }
         }
-        // Release previous device if any
+    }
+    
+    return foundDevice;
+}
+
+- (void)makeDevice {
+    if (self.currentDeviceInfo && self.currentDeviceInfo.deviceID) {
+        MTDeviceRef foundDevice = [self copyDeviceRefForDeviceInfo:self.currentDeviceInfo];
         if (self.device) {
             MTDeviceRelease(self.device);
             self.device = NULL;
@@ -233,6 +273,16 @@
     }
 }
 
+- (NSArray<OpenMTDeviceInfo *> *)gestureDeviceInfos {
+    NSMutableArray<OpenMTDeviceInfo *> *gestureDevices = [NSMutableArray array];
+    for (OpenMTDeviceInfo *deviceInfo in self.availableDeviceInfos) {
+        if (deviceInfo.isTrackpad) {
+            [gestureDevices addObject:deviceInfo];
+        }
+    }
+    return [gestureDevices copy];
+}
+
 //- (void)handlePathEvent:(OpenMTTouch *)touch {
 //    NSLog(@"%@", touch.description);
 //}
@@ -254,29 +304,44 @@
 }
 
 - (void)startHandlingMultitouchEvents {
-    [self makeDevice];
-    @try {
-        MTRegisterContactFrameCallback(self.device, contactEventHandler); // work
-        // MTEasyInstallPrintCallbacks(self.device, YES, NO, NO, NO, NO, NO); // work
-        // MTRegisterPathCallback(self.device, pathEventHandler); // work
-        // MTRegisterMultitouchImageCallback(self.device, MTImagePrintCallback); // not work
-        MTDeviceStart(self.device, 0);
-    } @catch (NSException *exception) {
-        NSLog(@"Failed Start Handling Multitouch Events");
+    [self enumerateDevices];
+    NSArray<OpenMTDeviceInfo *> *gestureDevices = [self gestureDeviceInfos];
+    for (OpenMTDeviceInfo *deviceInfo in gestureDevices) {
+        if (self.listeningDevices[deviceInfo.deviceID] != nil) {
+            continue;
+        }
+        MTDeviceRef deviceRef = [self copyDeviceRefForDeviceInfo:deviceInfo];
+        if (!deviceRef) {
+            continue;
+        }
+        @try {
+            MTRegisterContactFrameCallback(deviceRef, contactEventHandler);
+            MTDeviceStart(deviceRef, 0);
+            self.listeningDevices[deviceInfo.deviceID] = [NSValue valueWithPointer:deviceRef];
+        } @catch (NSException *exception) {
+            NSLog(@"Failed Start Handling Multitouch Events for %@", deviceInfo.deviceName);
+            MTDeviceRelease(deviceRef);
+        }
     }
 }
 
 - (void)stopHandlingMultitouchEvents {
-    if (!MTDeviceIsRunning(self.device)) { return; }
-    @try {
-        MTUnregisterContactFrameCallback(self.device, contactEventHandler); // work
-        // MTUnregisterPathCallback(self.device, pathEventHandler); // work
-        // MTUnregisterImageCallback(self.device, MTImagePrintCallback); // not work
-        MTDeviceStop(self.device);
-        MTDeviceRelease(self.device);
-        self.device = NULL;
-    } @catch (NSException *exception) {
-        NSLog(@"Failed Stop Handling Multitouch Events");
+    NSArray<NSValue *> *deviceValues = self.listeningDevices.allValues.copy;
+    [self.listeningDevices removeAllObjects];
+    for (NSValue *deviceValue in deviceValues) {
+        MTDeviceRef deviceRef = deviceValue.pointerValue;
+        if (!deviceRef) {
+            continue;
+        }
+        @try {
+            if (MTDeviceIsRunning(deviceRef)) {
+                MTUnregisterContactFrameCallback(deviceRef, contactEventHandler);
+                MTDeviceStop(deviceRef);
+            }
+        } @catch (NSException *exception) {
+            NSLog(@"Failed Stop Handling Multitouch Events");
+        }
+        MTDeviceRelease(deviceRef);
     }
 }
 
@@ -294,6 +359,7 @@
 
 // Public Functions
 - (NSArray<OpenMTDeviceInfo *> *)availableDevices {
+    [self enumerateDevices];
     return self.availableDeviceInfos;
 }
 
@@ -301,21 +367,12 @@
     if (![self.availableDeviceInfos containsObject:deviceInfo]) {
         return NO;
     }
-    
-    // Stop current device if running
-    BOOL wasRunning = self.device && MTDeviceIsRunning(self.device);
-    if (wasRunning) {
-        [self stopHandlingMultitouchEvents];
-    }
-    
-    // Switch to new device
+
     self.currentDeviceInfo = deviceInfo;
-    
-    // Restart if it was running
-    if (wasRunning) {
-        [self startHandlingMultitouchEvents];
+    if (self.device) {
+        MTDeviceRelease(self.device);
+        self.device = NULL;
     }
-    
     return YES;
 }
 
@@ -494,7 +551,12 @@ static void contactEventHandler(MTDeviceRef eventDevice, MTTouch eventTouches[],
     
     OpenMTEvent *event = OpenMTEvent.new;
     event.touches = touches;
-    event.deviceID = *(int *)eventDevice;
+    uint64_t deviceID = 0;
+    if (eventDevice && MTDeviceGetDeviceID(eventDevice, &deviceID) == noErr) {
+        event.deviceID = [NSString stringWithFormat:@"%llu", deviceID];
+    } else {
+        event.deviceID = [NSString stringWithFormat:@"%p", eventDevice];
+    }
     event.frameID = frame;
     event.timestamp = timestamp;
     

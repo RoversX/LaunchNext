@@ -12,6 +12,7 @@ public struct OMSDeviceInfo: Sendable, Hashable {
     public let deviceName: String
     public let deviceID: String
     public let isBuiltIn: Bool
+    public let isTrackpad: Bool
     internal nonisolated(unsafe) let deviceInfo: OpenMTDeviceInfo
     
     internal init(_ deviceInfo: OpenMTDeviceInfo) {
@@ -19,6 +20,7 @@ public struct OMSDeviceInfo: Sendable, Hashable {
         self.deviceName = deviceInfo.deviceName
         self.deviceID = deviceInfo.deviceID
         self.isBuiltIn = deviceInfo.isBuiltIn
+        self.isTrackpad = deviceInfo.isTrackpad
     }
 }
 
@@ -41,8 +43,8 @@ public final class OMSManager: Sendable {
     private let protectedListener = OSAllocatedUnfairLock<OpenMTListener?>(uncheckedState: nil)
     private let dateFormatter = DateFormatter()
 
-    private let touchDataSubject = PassthroughSubject<[OMSTouchData], Never>()
-    public var touchDataStream: AsyncStream<[OMSTouchData]> {
+    private let touchDataSubject = PassthroughSubject<OMSTouchFrame, Never>()
+    public var touchDataStream: AsyncStream<OMSTouchFrame> {
         AsyncStream { continuation in
             let cancellable = touchDataSubject.sink { value in
                 continuation.yield(value)
@@ -124,7 +126,7 @@ public final class OMSManager: Sendable {
     @objc func listen(_ event: OpenMTEvent) {
         guard let touches = (event.touches as NSArray) as? [OpenMTTouch] else { return }
         if touches.isEmpty {
-            touchDataSubject.send([])
+            touchDataSubject.send(OMSTouchFrame(deviceID: event.deviceID, touches: []))
         } else {
             let array = touches.compactMap { touch -> OMSTouchData? in
                 guard let state = OMSState(touch.state) else { return nil }
@@ -140,7 +142,7 @@ public final class OMSManager: Sendable {
                     timestamp: dateFormatter.string(from: Date.now)
                 )
             }
-            touchDataSubject.send(array)
+            touchDataSubject.send(OMSTouchFrame(deviceID: event.deviceID, touches: array))
         }
     }
 }

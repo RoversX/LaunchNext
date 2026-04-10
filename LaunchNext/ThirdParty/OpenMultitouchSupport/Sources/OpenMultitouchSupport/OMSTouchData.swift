@@ -17,6 +17,11 @@ public struct OMSAxis: Sendable {
     public var minor: Float
 }
 
+public struct OMSTouchFrame: Sendable {
+    public var deviceID: String
+    public var touches: [OMSTouchData]
+}
+
 public enum OMSState: String, Sendable {
     case notTouching
     case starting
