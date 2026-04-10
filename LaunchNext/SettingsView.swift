@@ -39,6 +39,7 @@ struct SettingsView: View {
         }
     }
     @State private var showResetConfirm = false
+    @State private var showResetAppearanceConfirm = false
     @State private var selectedSection: SettingsSection = .general
     @State private var titleSearch: String = ""
     @State private var hasHiddenAppEntries: Bool = false
@@ -2801,17 +2802,29 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     Label(appStore.localized(.refresh), systemImage: "arrow.clockwise")
                 }
                 Spacer()
-                Button {
-                    showResetConfirm = true
+                Menu {
+                    Button(appStore.localized(.resetLayout), role: .destructive) {
+                        showResetConfirm = true
+                    }
+                    Button(appStore.localized(.resetAppearanceSettings), role: .destructive) {
+                        showResetAppearanceConfirm = true
+                    }
                 } label: {
-                    Label(appStore.localized(.resetLayout), systemImage: "arrow.counterclockwise")
+                    Label(appStore.localized(.resetConfirm), systemImage: "arrow.counterclockwise")
                         .foregroundStyle(Color.red)
                 }
+                .menuStyle(.borderlessButton)
                 .alert(appStore.localized(.resetAlertTitle), isPresented: $showResetConfirm) {
                     Button(appStore.localized(.resetConfirm), role: .destructive) { appStore.resetLayout() }
                     Button(appStore.localized(.cancel), role: .cancel) {}
                 } message: {
                     Text(appStore.localized(.resetAlertMessage))
+                }
+                .alert(appStore.localized(.resetAppearanceAlertTitle), isPresented: $showResetAppearanceConfirm) {
+                    Button(appStore.localized(.resetConfirm), role: .destructive) { appStore.resetAppearanceSettings() }
+                    Button(appStore.localized(.cancel), role: .cancel) {}
+                } message: {
+                    Text(appStore.localized(.resetAppearanceAlertMessage))
                 }
                 Button {
                     AppDelegate.shared?.quitWithFade()

@@ -417,6 +417,12 @@ final class AppStore: ObservableObject {
     private static let maxColumnSpacing: Double = 50
     private static let minRowSpacing: Double = 6
     private static let maxRowSpacing: Double = 40
+    private static let defaultGridColumnsPerPage = 7
+    private static let defaultGridRowsPerPage = 5
+    private static let defaultColumnSpacing: Double = 20
+    private static let defaultRowSpacing: Double = 14
+    private static let defaultIconScale: Double = 0.95
+    private static let defaultIconLabelFontSize: Double = 11.0
     static let defaultScrollSensitivity: Double = 0.2
     static var gridColumnRange: ClosedRange<Int> { minColumnsPerPage...maxColumnsPerPage }
     static var gridRowRange: ClosedRange<Int> { minRowsPerPage...maxRowsPerPage }
@@ -432,8 +438,10 @@ final class AppStore: ObservableObject {
     private static let defaultFolderPopoverHeight: Double = 0.85
     static let folderDropZoneScaleRange: ClosedRange<Double> = 0.6...2.0
     static let defaultFolderDropZoneScale: Double = 1.6
+    private static let defaultPageIndicatorOffset: Double = 27.0
     static let pageIndicatorTopPaddingRange: ClosedRange<Double> = 0...60
     static let defaultPageIndicatorTopPadding: Double = 12
+    private static let defaultAnimationDuration: Double = 0.3
     private static let lastUpdateCheckKey = "lastUpdateCheckTimestamp"
     private static let automaticUpdateInterval: TimeInterval = 60 * 60 * 24
     private static let defaultLaunchpadOpenSound = "Submarine"
@@ -632,6 +640,118 @@ final class AppStore: ObservableObject {
         }
     }
 
+    private static func writeDefaultAppearancePreferences(to defaults: UserDefaults) {
+        defaults.set(SidebarIconPreset.large.rawValue, forKey: Self.sidebarIconPresetKey)
+        defaults.set(AppearancePreference.system.rawValue, forKey: "appearancePreference")
+        defaults.set(BackgroundStyle.glass.rawValue, forKey: Self.backgroundStyleKey)
+        defaults.set(false, forKey: Self.backgroundMaskEnabledKey)
+        Self.persistBackgroundMaskColor(Self.defaultBackgroundMaskColor, forKey: Self.backgroundMaskLightKey)
+        Self.persistBackgroundMaskColor(Self.defaultBackgroundMaskColor, forKey: Self.backgroundMaskDarkKey)
+        defaults.set(true, forKey: "isFullscreenMode")
+        defaults.set(true, forKey: "showLabels")
+        defaults.set(true, forKey: Self.folderPreviewHighResKey)
+        defaults.set(false, forKey: "hideDock")
+        defaults.set(0.8, forKey: "scrollSensitivity")
+        defaults.set(Self.defaultGridColumnsPerPage, forKey: Self.gridColumnsKey)
+        defaults.set(Self.defaultGridRowsPerPage, forKey: Self.gridRowsKey)
+        defaults.set(Self.defaultColumnSpacing, forKey: Self.columnSpacingKey)
+        defaults.set(Self.defaultRowSpacing, forKey: Self.rowSpacingKey)
+        defaults.set(true, forKey: "enableDropPrediction")
+        defaults.set(true, forKey: "enableAnimations")
+        defaults.set(false, forKey: Self.hoverMagnificationKey)
+        defaults.set(Self.defaultHoverMagnificationScale, forKey: Self.hoverMagnificationScaleKey)
+        defaults.set(false, forKey: Self.activePressEffectKey)
+        defaults.set(false, forKey: Self.followScrollPagingKey)
+        defaults.set(false, forKey: Self.reverseWheelPagingKey)
+        defaults.set(Self.defaultActivePressScale, forKey: Self.activePressScaleKey)
+        defaults.set(Self.defaultIconScale, forKey: "iconScale")
+        defaults.set(Self.defaultIconLabelFontSize, forKey: "iconLabelFontSize")
+        defaults.set(IconLabelFontWeightOption.medium.rawValue, forKey: Self.iconLabelFontWeightKey)
+        defaults.set(Self.defaultAnimationDuration, forKey: "animationDuration")
+        defaults.set(true, forKey: Self.windowOpenAnimationKey)
+        defaults.set(true, forKey: "useLocalizedThirdPartyTitles")
+        defaults.set(Self.defaultPageIndicatorOffset, forKey: "pageIndicatorOffset")
+        defaults.set(Self.defaultPageIndicatorTopPadding, forKey: Self.pageIndicatorTopPaddingKey)
+        defaults.set(false, forKey: Self.pageIndicatorPerDisplayEnabledKey)
+        defaults.removeObject(forKey: Self.pageIndicatorPerDisplayOverridesKey)
+        defaults.set(true, forKey: Self.rememberPageKey)
+        defaults.removeObject(forKey: Self.rememberedPageIndexKey)
+        defaults.set(Self.defaultFolderPopoverWidth, forKey: "folderPopoverWidthFactor")
+        defaults.set(Self.defaultFolderPopoverHeight, forKey: "folderPopoverHeightFactor")
+        defaults.set(false, forKey: "showFPSOverlay")
+        if let data = try? JSONEncoder().encode(Self.defaultDualModeAppearanceSettings) {
+            defaults.set(data, forKey: Self.dualModeAppearanceSettingsKey)
+        }
+    }
+
+    private func reloadAppearancePreferencesFromDefaults() {
+        let defaults = UserDefaults.standard
+
+        if let raw = defaults.string(forKey: Self.sidebarIconPresetKey),
+           let preset = SidebarIconPreset(rawValue: raw) {
+            sidebarIconPreset = preset
+        } else {
+            sidebarIconPreset = .large
+        }
+
+        if let raw = defaults.string(forKey: "appearancePreference"),
+           let preference = AppearancePreference(rawValue: raw) {
+            appearancePreference = preference
+        } else {
+            appearancePreference = .system
+        }
+
+        launchpadBackgroundStyle = Self.loadBackgroundStyle()
+        backgroundMaskEnabled = Self.loadBackgroundMaskEnabled()
+        backgroundMaskLightColor = Self.loadBackgroundMaskColor(forKey: Self.backgroundMaskLightKey)
+        backgroundMaskDarkColor = Self.loadBackgroundMaskColor(forKey: Self.backgroundMaskDarkKey)
+
+        isFullscreenMode = defaults.object(forKey: "isFullscreenMode") as? Bool ?? true
+        showLabels = defaults.object(forKey: "showLabels") as? Bool ?? true
+        enableHighResFolderPreviews = defaults.object(forKey: Self.folderPreviewHighResKey) as? Bool ?? true
+        hideDock = defaults.object(forKey: "hideDock") as? Bool ?? false
+        scrollSensitivity = defaults.object(forKey: "scrollSensitivity") as? Double ?? 0.8
+        gridColumnsPerPage = Self.clampColumns(defaults.object(forKey: Self.gridColumnsKey) as? Int ?? Self.defaultGridColumnsPerPage)
+        gridRowsPerPage = Self.clampRows(defaults.object(forKey: Self.gridRowsKey) as? Int ?? Self.defaultGridRowsPerPage)
+        iconColumnSpacing = Self.clampColumnSpacing(defaults.object(forKey: Self.columnSpacingKey) as? Double ?? Self.defaultColumnSpacing)
+        iconRowSpacing = Self.clampRowSpacing(defaults.object(forKey: Self.rowSpacingKey) as? Double ?? Self.defaultRowSpacing)
+        enableDropPrediction = defaults.object(forKey: "enableDropPrediction") as? Bool ?? true
+        enableAnimations = defaults.object(forKey: "enableAnimations") as? Bool ?? true
+        enableHoverMagnification = defaults.object(forKey: Self.hoverMagnificationKey) as? Bool ?? false
+        hoverMagnificationScale = defaults.object(forKey: Self.hoverMagnificationScaleKey) as? Double ?? Self.defaultHoverMagnificationScale
+        enableActivePressEffect = defaults.object(forKey: Self.activePressEffectKey) as? Bool ?? false
+        followScrollPagingEnabled = defaults.object(forKey: Self.followScrollPagingKey) as? Bool ?? false
+        reverseWheelPagingDirection = defaults.object(forKey: Self.reverseWheelPagingKey) as? Bool ?? false
+        activePressScale = defaults.object(forKey: Self.activePressScaleKey) as? Double ?? Self.defaultActivePressScale
+        useLocalizedThirdPartyTitles = defaults.object(forKey: "useLocalizedThirdPartyTitles") as? Bool ?? true
+        useCAGridRenderer = defaults.object(forKey: Self.useCAGridRendererKey) as? Bool ?? true
+        iconLabelFontWeight = defaults.string(forKey: Self.iconLabelFontWeightKey).flatMap(IconLabelFontWeightOption.init(rawValue:)) ?? .medium
+        showFPSOverlay = defaults.object(forKey: "showFPSOverlay") as? Bool ?? false
+        enableWindowOpenAnimation = defaults.object(forKey: Self.windowOpenAnimationKey) as? Bool ?? true
+        rememberLastPage = defaults.object(forKey: Self.rememberPageKey) as? Bool ?? true
+        folderPopoverWidthFactor = Self.clampFolderWidth(defaults.object(forKey: "folderPopoverWidthFactor") as? Double ?? Self.defaultFolderPopoverWidth)
+        folderPopoverHeightFactor = Self.clampFolderHeight(defaults.object(forKey: "folderPopoverHeightFactor") as? Double ?? Self.defaultFolderPopoverHeight)
+
+        if let storedDualModeAppearance = Self.loadDualModeAppearanceSettings(from: defaults) {
+            dualModeAppearanceSettings = storedDualModeAppearance
+        } else {
+            let legacy = Self.legacyAppearanceSettings(from: defaults)
+            dualModeAppearanceSettings = DualModeAppearanceSettings(fullscreen: legacy, compact: legacy)
+            persistDualModeAppearanceSettings()
+        }
+        syncActiveAppearanceProxies(from: currentAppearanceLayoutMode)
+        persistLegacyAppearanceProxyValues()
+
+        iconScale = dualModeAppearanceSettings[currentAppearanceLayoutMode].iconScale
+        iconLabelFontSize = dualModeAppearanceSettings[currentAppearanceLayoutMode].iconLabelFontSize
+        pageIndicatorOffset = dualModeAppearanceSettings[currentAppearanceLayoutMode].pageIndicatorOffset
+        pageIndicatorTopPadding = dualModeAppearanceSettings[currentAppearanceLayoutMode].pageIndicatorTopPadding
+        pageIndicatorPerDisplayEnabled = dualModeAppearanceSettings[currentAppearanceLayoutMode].pageIndicatorPerDisplayEnabled
+        pageIndicatorOverrides = dualModeAppearanceSettings[currentAppearanceLayoutMode].pageIndicatorOverrides
+        folderDropZoneScale = dualModeAppearanceSettings[currentAppearanceLayoutMode].folderDropZoneScale
+        animationDuration = defaults.object(forKey: "animationDuration") as? Double ?? Self.defaultAnimationDuration
+    }
+
     // Reload selected preferences from UserDefaults after an import
     func reloadPreferencesFromDefaults() {
         hiddenAppPaths = AppStore.loadHiddenApps()
@@ -640,56 +760,14 @@ final class AppStore: ObservableObject {
             customAppSourcePaths = savedSources
         }
 
-        if let raw = UserDefaults.standard.string(forKey: AppStore.sidebarIconPresetKey),
-           let preset = SidebarIconPreset(rawValue: raw) {
-            sidebarIconPreset = preset
-        }
         uninstallToolAppPath = UserDefaults.standard.string(forKey: AppStore.uninstallToolAppPathKey) ?? ""
+        reloadAppearancePreferencesFromDefaults()
 
-        launchpadBackgroundStyle = AppStore.loadBackgroundStyle()
-        backgroundMaskEnabled = AppStore.loadBackgroundMaskEnabled()
-        backgroundMaskLightColor = AppStore.loadBackgroundMaskColor(forKey: Self.backgroundMaskLightKey)
-        backgroundMaskDarkColor = AppStore.loadBackgroundMaskColor(forKey: Self.backgroundMaskDarkKey)
-
-        isFullscreenMode = UserDefaults.standard.bool(forKey: "isFullscreenMode")
-        showLabels = UserDefaults.standard.object(forKey: "showLabels") as? Bool ?? true
-        hideDock = UserDefaults.standard.object(forKey: "hideDock") as? Bool ?? false
-        useLocalizedThirdPartyTitles = UserDefaults.standard.object(forKey: "useLocalizedThirdPartyTitles") as? Bool ?? true
-        enableAnimations = UserDefaults.standard.object(forKey: "enableAnimations") as? Bool ?? true
-        scrollSensitivity = UserDefaults.standard.object(forKey: "scrollSensitivity") as? Double ?? scrollSensitivity
-        reverseWheelPagingDirection = UserDefaults.standard.object(forKey: Self.reverseWheelPagingKey) as? Bool ?? false
-        useCAGridRenderer = UserDefaults.standard.object(forKey: Self.useCAGridRendererKey) as? Bool ?? useCAGridRenderer
         developmentEnableCLICode = UserDefaults.standard.object(forKey: Self.developmentEnableCLICodeKey) as? Bool ?? false
         fuzzySearchEnabled = UserDefaults.standard.object(forKey: Self.fuzzySearchEnabledKey) as? Bool ?? true
         searchDebounceMilliseconds = Self.clampedSearchDebounceMilliseconds(
             UserDefaults.standard.object(forKey: Self.searchDebounceMillisecondsKey) as? Double ?? 300
         )
-
-        // Keep imported appearance/input settings in sync without requiring relaunch.
-        iconScale = UserDefaults.standard.object(forKey: "iconScale") as? Double ?? iconScale
-        iconLabelFontSize = UserDefaults.standard.object(forKey: "iconLabelFontSize") as? Double ?? iconLabelFontSize
-        if let rawFontWeight = UserDefaults.standard.string(forKey: Self.iconLabelFontWeightKey),
-           let fontWeight = IconLabelFontWeightOption(rawValue: rawFontWeight) {
-            iconLabelFontWeight = fontWeight
-        }
-
-        pageIndicatorOffset = UserDefaults.standard.object(forKey: "pageIndicatorOffset") as? Double ?? pageIndicatorOffset
-        let importedTopPadding = UserDefaults.standard.object(forKey: Self.pageIndicatorTopPaddingKey) as? Double ?? pageIndicatorTopPadding
-        pageIndicatorTopPadding = Self.clampPageIndicatorTopPadding(importedTopPadding)
-        if let importedPerDisplayEnabled = UserDefaults.standard.object(forKey: Self.pageIndicatorPerDisplayEnabledKey) as? Bool {
-            pageIndicatorPerDisplayEnabled = importedPerDisplayEnabled
-        }
-        pageIndicatorOverrides = Self.loadPageIndicatorOverrides()
-
-        if let storedDualModeAppearance = Self.loadDualModeAppearanceSettings(from: UserDefaults.standard) {
-            dualModeAppearanceSettings = storedDualModeAppearance
-        } else {
-            let legacy = Self.legacyAppearanceSettings(from: UserDefaults.standard)
-            dualModeAppearanceSettings = DualModeAppearanceSettings(fullscreen: legacy, compact: legacy)
-            persistDualModeAppearanceSettings()
-        }
-        syncActiveAppearanceProxies(from: currentAppearanceLayoutMode)
-        persistLegacyAppearanceProxyValues()
 
         globalHotKey = Self.loadHotKeyConfiguration()
 
@@ -840,22 +918,7 @@ final class AppStore: ObservableObject {
     private var appearanceRefreshWorkItem: DispatchWorkItem?
     private var lastAppearanceEventAt: TimeInterval = 0
     private var isApplyingScopedAppearanceState = false
-    @Published private var dualModeAppearanceSettings: DualModeAppearanceSettings = DualModeAppearanceSettings(
-        fullscreen: ModeScopedAppearanceSettings(iconScale: 0.95,
-                                                 iconLabelFontSize: 11.0,
-                                                 folderDropZoneScale: AppStore.defaultFolderDropZoneScale,
-                                                 pageIndicatorOffset: 27.0,
-                                                 pageIndicatorTopPadding: AppStore.defaultPageIndicatorTopPadding,
-                                                 pageIndicatorPerDisplayEnabled: false,
-                                                 pageIndicatorOverrides: [:]),
-        compact: ModeScopedAppearanceSettings(iconScale: 0.95,
-                                              iconLabelFontSize: 11.0,
-                                              folderDropZoneScale: AppStore.defaultFolderDropZoneScale,
-                                              pageIndicatorOffset: 27.0,
-                                              pageIndicatorTopPadding: AppStore.defaultPageIndicatorTopPadding,
-                                              pageIndicatorPerDisplayEnabled: false,
-                                              pageIndicatorOverrides: [:])
-    )
+    @Published private var dualModeAppearanceSettings: DualModeAppearanceSettings = AppStore.defaultDualModeAppearanceSettings
 
     static func screenIdentifier(for screen: NSScreen) -> String {
         if let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
@@ -880,10 +943,10 @@ final class AppStore: ObservableObject {
     }
 
     private static func legacyAppearanceSettings(from defaults: UserDefaults) -> ModeScopedAppearanceSettings {
-        let iconScale = defaults.object(forKey: "iconScale") as? Double ?? 0.95
-        let iconLabelFontSize = defaults.object(forKey: "iconLabelFontSize") as? Double ?? 11.0
+        let iconScale = defaults.object(forKey: "iconScale") as? Double ?? Self.defaultIconScale
+        let iconLabelFontSize = defaults.object(forKey: "iconLabelFontSize") as? Double ?? Self.defaultIconLabelFontSize
         let dropZoneScale = clampFolderDropZoneScale(defaults.object(forKey: Self.folderDropZoneScaleKey) as? Double ?? Self.defaultFolderDropZoneScale)
-        let indicatorOffset = defaults.object(forKey: "pageIndicatorOffset") as? Double ?? 27.0
+        let indicatorOffset = defaults.object(forKey: "pageIndicatorOffset") as? Double ?? Self.defaultPageIndicatorOffset
         let indicatorTopPadding = clampPageIndicatorTopPadding(defaults.object(forKey: Self.pageIndicatorTopPaddingKey) as? Double ?? Self.defaultPageIndicatorTopPadding)
         let perDisplayEnabled = defaults.object(forKey: Self.pageIndicatorPerDisplayEnabledKey) as? Bool ?? false
         let overrides = (try? JSONDecoder().decode([String: PageIndicatorOverride].self,
@@ -926,6 +989,23 @@ final class AppStore: ObservableObject {
         if let data = try? JSONEncoder().encode(normalized) {
             UserDefaults.standard.set(data, forKey: Self.dualModeAppearanceSettingsKey)
         }
+    }
+
+    private static var defaultScopedAppearanceSettings: ModeScopedAppearanceSettings {
+        ModeScopedAppearanceSettings(
+            iconScale: defaultIconScale,
+            iconLabelFontSize: defaultIconLabelFontSize,
+            folderDropZoneScale: defaultFolderDropZoneScale,
+            pageIndicatorOffset: defaultPageIndicatorOffset,
+            pageIndicatorTopPadding: defaultPageIndicatorTopPadding,
+            pageIndicatorPerDisplayEnabled: false,
+            pageIndicatorOverrides: [:]
+        )
+    }
+
+    private static var defaultDualModeAppearanceSettings: DualModeAppearanceSettings {
+        let scoped = defaultScopedAppearanceSettings
+        return DualModeAppearanceSettings(fullscreen: scoped, compact: scoped)
     }
 
     private var currentAppearanceLayoutMode: AppearanceLayoutMode {
@@ -3990,6 +4070,60 @@ final class AppStore: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.refreshCacheAfterFolderOperation()
         }
+    }
+
+    func resetAppearanceSettings() {
+        let defaults = UserDefaults.standard
+        let keysToClear: [String] = [
+            Self.sidebarIconPresetKey,
+            "appearancePreference",
+            Self.backgroundStyleKey,
+            Self.backgroundMaskEnabledKey,
+            Self.backgroundMaskLightKey,
+            Self.backgroundMaskDarkKey,
+            "isFullscreenMode",
+            "showLabels",
+            Self.folderPreviewHighResKey,
+            "hideDock",
+            "scrollSensitivity",
+            Self.gridColumnsKey,
+            Self.gridRowsKey,
+            Self.columnSpacingKey,
+            Self.rowSpacingKey,
+            "enableDropPrediction",
+            Self.folderDropZoneScaleKey,
+            "enableAnimations",
+            Self.hoverMagnificationKey,
+            Self.hoverMagnificationScaleKey,
+            Self.activePressEffectKey,
+            Self.followScrollPagingKey,
+            Self.reverseWheelPagingKey,
+            Self.activePressScaleKey,
+            "iconScale",
+            "iconLabelFontSize",
+            Self.iconLabelFontWeightKey,
+            "animationDuration",
+            Self.windowOpenAnimationKey,
+            "useLocalizedThirdPartyTitles",
+            "pageIndicatorOffset",
+            Self.pageIndicatorTopPaddingKey,
+            Self.pageIndicatorPerDisplayEnabledKey,
+            Self.pageIndicatorPerDisplayOverridesKey,
+            Self.dualModeAppearanceSettingsKey,
+            Self.rememberPageKey,
+            Self.rememberedPageIndexKey,
+            "folderPopoverWidthFactor",
+            "folderPopoverHeightFactor",
+            "showFPSOverlay"
+        ]
+
+        keysToClear.forEach { defaults.removeObject(forKey: $0) }
+        Self.writeDefaultAppearancePreferences(to: defaults)
+        reloadAppearancePreferencesFromDefaults()
+
+        clearIconCachesForLayoutChange()
+        triggerFolderUpdate()
+        triggerGridRefresh()
     }
     
     /// 单页内自动补位：将每页的 .empty 槽位移动到该页尾部，保持非空项的相对顺序
