@@ -335,6 +335,8 @@ final class AppStore: ObservableObject {
     static let gestureEnabledKey = "gestureEnabled"
     static let gestureCloseOnPinchOutKey = "gestureCloseOnPinchOut"
     static let gestureTapActionKey = "gestureTapAction"
+    static let gestureDeviceSelectionModeKey = "gestureDeviceSelectionMode"
+    static let gestureSelectedDeviceIDsKey = "gestureSelectedDeviceIDs"
     static let searchDebounceMillisecondsRange: ClosedRange<Double> = 100...600
     private static let cliShimMarker = "# LaunchNext CLI shim"
     private static let cliPathSnippetHeader = "# >>> LaunchNext CLI >>>"
@@ -770,6 +772,11 @@ final class AppStore: ObservableObject {
         )
 
         globalHotKey = Self.loadHotKeyConfiguration()
+        gestureEnabled = UserDefaults.standard.object(forKey: Self.gestureEnabledKey) as? Bool ?? false
+        gestureCloseOnPinchOut = UserDefaults.standard.object(forKey: Self.gestureCloseOnPinchOutKey) as? Bool ?? false
+        gestureTapAction = GestureTapAction(rawValue: UserDefaults.standard.string(forKey: Self.gestureTapActionKey) ?? "") ?? .off
+        gestureDeviceSelectionMode = GestureDeviceSelectionMode(rawValue: UserDefaults.standard.string(forKey: Self.gestureDeviceSelectionModeKey) ?? "") ?? .automatic
+        gestureSelectedDeviceIDs = Array(Set(UserDefaults.standard.stringArray(forKey: Self.gestureSelectedDeviceIDsKey) ?? [])).sorted()
 
         // Apply hidden filtering immediately
         pruneHiddenAppsFromAppList()
@@ -778,7 +785,26 @@ final class AppStore: ObservableObject {
         removeEmptyPages()
         triggerFolderUpdate()
         triggerGridRefresh()
+        refreshGestureDeviceInventory()
     }
+
+    func refreshGestureDeviceInventory() {
+        let provider = GestureTouchProvider()
+        provider.refreshDevices()
+        provider.configureDevices(mode: gestureDeviceSelectionMode, selectedDeviceIDs: gestureSelectedDeviceIDs)
+        availableGestureDevices = provider.availableDevices.sorted {
+            if $0.isBuiltIn != $1.isBuiltIn {
+                return !$0.isBuiltIn && $1.isBuiltIn
+            }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
+    var gestureUnavailableSelectionCount: Int {
+        let availableIDs = Set(availableGestureDevices.map(\.id))
+        return gestureSelectedDeviceIDs.filter { !availableIDs.contains($0) }.count
+    }
+
     @Published var isSetting = false
     @Published var isInitialLoading = true
     @Published var shouldShowOnboarding: Bool = false
@@ -1832,6 +1858,42 @@ final class AppStore: ObservableObject {
         }
     }
 
+    @Published var gestureDeviceSelectionMode: GestureDeviceSelectionMode = {
+        let defaults = UserDefaults.standard
+        guard let rawValue = defaults.string(forKey: AppStore.gestureDeviceSelectionModeKey),
+              let mode = GestureDeviceSelectionMode(rawValue: rawValue) else {
+            defaults.set(GestureDeviceSelectionMode.automatic.rawValue, forKey: AppStore.gestureDeviceSelectionModeKey)
+            return .automatic
+        }
+        return mode
+    }() {
+        didSet {
+            guard gestureDeviceSelectionMode != oldValue else { return }
+            UserDefaults.standard.set(gestureDeviceSelectionMode.rawValue, forKey: Self.gestureDeviceSelectionModeKey)
+        }
+    }
+
+    @Published var gestureSelectedDeviceIDs: [String] = {
+        let defaults = UserDefaults.standard
+        let rawIDs = defaults.stringArray(forKey: AppStore.gestureSelectedDeviceIDsKey) ?? []
+        let normalized = Array(Set(rawIDs)).sorted()
+        if rawIDs != normalized {
+            defaults.set(normalized, forKey: AppStore.gestureSelectedDeviceIDsKey)
+        }
+        return normalized
+    }() {
+        didSet {
+            let normalized = Array(Set(gestureSelectedDeviceIDs)).sorted()
+            if gestureSelectedDeviceIDs != normalized {
+                gestureSelectedDeviceIDs = normalized
+                return
+            }
+            UserDefaults.standard.set(normalized, forKey: Self.gestureSelectedDeviceIDsKey)
+        }
+    }
+
+    @Published private(set) var availableGestureDevices: [GestureInputDevice] = []
+
     // @Published var isAIEnabled: Bool = {
     //     if UserDefaults.standard.object(forKey: AppStore.aiFeatureEnabledKey) == nil { return false }
     //     return UserDefaults.standard.bool(forKey: AppStore.aiFeatureEnabledKey)
@@ -2407,6 +2469,12 @@ final class AppStore: ObservableObject {
             let migratedAction: GestureTapAction = legacyEnabled ? (legacyToggle ? .toggle : .open) : .off
             defaults.set(migratedAction.rawValue, forKey: Self.gestureTapActionKey)
         }
+        if defaults.object(forKey: Self.gestureDeviceSelectionModeKey) == nil {
+            defaults.set(GestureDeviceSelectionMode.automatic.rawValue, forKey: Self.gestureDeviceSelectionModeKey)
+        }
+        if defaults.object(forKey: Self.gestureSelectedDeviceIDsKey) == nil {
+            defaults.set([], forKey: Self.gestureSelectedDeviceIDsKey)
+        }
         if defaults.object(forKey: Self.gameControllerMenuToggleKey) == nil {
             defaults.set(true, forKey: Self.gameControllerMenuToggleKey)
         }
@@ -2476,6 +2544,8 @@ final class AppStore: ObservableObject {
         self.gestureEnabled = defaults.object(forKey: Self.gestureEnabledKey) as? Bool ?? false
         self.gestureCloseOnPinchOut = defaults.object(forKey: Self.gestureCloseOnPinchOutKey) as? Bool ?? false
         self.gestureTapAction = GestureTapAction(rawValue: defaults.string(forKey: Self.gestureTapActionKey) ?? "") ?? .off
+        self.gestureDeviceSelectionMode = GestureDeviceSelectionMode(rawValue: defaults.string(forKey: Self.gestureDeviceSelectionModeKey) ?? "") ?? .automatic
+        self.gestureSelectedDeviceIDs = Array(Set(defaults.stringArray(forKey: Self.gestureSelectedDeviceIDsKey) ?? [])).sorted()
         self.enableAnimations = UserDefaults.standard.object(forKey: "enableAnimations") as? Bool ?? true
         self.customIconFileURL = AppStore.customIconFileURL
 
@@ -2496,6 +2566,7 @@ final class AppStore: ObservableObject {
         if sanitizedSources != customAppSourcePaths {
             customAppSourcePaths = sanitizedSources
         }
+        refreshGestureDeviceInventory()
 
         setupVolumeObservers()
 

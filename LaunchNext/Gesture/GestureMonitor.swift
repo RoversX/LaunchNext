@@ -39,17 +39,26 @@ final class GestureMonitor {
         guard configuration.isEnabled else { return }
         guard monitorTask == nil else { return }
 
-        guard provider.startListening() else { return }
+        guard provider.startListening(configuration: configuration) else { return }
         let configuration = self.configuration
         monitorTask = Task { [provider, onTrigger] in
-            var machine = GestureStateMachine(configuration: configuration)
-            for await samples in provider.touchDataStream {
+            var machines: [String: GestureStateMachine] = [:]
+            var lastTriggeredAt: TimeInterval = 0
+            for await frame in provider.touchDataStream {
                 if Task.isCancelled { break }
-                if let action = machine.consume(samples: samples) {
+                var machine = machines[frame.deviceID] ?? GestureStateMachine(configuration: configuration)
+                if let action = machine.consume(samples: frame.samples) {
+                    let now = ProcessInfo.processInfo.systemUptime
+                    guard now - lastTriggeredAt >= configuration.cooldownDuration else {
+                        machines[frame.deviceID] = machine
+                        continue
+                    }
+                    lastTriggeredAt = now
                     await MainActor.run {
                         onTrigger(action)
                     }
                 }
+                machines[frame.deviceID] = machine
             }
         }
     }

@@ -462,6 +462,18 @@ private var gestureTapActionBinding: Binding<AppStore.GestureTapAction> {
     )
 }
 
+private var gestureDeviceSelectionModeBinding: Binding<GestureDeviceSelectionMode> {
+    Binding(
+        get: { appStore.gestureDeviceSelectionMode },
+        set: { newValue in
+            guard appStore.gestureDeviceSelectionMode != newValue else { return }
+            DispatchQueue.main.async {
+                appStore.gestureDeviceSelectionMode = newValue
+            }
+        }
+    )
+}
+
 private func layoutModeScopeControl(width: CGFloat = 130) -> some View {
     let outerShape = Capsule(style: .continuous)
 
@@ -4029,6 +4041,44 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     }
                 }
 
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(appStore.localized(.gestureInputDeviceTitle))
+                        .font(.headline)
+
+                    HStack(spacing: 10) {
+                        gestureDeviceModeButton(for: .automatic)
+                        gestureDeviceModeButton(for: .selected)
+                    }
+
+                    if appStore.gestureDeviceSelectionMode == .selected {
+                        VStack(alignment: .leading, spacing: 8) {
+                            let showUnavailableMessage = appStore.availableGestureDevices.isEmpty || appStore.gestureUnavailableSelectionCount > 0
+
+                            if appStore.availableGestureDevices.isEmpty {
+                                Text(appStore.localized(.gestureInputDeviceUnavailableDescription))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } else {
+                                ForEach(appStore.availableGestureDevices) { device in
+                                    gestureDeviceRow(for: device)
+                                }
+                            }
+
+                            if appStore.gestureSelectedDeviceIDs.isEmpty {
+                                Text(appStore.localized(.gestureInputDeviceManualEmpty))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else if showUnavailableMessage && !appStore.availableGestureDevices.isEmpty {
+                                Text(appStore.localized(.gestureInputDeviceUnavailableDescription))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+
                 VStack(alignment: .leading, spacing: 8) {
                     Text(appStore.localized(.gestureSystemHintTitle))
                         .font(.footnote.weight(.semibold))
@@ -4044,6 +4094,9 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .onAppear {
+                appStore.refreshGestureDeviceInventory()
+            }
         }
     }
 
@@ -4175,6 +4228,114 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 12)
             .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(colorScheme == .dark ? 0.18 : 0.12)
+                                     : Color(nsColor: .windowBackgroundColor).opacity(colorScheme == .dark ? 0.25 : 0.75))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor.opacity(0.65) : Color.primary.opacity(0.08), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func gestureDeviceModeButton(for mode: GestureDeviceSelectionMode) -> some View {
+        let isSelected = appStore.gestureDeviceSelectionMode == mode
+        let symbolName = mode == .automatic ? "sparkles" : "list.bullet.circle"
+        let title = appStore.localized(mode == .automatic ? .gestureInputDeviceModeAuto : .gestureInputDeviceModeSelected)
+        let subtitle = mode == .automatic ? appStore.localized(.gestureInputDeviceAutoDescription) : gestureSelectedDeviceSummary
+
+        return Button {
+            gestureDeviceSelectionModeBinding.wrappedValue = mode
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: symbolName)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                    .frame(width: 20, height: 20)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(colorScheme == .dark ? 0.18 : 0.12)
+                                     : Color(nsColor: .windowBackgroundColor).opacity(colorScheme == .dark ? 0.25 : 0.75))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor.opacity(0.65) : Color.primary.opacity(0.08), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var gestureSelectedDeviceSummary: String {
+        if appStore.gestureSelectedDeviceIDs.isEmpty {
+            return appStore.localized(.gestureInputDeviceManualEmpty)
+        }
+
+        let selectedNames = appStore.availableGestureDevices
+            .filter { appStore.gestureSelectedDeviceIDs.contains($0.id) }
+            .map(\.name)
+
+        if selectedNames.isEmpty {
+            return appStore.localized(.gestureInputDeviceUnavailableDescription)
+        }
+
+        return selectedNames.prefix(2).joined(separator: ", ")
+    }
+
+    private func gestureDeviceRow(for device: GestureInputDevice) -> some View {
+        let isSelected = appStore.gestureSelectedDeviceIDs.contains(device.id)
+
+        return Button {
+            let updatedSelection: [String]
+            if isSelected {
+                updatedSelection = appStore.gestureSelectedDeviceIDs.filter { $0 != device.id }
+            } else {
+                updatedSelection = Array(Set(appStore.gestureSelectedDeviceIDs + [device.id])).sorted()
+            }
+            DispatchQueue.main.async {
+                appStore.gestureSelectedDeviceIDs = updatedSelection
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.headline)
+                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(device.name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+
+                    Text(appStore.localized(device.isBuiltIn ? .gestureInputDeviceBuiltInBadge : .gestureInputDeviceExternalBadge))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(isSelected ? Color.accentColor.opacity(colorScheme == .dark ? 0.18 : 0.12)
@@ -5059,6 +5220,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert(AppStore.gestureEnabledKey)
                     keys.insert(AppStore.gestureCloseOnPinchOutKey)
                     keys.insert(AppStore.gestureTapActionKey)
+                    keys.insert(AppStore.gestureDeviceSelectionModeKey)
+                    keys.insert(AppStore.gestureSelectedDeviceIDsKey)
                 }
                 if appearanceCheckbox.state == .on {
                     keys.insert(AppStore.sidebarIconPresetKey)

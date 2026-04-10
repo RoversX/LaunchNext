@@ -15,6 +15,7 @@
 
 @property (strong, readonly) NSArray *touches;
 @property (assign, readonly) int deviceID;
+@property (strong, readonly) NSString *deviceIdentifier;
 @property (assign, readonly) int frameID;
 @property (assign, readonly) double timestamp;
 

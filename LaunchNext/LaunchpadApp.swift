@@ -344,17 +344,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
         // so the monitor can be rebuilt from a single source of truth.
         // If gesture support is removed later, delete this binder together with
         // updateGestureMonitor()/handleGestureTrigger() and the Gesture folder.
-        Publishers.CombineLatest3(
-            appStore.$gestureEnabled.removeDuplicates(),
-            appStore.$gestureCloseOnPinchOut.removeDuplicates(),
-            appStore.$gestureTapAction.removeDuplicates()
+        Publishers.CombineLatest(
+            Publishers.CombineLatest4(
+                appStore.$gestureEnabled.removeDuplicates(),
+                appStore.$gestureCloseOnPinchOut.removeDuplicates(),
+                appStore.$gestureTapAction.removeDuplicates(),
+                appStore.$gestureDeviceSelectionMode.removeDuplicates()
+            ),
+            appStore.$gestureSelectedDeviceIDs.removeDuplicates()
         )
         .receive(on: RunLoop.main)
-        .sink { [weak self] enabled, closeOnPinchOut, tapAction in
+        .sink { [weak self] combined, selectedDeviceIDs in
+            let (enabled, closeOnPinchOut, tapAction, deviceSelectionMode) = combined
             self?.updateGestureMonitor(
                 enabled: enabled,
                 closeOnPinchOut: closeOnPinchOut,
-                tapAction: tapAction
+                tapAction: tapAction,
+                deviceSelectionMode: deviceSelectionMode,
+                selectedDeviceIDs: selectedDeviceIDs
             )
         }
         .store(in: &cancellables)
@@ -396,6 +403,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
                 guard let self else { return }
                 guard !self.isTerminating else { return }
                 guard self.appStore.gestureEnabled || self.appStore.gestureTapAction != .off else { return }
+                self.appStore.refreshGestureDeviceInventory()
                 self.gestureMonitor?.restart()
             }
             gestureWakeRecoveryWorkItems.append(workItem)
@@ -451,12 +459,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     // then remove this method together with bindGesturePreference().
     private func updateGestureMonitor(enabled: Bool,
                                       closeOnPinchOut: Bool,
-                                      tapAction: AppStore.GestureTapAction) {
+                                      tapAction: AppStore.GestureTapAction,
+                                      deviceSelectionMode: GestureDeviceSelectionMode,
+                                      selectedDeviceIDs: [String]) {
         let configuration = GestureMonitor.Configuration(
             isEnabled: enabled || tapAction != .off,
             closeOnPinchOutEnabled: closeOnPinchOut,
             tapEnabled: tapAction != .off,
-            tapTogglesWindow: tapAction == .toggle
+            tapTogglesWindow: tapAction == .toggle,
+            deviceSelectionMode: deviceSelectionMode,
+            selectedDeviceIDs: selectedDeviceIDs
         )
 
         if gestureMonitor == nil {

@@ -43,6 +43,7 @@ public enum OMSState: String, Sendable {
 }
 
 public struct OMSTouchData: CustomStringConvertible, Sendable {
+    public var deviceID: String
     public var id: Int32
     public var position: OMSPosition
     public var total: Float
@@ -54,7 +55,8 @@ public struct OMSTouchData: CustomStringConvertible, Sendable {
     public var timestamp: String
 
     public var description: String {
-        var text = String(format: "id:%2d, ", id)
+        var text = "device:\(deviceID), "
+        text += String(format: "id:%2d, ", id)
         text += String(format: "pos:(%05.3f,%05.3f), ", position.x, position.y)
         text += String(format: "total:%05.3f, ", total)
         text += String(format: "pressure:%05.3f, ", pressure)
@@ -64,4 +66,9 @@ public struct OMSTouchData: CustomStringConvertible, Sendable {
         text += "\(state.rawValue), \(timestamp)"
         return text
     }
+}
+
+public struct OMSTouchFrame: Sendable {
+    public var deviceID: String
+    public var touches: [OMSTouchData]
 }

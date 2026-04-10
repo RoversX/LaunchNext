@@ -5,6 +5,8 @@ struct GestureConfiguration: Equatable {
     var closeOnPinchOutEnabled: Bool = false
     var tapEnabled: Bool = false
     var tapTogglesWindow: Bool = false
+    var deviceSelectionMode: GestureDeviceSelectionMode = .automatic
+    var selectedDeviceIDs: [String] = []
     var requiredFingerCount: Int = 4
     var stableContactDuration: TimeInterval = 0.03
     var openTriggerScaleRatio: Double = 0.84

@@ -41,8 +41,8 @@ public final class OMSManager: Sendable {
     private let protectedListener = OSAllocatedUnfairLock<OpenMTListener?>(uncheckedState: nil)
     private let dateFormatter = DateFormatter()
 
-    private let touchDataSubject = PassthroughSubject<[OMSTouchData], Never>()
-    public var touchDataStream: AsyncStream<[OMSTouchData]> {
+    private let touchDataSubject = PassthroughSubject<OMSTouchFrame, Never>()
+    public var touchDataStream: AsyncStream<OMSTouchFrame> {
         AsyncStream { continuation in
             let cancellable = touchDataSubject.sink { value in
                 continuation.yield(value)
@@ -66,6 +66,11 @@ public final class OMSManager: Sendable {
         guard let xcfManager = protectedManager.withLockUnchecked(\.self),
               let current = xcfManager.currentDevice() else { return nil }
         return OMSDeviceInfo(current)
+    }
+
+    public var selectedDevices: [OMSDeviceInfo] {
+        guard let xcfManager = protectedManager.withLockUnchecked(\.self) else { return [] }
+        return xcfManager.selectedDevices().map { OMSDeviceInfo($0) }
     }
 
     private init() {
@@ -103,6 +108,16 @@ public final class OMSManager: Sendable {
         guard let xcfManager = protectedManager.withLockUnchecked(\.self) else { return false }
         return xcfManager.selectDevice(device.deviceInfo)
     }
+
+    @discardableResult
+    public func selectDevices(_ devices: [OMSDeviceInfo]) -> Bool {
+        guard let xcfManager = protectedManager.withLockUnchecked(\.self) else { return false }
+        return xcfManager.selectDevices(devices.map(\.deviceInfo))
+    }
+
+    public func refreshDevices() {
+        protectedManager.withLockUnchecked(\.self)?.refreshDevices()
+    }
     
     public var isHapticEnabled: Bool {
         guard let xcfManager = protectedManager.withLockUnchecked(\.self) else { return false }
@@ -123,12 +138,14 @@ public final class OMSManager: Sendable {
 
     @objc func listen(_ event: OpenMTEvent) {
         guard let touches = (event.touches as NSArray) as? [OpenMTTouch] else { return }
+        let deviceID = event.deviceIdentifier ?? String(event.deviceID)
         if touches.isEmpty {
-            touchDataSubject.send([])
+            touchDataSubject.send(OMSTouchFrame(deviceID: deviceID, touches: []))
         } else {
             let array = touches.compactMap { touch -> OMSTouchData? in
                 guard let state = OMSState(touch.state) else { return nil }
                 return OMSTouchData(
+                    deviceID: deviceID,
                     id: touch.identifier,
                     position: OMSPosition(x: touch.posX, y: touch.posY),
                     total: touch.total,
@@ -140,7 +157,7 @@ public final class OMSManager: Sendable {
                     timestamp: dateFormatter.string(from: Date.now)
                 )
             }
-            touchDataSubject.send(array)
+            touchDataSubject.send(OMSTouchFrame(deviceID: deviceID, touches: array))
         }
     }
 }
