@@ -8,10 +8,12 @@ struct GestureConfiguration: Equatable {
     var requiredFingerCount: Int = 4
     var stableContactDuration: TimeInterval = 0.03
     var openTriggerScaleRatio: Double = 0.84
-    var closeTriggerScaleRatio: Double = 1.06
+    var closeTriggerScaleRatio: Double = 1.065
     var openPerFingerRadiusRatio: Double = 0.96
+    var closePerFingerRadiusRatio: Double = 1.04
     var closeLeadingFingerRadiusRatio: Double = 1.12
     var minimumOpenParticipatingFingerCount: Int = 3
+    var minimumCloseParticipatingFingerCount: Int = 3
     var minimumCloseLeadingGap: Double = 0.06
     var maximumCloseSupportingSpread: Double = 0.22
     var requiredConsecutiveMatches: Int = 2

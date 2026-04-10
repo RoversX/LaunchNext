@@ -7,6 +7,11 @@ enum GestureTriggerAction {
     case toggle
 }
 
+struct GesturePreviewState: Equatable {
+    let action: GestureTriggerAction
+    let progress: CGFloat
+}
+
 struct GestureStateMachine {
     private struct TapMetrics {
         let initialPoints: [Int32: CGPoint]
@@ -25,14 +30,15 @@ struct GestureStateMachine {
             baselineCentroid: CGPoint,
             baselineRadii: [Int32: Double],
             filteredScale: Double,
+            candidateAction: GestureTriggerAction?,
             consecutiveMatches: Int,
             tapMetrics: TapMetrics
         )
-        case triggered
         case cooldown(until: TimeInterval)
     }
 
     private var state: State = .idle
+    private(set) var previewState: GesturePreviewState?
     private let configuration: GestureConfiguration
     private let smoothingAlpha = 0.7
 
@@ -51,6 +57,7 @@ struct GestureStateMachine {
 
         switch state {
         case .idle:
+            previewState = nil
             guard touches.count == configuration.requiredFingerCount else { return nil }
             let ids = Set(touches.map(\.id))
             let scale = scale(for: touches)
@@ -73,9 +80,10 @@ struct GestureStateMachine {
 
         case let .arming(ids, startedAt, scales, centroids, tapMetrics):
             if touches.isEmpty {
+                previewState = nil
                 if let action = tapAction(for: tapMetrics, endedAt: time) {
                     debugLog("tap recognized action=\(String(describing: action)) duration=\(String(format: "%.3f", time - tapMetrics.startedAt)) movement=\(String(format: "%.3f", tapMetrics.maxFingerMovement)) scaleDeviation=\(String(format: "%.3f", tapMetrics.maxScaleDeviation))")
-                    state = .cooldown(until: time + configuration.cooldownDuration)
+                    state = .idle
                     return action
                 }
                 state = .idle
@@ -83,10 +91,11 @@ struct GestureStateMachine {
             }
 
             guard touches.count == configuration.requiredFingerCount else {
+                previewState = nil
                 if touches.count < configuration.requiredFingerCount,
                    let action = tapAction(for: tapMetrics, endedAt: time) {
                     debugLog("tap recognized action=\(String(describing: action)) on finger release")
-                    state = .cooldown(until: time + configuration.cooldownDuration)
+                    state = .idle
                     return action
                 }
                 state = .idle
@@ -95,6 +104,7 @@ struct GestureStateMachine {
 
             let currentIDs = Set(touches.map(\.id))
             guard currentIDs == ids else {
+                previewState = nil
                 let scale = scale(for: touches)
                 let centroid = centroid(for: touches)
                 state = .arming(
@@ -118,6 +128,7 @@ struct GestureStateMachine {
             let updatedTapMetrics = updatedTapMetrics(from: tapMetrics, touches: touches)
 
             guard time - startedAt >= configuration.stableContactDuration else {
+                previewState = nil
                 state = .arming(
                     ids: ids,
                     startedAt: startedAt,
@@ -131,6 +142,7 @@ struct GestureStateMachine {
             let baselineWindow = max(1, min(updatedScales.count, 2))
             let baselineScale = median(Array(updatedScales.prefix(baselineWindow)))
             guard baselineScale >= configuration.minimumBaselineScale else {
+                previewState = nil
                 state = .idle
                 return nil
             }
@@ -144,16 +156,27 @@ struct GestureStateMachine {
                 baselineCentroid: baselineCentroid,
                 baselineRadii: baselineRadii,
                 filteredScale: baselineScale,
+                candidateAction: nil,
                 consecutiveMatches: 0,
                 tapMetrics: updatedTapMetrics
             )
             debugLog("tracking baseline=\(String(format: "%.3f", baselineScale)) centroid=(\(String(format: "%.3f", baselineCentroid.x)),\(String(format: "%.3f", baselineCentroid.y)))")
+            previewState = nil
             return nil
 
-        case let .tracking(ids, baselineScale, baselineCentroid, baselineRadii, filteredScale, consecutiveMatches, tapMetrics):
+        case let .tracking(ids, baselineScale, baselineCentroid, baselineRadii, filteredScale, candidateAction, consecutiveMatches, tapMetrics):
             if touches.isEmpty {
+                let lastPreview = previewState
+                previewState = nil
                 if let action = tapAction(for: tapMetrics, endedAt: time) {
-                    state = .cooldown(until: time + configuration.cooldownDuration)
+                    state = .idle
+                    return action
+                }
+                if let action = pinchActionOnRelease(lastPreview: lastPreview,
+                                                    candidateAction: candidateAction,
+                                                    consecutiveMatches: consecutiveMatches) {
+                    debugLog("release action=\(String(describing: action))")
+                    state = .idle
                     return action
                 }
                 state = .idle
@@ -161,10 +184,20 @@ struct GestureStateMachine {
             }
 
             guard touches.count == configuration.requiredFingerCount else {
+                let lastPreview = previewState
+                previewState = nil
                 if touches.count < configuration.requiredFingerCount,
                    let action = tapAction(for: tapMetrics, endedAt: time) {
                     debugLog("tap recognized action=\(String(describing: action)) on finger release")
-                    state = .cooldown(until: time + configuration.cooldownDuration)
+                    state = .idle
+                    return action
+                }
+                if touches.count < configuration.requiredFingerCount,
+                   let action = pinchActionOnRelease(lastPreview: lastPreview,
+                                                    candidateAction: candidateAction,
+                                                    consecutiveMatches: consecutiveMatches) {
+                    debugLog("release action=\(String(describing: action)) on finger release")
+                    state = .idle
                     return action
                 }
                 state = .idle
@@ -173,6 +206,7 @@ struct GestureStateMachine {
 
             let currentIDs = Set(touches.map(\.id))
             guard currentIDs == ids else {
+                previewState = nil
                 let scale = scale(for: touches)
                 let centroid = centroid(for: touches)
                 state = .arming(
@@ -200,63 +234,110 @@ struct GestureStateMachine {
             let currentRadii = radii(for: touches, around: currentCentroid)
             let radialRatios = perFingerRadialRatios(currentRadii: currentRadii, baselineRadii: baselineRadii)
             let inwardFingerCount = radialRatios.filter { $0 <= configuration.openPerFingerRadiusRatio }.count
-            let sortedRadialRatios = radialRatios.sorted()
-            let leadingRatio = sortedRadialRatios.last ?? 1
-            let supportingRatios = Array(sortedRadialRatios.dropLast())
-            let supportingSpread = supportingRatios.isEmpty ? 0 : ((supportingRatios.max() ?? 1) - (supportingRatios.min() ?? 1))
-            let leadingGap = leadingRatio - (supportingRatios.max() ?? leadingRatio)
             let updatedTapMetrics = updatedTapMetrics(from: tapMetrics, touches: touches)
+            let preview = makePreviewState(scaleRatio: scaleRatio,
+                                           centroidDrift: centroidDrift,
+                                           maxDrift: maxDrift,
+                                           inwardFingerCount: inwardFingerCount)
 
-            let action: GestureTriggerAction?
+            let nextAction: GestureTriggerAction?
             if centroidDrift <= maxDrift,
                scaleRatio <= configuration.openTriggerScaleRatio,
                inwardFingerCount >= configuration.minimumOpenParticipatingFingerCount {
-                action = .open
+                nextAction = .open
             } else if configuration.closeOnPinchOutEnabled,
                       centroidDrift <= maxDrift,
-                      scaleRatio >= configuration.closeTriggerScaleRatio,
-                      leadingRatio >= configuration.closeLeadingFingerRadiusRatio,
-                      leadingGap >= configuration.minimumCloseLeadingGap,
-                      supportingSpread <= configuration.maximumCloseSupportingSpread {
-                action = .close
+                      scaleRatio >= configuration.closeTriggerScaleRatio {
+                nextAction = .close
             } else {
-                action = nil
+                nextAction = nil
             }
 
-            let nextMatches = action == nil ? 0 : (consecutiveMatches + 1)
-
-            if nextMatches >= configuration.requiredConsecutiveMatches {
-                if let action {
-                    debugLog("trigger action=\(String(describing: action)) scaleRatio=\(String(format: "%.3f", scaleRatio)) centroidDrift=\(String(format: "%.3f", centroidDrift)) inwardCount=\(inwardFingerCount) leadingRatio=\(String(format: "%.3f", leadingRatio)) leadingGap=\(String(format: "%.3f", leadingGap)) supportingSpread=\(String(format: "%.3f", supportingSpread))")
+            let nextMatches: Int
+            if let nextAction {
+                nextMatches = nextAction == candidateAction ? (consecutiveMatches + 1) : 1
+                if nextMatches >= configuration.requiredConsecutiveMatches {
+                    debugLog("candidate action=\(String(describing: nextAction)) scaleRatio=\(String(format: "%.3f", scaleRatio)) centroidDrift=\(String(format: "%.3f", centroidDrift)) inwardCount=\(inwardFingerCount) matches=\(nextMatches)")
                 }
-                state = .triggered
-                return action
+            } else {
+                nextMatches = 0
             }
 
+            previewState = preview
             state = .tracking(
                 ids: ids,
                 baselineScale: baselineScale,
                 baselineCentroid: baselineCentroid,
                 baselineRadii: baselineRadii,
                 filteredScale: smoothedScale,
+                candidateAction: nextAction,
                 consecutiveMatches: nextMatches,
                 tapMetrics: updatedTapMetrics
             )
             return nil
 
-        case .triggered:
-            if touches.count < configuration.requiredFingerCount {
-                state = .cooldown(until: time + configuration.cooldownDuration)
-            }
-            return nil
-
         case let .cooldown(until):
+            previewState = nil
             guard time >= until else { return nil }
             state = .idle
             if touches.isEmpty {
                 return nil
             }
             return consume(samples: touches, at: time)
+        }
+    }
+
+    private func makePreviewState(scaleRatio: Double,
+                                  centroidDrift: Double,
+                                  maxDrift: Double,
+                                  inwardFingerCount: Int) -> GesturePreviewState? {
+        let relaxedDriftLimit = maxDrift * 1.35
+
+        if scaleRatio < 1 {
+            guard centroidDrift <= relaxedDriftLimit else { return nil }
+            let relaxedFingerCount = max(2, configuration.minimumOpenParticipatingFingerCount - 1)
+            guard inwardFingerCount >= relaxedFingerCount else { return nil }
+            let denominator = max(1 - configuration.openTriggerScaleRatio, 0.0001)
+            let rawProgress = (1 - scaleRatio) / denominator
+            let progress = easedPreviewProgress(rawProgress)
+            guard progress > 0.01 else { return nil }
+            return GesturePreviewState(action: .open, progress: progress)
+        }
+
+        guard configuration.closeOnPinchOutEnabled else { return nil }
+        guard centroidDrift <= relaxedDriftLimit else { return nil }
+        let previewStartScaleRatio = 1.002
+        let previewTravelMultiplier = 2.0
+        let denominator = max((configuration.closeTriggerScaleRatio - previewStartScaleRatio) * previewTravelMultiplier, 0.0001)
+        let rawProgress = (scaleRatio - previewStartScaleRatio) / denominator
+        guard rawProgress > 0.001 else { return nil }
+        let progress = easedPreviewProgress(rawProgress)
+        guard progress > 0.01 else { return nil }
+        return GesturePreviewState(action: .close, progress: progress)
+    }
+
+    private func easedPreviewProgress(_ rawValue: Double) -> CGFloat {
+        let clamped = min(max(rawValue, 0), 1)
+        let eased = clamped * clamped * (3 - 2 * clamped)
+        return CGFloat(eased)
+    }
+
+    private func pinchActionOnRelease(lastPreview: GesturePreviewState?,
+                                      candidateAction: GestureTriggerAction?,
+                                      consecutiveMatches: Int) -> GestureTriggerAction? {
+        let releaseMatchThreshold = max(1, configuration.requiredConsecutiveMatches - 1)
+        if let candidateAction, consecutiveMatches >= releaseMatchThreshold {
+            return candidateAction
+        }
+
+        guard let lastPreview else { return nil }
+        switch lastPreview.action {
+        case .open where lastPreview.progress >= 0.16:
+            return .open
+        case .close where lastPreview.progress >= 0.14:
+            return .close
+        default:
+            return nil
         }
     }
 

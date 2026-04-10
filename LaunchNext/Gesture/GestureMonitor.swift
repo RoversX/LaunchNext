@@ -1,16 +1,23 @@
 import Foundation
 
+enum GestureMonitorEvent {
+    case preview(GesturePreviewState)
+    case clearPreview
+    case gestureEnded
+    case trigger(GestureTriggerAction)
+}
+
 final class GestureMonitor {
     typealias Configuration = GestureConfiguration
 
     private let provider = GestureTouchProvider()
-    private let onTrigger: (GestureTriggerAction) -> Void
+    private let onEvent: (GestureMonitorEvent) -> Void
     private var configuration: Configuration
     private var monitorTask: Task<Void, Never>?
 
-    init(configuration: Configuration, onTrigger: @escaping (GestureTriggerAction) -> Void) {
+    init(configuration: Configuration, onEvent: @escaping (GestureMonitorEvent) -> Void) {
         self.configuration = configuration
-        self.onTrigger = onTrigger
+        self.onEvent = onEvent
     }
 
     deinit {
@@ -41,14 +48,38 @@ final class GestureMonitor {
 
         guard provider.startListening() else { return }
         let configuration = self.configuration
-        monitorTask = Task { [provider, onTrigger] in
+        monitorTask = Task { [provider, onEvent] in
             var machine = GestureStateMachine(configuration: configuration)
+            var lastPreview: GesturePreviewState?
             for await samples in provider.touchDataStream {
                 if Task.isCancelled { break }
                 if let action = machine.consume(samples: samples) {
+                    lastPreview = nil
                     await MainActor.run {
-                        onTrigger(action)
+                        onEvent(.trigger(action))
                     }
+                    continue
+                }
+
+                let preview = machine.previewState
+                guard preview != lastPreview else { continue }
+                lastPreview = preview
+                await MainActor.run {
+                    if let preview {
+                        onEvent(.preview(preview))
+                    } else {
+                        onEvent(.clearPreview)
+                        if samples.isEmpty {
+                            onEvent(.gestureEnded)
+                        }
+                    }
+                }
+            }
+
+            if lastPreview != nil {
+                await MainActor.run {
+                    onEvent(.clearPreview)
+                    onEvent(.gestureEnded)
                 }
             }
         }

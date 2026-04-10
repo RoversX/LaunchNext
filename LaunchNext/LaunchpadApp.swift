@@ -55,6 +55,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     // Remove this property if gesture support is dropped together with
     // bindGesturePreference()/updateGestureMonitor()/handleGestureTrigger().
     private var gestureMonitor: GestureMonitor?
+    private var gesturePreviewState: GesturePreviewState?
+    private var committedGesturePreviewAction: GestureTriggerAction?
+    private var isShowingGesturePreview = false
+    private var gesturePreviewClearWorkItem: DispatchWorkItem?
+    private var gesturePreviewGeneration: UInt = 0
+    private var gesturePreviewResumeProgress: CGFloat?
+    private var windowAnimationGeneration: UInt = 0
+    private var windowAnimationTargetAlpha: CGFloat?
     // Wake recovery work items for the experimental gesture monitor.
     // If gesture support is removed later, delete this together with
     // bindGestureWakeRecovery()/scheduleGestureWakeRecovery().
@@ -460,14 +468,99 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
         )
 
         if gestureMonitor == nil {
-            gestureMonitor = GestureMonitor(configuration: configuration) { [weak self] action in
-                DispatchQueue.main.async {
-                    self?.handleGestureTrigger(action: action)
-                }
+            gestureMonitor = GestureMonitor(configuration: configuration) { [weak self] event in
+                self?.handleGestureMonitorEvent(event)
             }
         }
 
         gestureMonitor?.update(configuration: configuration)
+    }
+
+    private func handleGestureMonitorEvent(_ event: GestureMonitorEvent) {
+        guard !isTerminating else { return }
+
+        switch event {
+        case let .preview(preview):
+            gesturePreviewGeneration &+= 1
+            cancelGesturePreviewClear()
+            updateGesturePreview(preview)
+        case .clearPreview:
+            scheduleGesturePreviewReset()
+        case .gestureEnded:
+            cancelGesturePreviewClear()
+            settleOrClearGesturePreview()
+        case let .trigger(action):
+            cancelGesturePreviewClear()
+            if gesturePreviewState?.action == action {
+                committedGesturePreviewAction = action
+            } else {
+                committedGesturePreviewAction = nil
+                clearGesturePreview()
+            }
+            gesturePreviewState = nil
+            handleGestureTrigger(action: action)
+        }
+    }
+
+    private func scheduleGesturePreviewReset() {
+        gesturePreviewClearWorkItem?.cancel()
+        let scheduledGeneration = gesturePreviewGeneration
+        let resetDelay = gesturePreviewResetDelay()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.gesturePreviewClearWorkItem = nil
+            guard self.gesturePreviewGeneration == scheduledGeneration else { return }
+            self.clearGesturePreview()
+        }
+        gesturePreviewClearWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + resetDelay, execute: workItem)
+    }
+
+    private func cancelGesturePreviewClear() {
+        gesturePreviewClearWorkItem?.cancel()
+        gesturePreviewClearWorkItem = nil
+    }
+
+    private func invalidateGesturePreviewClear() {
+        gesturePreviewGeneration &+= 1
+        cancelGesturePreviewClear()
+    }
+
+    private func settleOrClearGesturePreview() {
+        guard let preview = gesturePreviewState else {
+            clearGesturePreview()
+            return
+        }
+
+        let continuationThreshold: CGFloat
+        switch preview.action {
+        case .open:
+            continuationThreshold = 0.24
+        case .close:
+            continuationThreshold = 0.20
+        case .toggle:
+            continuationThreshold = 1
+        }
+
+        guard preview.progress >= continuationThreshold else {
+            clearGesturePreview()
+            return
+        }
+
+        switch preview.action {
+        case .open where !windowIsVisible:
+            committedGesturePreviewAction = .open
+            gesturePreviewState = nil
+            handleGestureTrigger(action: .open)
+
+        case .close where windowIsVisible:
+            committedGesturePreviewAction = .close
+            gesturePreviewState = nil
+            handleGestureTrigger(action: .close)
+
+        default:
+            clearGesturePreview()
+        }
     }
 
     // Maps recognized gesture actions onto the existing window flow.
@@ -477,6 +570,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     private func handleGestureTrigger(action: GestureTriggerAction) {
         guard !isTerminating else { return }
         guard !isPerformingExternalSystemDrag else { return }
+        interruptWindowAnimationIfNeeded(for: action)
         guard !isAnimatingWindow else { return }
 
         switch action {
@@ -1431,7 +1525,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     }
 
     func updateSystemUIVisibility() {
-        let shouldHideDock = appStore.hideDock && windowIsVisible
+        let shouldHideDock = appStore.hideDock && (windowIsVisible || isShowingGesturePreview)
         let options: NSApplication.PresentationOptions = shouldHideDock ? [.autoHideDock] : []
         if options != NSApp.presentationOptions {
             NSApp.presentationOptions = options
@@ -1455,12 +1549,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     func presentLaunchError(_ error: Error, for url: URL) { }
     
     func showWindow() {
+        invalidateGesturePreviewClear()
         pendingShow = true
         pendingHide = false
         startPendingWindowTransition()
     }
     
     func hideWindow() {
+        invalidateGesturePreviewClear()
+        guard windowIsVisible else { return }
         pendingHide = true
         pendingShow = false
         startPendingWindowTransition()
@@ -1558,8 +1655,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     private func performShowWindow() {
         pendingShow = false
         guard let window = window else { return }
+        let continuingFromGesturePreview = committedGesturePreviewAction == .open
 
         if windowIsVisible && !isAnimatingWindow && window.alphaValue >= 0.99 {
+            committedGesturePreviewAction = nil
+            gesturePreviewResumeProgress = nil
             return
         }
 
@@ -1568,9 +1668,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
         window.setFrame(rect, display: true)
         applyCornerRadius()
 
-        if window.alphaValue <= 0.01 || !windowIsVisible {
-            window.alphaValue = 0
-            window.contentView?.alphaValue = 0
+        if !continuingFromGesturePreview && (window.alphaValue <= 0.01 || !windowIsVisible) {
+            applyWindowPresentationProgress(0)
         }
 
         window.makeKeyAndOrderFront(nil)
@@ -1584,13 +1683,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
 
         lastShowAt = Date()
         windowIsVisible = true
+        isShowingGesturePreview = false
         updateSystemUIVisibility()
         SoundManager.shared.play(.launchpadOpen)
         NotificationCenter.default.post(name: .launchpadWindowShown, object: nil)
 
         let finalizeShow: () -> Void = {
             self.windowIsVisible = true
+            self.isShowingGesturePreview = false
+            self.committedGesturePreviewAction = nil
+            self.gesturePreviewResumeProgress = nil
             self.updateSystemUIVisibility()
+            self.applyWindowPresentationProgress(1)
             // Ensure focus after animation completes
             DispatchQueue.main.async {
                 self.window?.makeKey()
@@ -1603,8 +1707,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
                 finalizeShow()
             }
         } else {
-            window.alphaValue = 1
-            window.contentView?.alphaValue = 1
+            committedGesturePreviewAction = nil
+            gesturePreviewResumeProgress = nil
+            applyWindowPresentationProgress(1)
             finalizeShow()
         }
     }
@@ -1612,15 +1717,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     private func performHideWindow() {
         pendingHide = false
         guard let window = window else { return }
+        let continuingFromGesturePreview = committedGesturePreviewAction == .close
 
         let shouldPlaySound = windowIsVisible && !isTerminating
 
         let finalize: () -> Void = {
             self.windowIsVisible = false
+            self.isShowingGesturePreview = false
+            self.committedGesturePreviewAction = nil
+            self.gesturePreviewResumeProgress = nil
             self.updateSystemUIVisibility()
             window.orderOut(nil)
-            window.alphaValue = 1
-            window.contentView?.alphaValue = 1
+            self.applyWindowPresentationProgress(1)
             self.appStore.isSetting = false
             if self.appStore.rememberLastPage {
                 self.appStore.persistCurrentPageIfNeeded()
@@ -1633,7 +1741,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
             NotificationCenter.default.post(name: .launchpadWindowHidden, object: nil)
         }
 
-        if (!windowIsVisible && window.alphaValue <= 0.01) || isTerminating {
+        if ((!windowIsVisible && window.alphaValue <= 0.01) || isTerminating) && !continuingFromGesturePreview {
             if shouldPlaySound {
                 SoundManager.shared.play(.launchpadClose)
             }
@@ -1646,7 +1754,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
         }
 
         if appStore.enableWindowOpenAnimation {
-            animateWindow(to: 0) {
+            let animationDuration: TimeInterval = continuingFromGesturePreview ? 0.5 : 0.25
+            animateWindow(to: 0, duration: animationDuration) {
                 finalize()
             }
         } else {
@@ -1654,27 +1763,206 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
         }
     }
 
-    private func animateWindow(to targetAlpha: CGFloat, resumePending: Bool = true, completion: (() -> Void)? = nil) {
+    private func animateWindow(to targetAlpha: CGFloat,
+                               duration: TimeInterval = 0.25,
+                               resumePending: Bool = true,
+                               completion: (() -> Void)? = nil) {
         guard let window = window else {
             completion?()
             return
         }
+        let targetScale = windowPresentationScale(for: targetAlpha)
+        windowAnimationGeneration &+= 1
+        let animationGeneration = windowAnimationGeneration
+        windowAnimationTargetAlpha = targetAlpha
 
         isAnimatingWindow = true
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.25
+            ctx.duration = duration
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             window.animator().alphaValue = targetAlpha
             window.contentView?.animator().alphaValue = targetAlpha
+            if let layer = window.contentView?.layer {
+                CATransaction.begin()
+                CATransaction.setAnimationDuration(ctx.duration)
+                CATransaction.setAnimationTimingFunction(ctx.timingFunction)
+                layer.transform = CATransform3DMakeScale(targetScale, targetScale, 1)
+                CATransaction.commit()
+            }
         }, completionHandler: {
-            window.alphaValue = targetAlpha
-            window.contentView?.alphaValue = targetAlpha
+            guard self.windowAnimationGeneration == animationGeneration else { return }
+            self.windowAnimationTargetAlpha = nil
+            self.applyWindowPresentationProgress(targetAlpha)
             self.isAnimatingWindow = false
             completion?()
             if resumePending {
                 self.startPendingWindowTransition()
             }
         })
+    }
+
+    private func updateGesturePreview(_ preview: GesturePreviewState) {
+        interruptWindowAnimationIfNeeded(for: preview.action)
+        guard !isAnimatingWindow else { return }
+        guard !isPerformingExternalSystemDrag else { return }
+        guard let window = window else { return }
+
+        gesturePreviewState = preview
+
+        switch preview.action {
+        case .open:
+            guard !windowIsVisible else { return }
+            let screen = getCurrentActiveScreen() ?? NSScreen.main!
+            let rect = appStore.isFullscreenMode ? screen.frame : calculateContentRect(for: screen)
+            window.setFrame(rect, display: true)
+            applyCornerRadius()
+
+            if !isShowingGesturePreview {
+                let startingProgress = gesturePreviewResumeProgress ?? 0
+                applyWindowPresentationProgress(startingProgress)
+                window.collectionBehavior = [.transient, .canJoinAllApplications, .fullScreenAuxiliary, .ignoresCycle]
+                window.orderFrontRegardless()
+                isShowingGesturePreview = true
+                updateSystemUIVisibility()
+            }
+
+            applyWindowPresentationProgress(displayedGesturePreviewProgress(for: preview))
+
+        case .close:
+            guard windowIsVisible else { return }
+            gesturePreviewResumeProgress = nil
+            applyWindowPresentationProgress(displayedGesturePreviewProgress(for: preview))
+
+        case .toggle:
+            break
+        }
+    }
+
+    private func clearGesturePreview() {
+        guard let window = window else {
+            gesturePreviewState = nil
+            isShowingGesturePreview = false
+            return
+        }
+
+        let previousPreview = gesturePreviewState
+        gesturePreviewState = nil
+        gesturePreviewResumeProgress = nil
+
+        switch previousPreview?.action {
+        case .open where !windowIsVisible:
+            isShowingGesturePreview = false
+            applyWindowPresentationProgress(0)
+            window.orderOut(nil)
+            updateSystemUIVisibility()
+
+        case .close where windowIsVisible:
+            applyWindowPresentationProgress(1)
+
+        default:
+            break
+        }
+    }
+
+    private func applyWindowPresentationProgress(_ progress: CGFloat) {
+        guard let window = window, let contentView = window.contentView else { return }
+        let clamped = min(max(progress, 0), 1)
+        contentView.wantsLayer = true
+        let scale = windowPresentationScale(for: clamped)
+        window.alphaValue = clamped
+        contentView.alphaValue = clamped
+        contentView.layer?.transform = CATransform3DMakeScale(scale, scale, 1)
+    }
+
+    private func windowPresentationScale(for progress: CGFloat) -> CGFloat {
+        let clamped = min(max(progress, 0), 1)
+        let hiddenScale: CGFloat = 0.965
+        return hiddenScale + ((1 - hiddenScale) * clamped)
+    }
+
+    private func displayedGesturePreviewProgress(for preview: GesturePreviewState) -> CGFloat {
+        switch preview.action {
+        case .open:
+            guard let resumeProgress = gesturePreviewResumeProgress else { return preview.progress }
+            let clampedResume = min(max(resumeProgress, 0), 1)
+            let clampedPreview = min(max(preview.progress, 0), 1)
+            return clampedResume + ((1 - clampedResume) * clampedPreview)
+
+        case .close:
+            return max(0.04, 1 - preview.progress)
+
+        case .toggle:
+            return preview.progress
+        }
+    }
+
+    private func gesturePreviewResetDelay() -> TimeInterval {
+        guard let preview = gesturePreviewState else { return 0.045 }
+
+        switch preview.action {
+        case .open where !windowIsVisible:
+            return 0.14
+        case .close where windowIsVisible:
+            return 0.06
+        case .toggle:
+            return 0.045
+        default:
+            return 0.045
+        }
+    }
+
+    private func interruptWindowAnimationIfNeeded(for action: GestureTriggerAction) {
+        guard isAnimatingWindow else { return }
+        guard let targetAlpha = windowAnimationTargetAlpha else { return }
+        guard let window = window else { return }
+
+        let shouldInterrupt: Bool
+        switch action {
+        case .open:
+            shouldInterrupt = targetAlpha < 0.5
+        case .close:
+            shouldInterrupt = targetAlpha > 0.5
+        case .toggle:
+            shouldInterrupt = true
+        }
+
+        guard shouldInterrupt else { return }
+
+        let currentProgress = currentWindowPresentationProgress()
+        windowAnimationGeneration &+= 1
+        windowAnimationTargetAlpha = nil
+        isAnimatingWindow = false
+        pendingShow = false
+        pendingHide = false
+        applyWindowPresentationProgress(currentProgress)
+        window.contentView?.layer?.removeAllAnimations()
+
+        switch action {
+        case .open:
+            windowIsVisible = false
+            isShowingGesturePreview = currentProgress > 0.01
+            gesturePreviewResumeProgress = currentProgress
+            window.orderFrontRegardless()
+            updateSystemUIVisibility()
+
+        case .close:
+            windowIsVisible = true
+            isShowingGesturePreview = false
+            gesturePreviewResumeProgress = nil
+
+        case .toggle:
+            gesturePreviewResumeProgress = nil
+        }
+    }
+
+    private func currentWindowPresentationProgress() -> CGFloat {
+        guard let window = window, let contentView = window.contentView else {
+            return windowIsVisible ? 1 : 0
+        }
+
+        let layerProgress = contentView.layer?.presentation().map { CGFloat($0.opacity) }
+        let fallbackProgress = min(window.alphaValue, contentView.alphaValue)
+        return min(max(layerProgress ?? fallbackProgress, 0), 1)
     }
     
     func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
@@ -1689,6 +1977,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     private func autoHideIfNeeded() {
         guard !isPerformingExternalSystemDrag else { return }
         guard !appStore.isSetting else { return }
+        guard windowIsVisible else { return }
+        guard !isShowingGesturePreview else { return }
+        guard !isAnimatingWindow else { return }
         hideWindow()
     }
     
@@ -1723,6 +2014,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
 
     @objc private func handleBackgroundClick(_ sender: NSClickGestureRecognizer) {
         guard appStore.openFolder == nil && !appStore.isFolderNameEditing else { return }
+        guard windowIsVisible else { return }
+        guard !isAnimatingWindow else { return }
         guard let view = sender.view else { return }
         let p = sender.location(in: view)
         if let hit = view.hitTest(p), isInteractiveView(hit) { return }
