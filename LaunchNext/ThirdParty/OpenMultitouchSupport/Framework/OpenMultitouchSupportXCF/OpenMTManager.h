@@ -17,6 +17,7 @@
 @property (nonatomic, readonly) NSString *deviceName;
 @property (nonatomic, readonly) NSString *deviceID;
 @property (nonatomic, readonly) BOOL isBuiltIn;
+@property (nonatomic, readonly) BOOL isTrackpad;
 @end
 
 @interface OpenMTManager: NSObject

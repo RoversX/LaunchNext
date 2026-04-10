@@ -12,6 +12,7 @@ public struct OMSDeviceInfo: Sendable, Hashable {
     public let deviceName: String
     public let deviceID: String
     public let isBuiltIn: Bool
+    public let isTrackpad: Bool
     internal nonisolated(unsafe) let deviceInfo: OpenMTDeviceInfo
     
     internal init(_ deviceInfo: OpenMTDeviceInfo) {
@@ -19,6 +20,7 @@ public struct OMSDeviceInfo: Sendable, Hashable {
         self.deviceName = deviceInfo.deviceName
         self.deviceID = deviceInfo.deviceID
         self.isBuiltIn = deviceInfo.isBuiltIn
+        self.isTrackpad = deviceInfo.isTrackpad
     }
 }
 
