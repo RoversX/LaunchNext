@@ -32,49 +32,75 @@
         // Get family ID for precise device identification
         int familyID = 0;
         MTDeviceGetFamilyID(deviceRef, &familyID);
+        _familyID = familyID;
+
+        int width = 0, height = 0;
+        MTDeviceGetSensorSurfaceDimensions(deviceRef, &width, &height);
+        _sensorSurfaceWidth = width;
+        _sensorSurfaceHeight = height;
+
+        BOOL looksLikeTouchBar = width > 1000 && height < 100;
+        BOOL looksLikeTrackpad = width > height && width > 50 && height > 20 && !looksLikeTouchBar;
+
         // Determine device name based on family ID mapping.
         if (familyID == 98 || familyID == 99 || familyID == 100) {
             // Built-in trackpad (older models)
             _deviceName = @"MacBook Trackpad";
+            _isTrackpad = YES;
         } else if (familyID == 101) {
             // Retina MacBook Pro trackpad
             _deviceName = @"MacBook Trackpad";
+            _isTrackpad = YES;
         } else if (familyID == 102) {
             // Retina MacBook with Force Touch trackpad (2015)
             _deviceName = @"MacBook Trackpad";
+            _isTrackpad = YES;
         } else if (familyID == 103) {
             // Retina MacBook Pro 13" with Force Touch trackpad (2015)
             _deviceName = @"MacBook Trackpad";
+            _isTrackpad = YES;
         } else if (familyID == 104) {
             // MacBook trackpad variant
             _deviceName = @"MacBook Trackpad";
+            _isTrackpad = YES;
         } else if (familyID == 105) {
-            // MacBook with Touch Bar
-            _deviceName = @"Touch Bar";
+            // Some MacBook trackpads report family 105; only treat it as
+            // Touch Bar when the sensor shape clearly matches one.
+            if (looksLikeTouchBar) {
+                _deviceName = @"Touch Bar";
+                _isTrackpad = NO;
+            } else {
+                _deviceName = @"MacBook Trackpad";
+                _isTrackpad = YES;
+            }
         } else if (familyID == 108 || familyID == 109) {
             // M4 Macbook Pro Trackpad
             _deviceName = @"MacBook Trackpad";
+            _isTrackpad = YES;
         } else if (familyID == 112 || familyID == 113) {
             // Magic Mouse & Magic Mouse 2/3
             _deviceName = @"Magic Mouse";
+            _isTrackpad = NO;
         } else if (familyID == 128 || familyID == 129 || familyID == 130) {
             // Magic Trackpad, Magic Trackpad 2, Magic Trackpad 3
             _deviceName = @"Magic Trackpad";
+            _isTrackpad = YES;
         } else {
             // Unknown device - use dimensions to make an educated guess
-            int width = 0, height = 0;
-            MTDeviceGetSensorSurfaceDimensions(deviceRef, &width, &height);
             // Heuristic: trackpads are typically wider than tall and have reasonable dimensions
             // Touch Bar is very wide and narrow (>1000 width, <100 height)
             // Regular trackpads are usually wider than tall but not extremely so
-            if (width > 1000 && height < 100) {
+            if (looksLikeTouchBar) {
                 _deviceName = [NSString stringWithFormat:@"Unknown Touch Bar (FamilyID: %d)", familyID];
-            } else if (width > height && width > 50 && height > 20) {
+                _isTrackpad = NO;
+            } else if (looksLikeTrackpad) {
                 // Likely a trackpad: wider than tall, reasonable dimensions
                 _deviceName = [NSString stringWithFormat:@"Unknown Trackpad (FamilyID: %d)", familyID];
+                _isTrackpad = YES;
             } else {
                 // Probably not a trackpad
                 _deviceName = [NSString stringWithFormat:@"Unknown Device (FamilyID: %d)", familyID];
+                _isTrackpad = NO;
             }
         }
     }

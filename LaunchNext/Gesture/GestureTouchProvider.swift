@@ -22,8 +22,18 @@ final class GestureTouchProvider {
 
     var availableDevices: [GestureInputDevice] {
         manager.availableDevices
-            .filter(\.isGestureTrackpadCandidate)
-            .map { GestureInputDevice(id: $0.deviceID, name: $0.deviceName, isBuiltIn: $0.isBuiltIn) }
+            .map {
+                GestureInputDevice(
+                    id: $0.deviceID,
+                    name: $0.deviceName,
+                    isBuiltIn: $0.isBuiltIn,
+                    kind: $0.gestureInputDeviceKind,
+                    familyID: $0.familyID,
+                    sensorSurfaceWidth: $0.sensorSurfaceWidth,
+                    sensorSurfaceHeight: $0.sensorSurfaceHeight,
+                    isRecommended: $0.isRecommendedGestureDevice
+                )
+            }
     }
 
     func refreshDevices() {
@@ -31,13 +41,13 @@ final class GestureTouchProvider {
     }
 
     func configureDevices(mode: GestureDeviceSelectionMode, selectedDeviceIDs: [String]) {
-        let availableTrackpads = manager.availableDevices.filter(\.isGestureTrackpadCandidate)
+        let availableDevices = manager.availableDevices
 
         switch mode {
         case .automatic:
-            _ = manager.selectDevices(availableTrackpads)
+            _ = manager.selectDevices(availableDevices.filter(\.isRecommendedGestureDevice))
         case .selected:
-            let selected = availableTrackpads.filter { selectedDeviceIDs.contains($0.deviceID) }
+            let selected = availableDevices.filter { selectedDeviceIDs.contains($0.deviceID) }
             _ = manager.selectDevices(selected)
         }
     }
@@ -46,7 +56,7 @@ final class GestureTouchProvider {
     func startListening(configuration: GestureConfiguration) -> Bool {
         refreshDevices()
         configureDevices(mode: configuration.deviceSelectionMode, selectedDeviceIDs: configuration.selectedDeviceIDs)
-        guard !manager.selectedDevices.filter(\.isGestureTrackpadCandidate).isEmpty else { return false }
+        guard !manager.selectedDevices.isEmpty else { return false }
         resetActiveDevice()
         return manager.startListening() || manager.isListening
     }

@@ -487,6 +487,18 @@ private var gestureDeviceSelectionModeBinding: Binding<GestureDeviceSelectionMod
     )
 }
 
+private var gestureShowAllInputDevicesBinding: Binding<Bool> {
+    Binding(
+        get: { appStore.gestureShowAllInputDevices },
+        set: { newValue in
+            guard appStore.gestureShowAllInputDevices != newValue else { return }
+            DispatchQueue.main.async {
+                appStore.gestureShowAllInputDevices = newValue
+            }
+        }
+    )
+}
+
 private func layoutModeScopeControl(width: CGFloat = 130) -> some View {
     let outerShape = Capsule(style: .continuous)
 
@@ -4087,15 +4099,20 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
                     if appStore.gestureDeviceSelectionMode == .selected {
                         VStack(alignment: .leading, spacing: 8) {
+                            let visibleDevices = appStore.visibleGestureDevices
                             let showUnavailableMessage = appStore.availableGestureDevices.isEmpty || appStore.gestureUnavailableSelectionCount > 0
 
-                            if appStore.availableGestureDevices.isEmpty {
-                                Text(appStore.localized(.gestureInputDeviceUnavailableDescription))
+                            Toggle(appStore.localized(.gestureInputDeviceShowAllTitle), isOn: gestureShowAllInputDevicesBinding)
+                                .font(.subheadline.weight(.semibold))
+                                .toggleStyle(.switch)
+
+                            if visibleDevices.isEmpty {
+                                Text(appStore.localized(appStore.gestureShowAllInputDevices ? .gestureInputDeviceUnavailableDescription : .gestureInputDeviceNoRecommendedDescription))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                             } else {
-                                ForEach(appStore.availableGestureDevices) { device in
+                                ForEach(visibleDevices) { device in
                                     gestureDeviceRow(for: device)
                                 }
                             }
@@ -4390,9 +4407,16 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
 
-                    Text(appStore.localized(device.isBuiltIn ? .gestureInputDeviceBuiltInBadge : .gestureInputDeviceExternalBadge))
+                    Text(gestureDeviceMetadata(for: device))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    if !device.isRecommended {
+                        Text(appStore.localized(.gestureInputDeviceUnverifiedWarning))
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 Spacer()
@@ -4411,6 +4435,17 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    private func gestureDeviceMetadata(for device: GestureInputDevice) -> String {
+        var parts = [
+            appStore.localized(device.isBuiltIn ? .gestureInputDeviceBuiltInBadge : .gestureInputDeviceExternalBadge),
+            appStore.localized(device.isRecommended ? .gestureInputDeviceRecommendedBadge : .gestureInputDeviceUnverifiedBadge)
+        ]
+        if device.familyID > 0 {
+            parts.append(String(format: appStore.localized(.gestureInputDeviceFamilyIDFormat), device.familyID))
+        }
+        return parts.joined(separator: " • ")
     }
 
     private func dockDragSideSymbol(for side: AppStore.DockDragSide) -> String {
@@ -5453,6 +5488,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert(AppStore.gestureFingerCountKey)
                     keys.insert(AppStore.gestureDeviceSelectionModeKey)
                     keys.insert(AppStore.gestureSelectedDeviceIDsKey)
+                    keys.insert(AppStore.gestureShowAllInputDevicesKey)
                 }
                 if appearanceCheckbox.state == .on {
                     keys.insert(AppStore.sidebarIconPresetKey)

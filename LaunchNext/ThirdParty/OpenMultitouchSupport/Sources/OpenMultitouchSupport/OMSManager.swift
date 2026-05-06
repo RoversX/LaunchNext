@@ -13,6 +13,9 @@ public struct OMSDeviceInfo: Sendable, Hashable {
     public let deviceID: String
     public let isBuiltIn: Bool
     public let isTrackpad: Bool
+    public let familyID: Int
+    public let sensorSurfaceWidth: Int
+    public let sensorSurfaceHeight: Int
     internal nonisolated(unsafe) let deviceInfo: OpenMTDeviceInfo
     
     internal init(_ deviceInfo: OpenMTDeviceInfo) {
@@ -21,6 +24,9 @@ public struct OMSDeviceInfo: Sendable, Hashable {
         self.deviceID = deviceInfo.deviceID
         self.isBuiltIn = deviceInfo.isBuiltIn
         self.isTrackpad = deviceInfo.isTrackpad
+        self.familyID = deviceInfo.familyID
+        self.sensorSurfaceWidth = deviceInfo.sensorSurfaceWidth
+        self.sensorSurfaceHeight = deviceInfo.sensorSurfaceHeight
     }
 }
 

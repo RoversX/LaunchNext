@@ -18,6 +18,9 @@
 @property (nonatomic, readonly) NSString *deviceID;
 @property (nonatomic, readonly) BOOL isBuiltIn;
 @property (nonatomic, readonly) BOOL isTrackpad;
+@property (nonatomic, readonly) NSInteger familyID;
+@property (nonatomic, readonly) NSInteger sensorSurfaceWidth;
+@property (nonatomic, readonly) NSInteger sensorSurfaceHeight;
 @end
 
 @interface OpenMTManager: NSObject

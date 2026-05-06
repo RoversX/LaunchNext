@@ -375,6 +375,7 @@ final class AppStore: ObservableObject {
     static let gestureFingerCountKey = "gestureFingerCount"
     static let gestureDeviceSelectionModeKey = "gestureDeviceSelectionMode"
     static let gestureSelectedDeviceIDsKey = "gestureSelectedDeviceIDs"
+    static let gestureShowAllInputDevicesKey = "gestureShowAllInputDevices"
     static let searchDebounceMillisecondsRange: ClosedRange<Double> = 100...600
     private static let cliShimMarker = "# LaunchNext CLI shim"
     private static let cliPathSnippetHeader = "# >>> LaunchNext CLI >>>"
@@ -837,6 +838,7 @@ final class AppStore: ObservableObject {
         gestureFingerCount = GestureFingerCount(rawValue: UserDefaults.standard.integer(forKey: Self.gestureFingerCountKey)) ?? .four
         gestureDeviceSelectionMode = GestureDeviceSelectionMode(rawValue: UserDefaults.standard.string(forKey: Self.gestureDeviceSelectionModeKey) ?? "") ?? .automatic
         gestureSelectedDeviceIDs = Array(Set(UserDefaults.standard.stringArray(forKey: Self.gestureSelectedDeviceIDsKey) ?? [])).sorted()
+        gestureShowAllInputDevices = UserDefaults.standard.object(forKey: Self.gestureShowAllInputDevicesKey) as? Bool ?? false
 
         // Apply hidden filtering immediately
         pruneHiddenAppsFromAppList()
@@ -854,10 +856,17 @@ final class AppStore: ObservableObject {
         provider.configureDevices(mode: gestureDeviceSelectionMode, selectedDeviceIDs: gestureSelectedDeviceIDs)
         availableGestureDevices = provider.availableDevices.sorted {
             if $0.isBuiltIn != $1.isBuiltIn {
-                return !$0.isBuiltIn && $1.isBuiltIn
+                return $0.isBuiltIn && !$1.isBuiltIn
+            }
+            if $0.isRecommended != $1.isRecommended {
+                return $0.isRecommended && !$1.isRecommended
             }
             return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
+    }
+
+    var visibleGestureDevices: [GestureInputDevice] {
+        gestureShowAllInputDevices ? availableGestureDevices : availableGestureDevices.filter(\.isRecommended)
     }
 
     var gestureUnavailableSelectionCount: Int {
@@ -1989,6 +1998,19 @@ final class AppStore: ObservableObject {
         }
     }
 
+    @Published var gestureShowAllInputDevices: Bool = {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: AppStore.gestureShowAllInputDevicesKey) == nil {
+            defaults.set(false, forKey: AppStore.gestureShowAllInputDevicesKey)
+        }
+        return defaults.bool(forKey: AppStore.gestureShowAllInputDevicesKey)
+    }() {
+        didSet {
+            guard gestureShowAllInputDevices != oldValue else { return }
+            UserDefaults.standard.set(gestureShowAllInputDevices, forKey: Self.gestureShowAllInputDevicesKey)
+        }
+    }
+
     @Published private(set) var availableGestureDevices: [GestureInputDevice] = []
 
     // @Published var isAIEnabled: Bool = {
@@ -2594,6 +2616,9 @@ final class AppStore: ObservableObject {
         if defaults.object(forKey: Self.gestureSelectedDeviceIDsKey) == nil {
             defaults.set([], forKey: Self.gestureSelectedDeviceIDsKey)
         }
+        if defaults.object(forKey: Self.gestureShowAllInputDevicesKey) == nil {
+            defaults.set(false, forKey: Self.gestureShowAllInputDevicesKey)
+        }
         if defaults.object(forKey: Self.gameControllerMenuToggleKey) == nil {
             defaults.set(true, forKey: Self.gameControllerMenuToggleKey)
         }
@@ -2667,6 +2692,7 @@ final class AppStore: ObservableObject {
         self.gestureFingerCount = GestureFingerCount(rawValue: defaults.integer(forKey: Self.gestureFingerCountKey)) ?? .four
         self.gestureDeviceSelectionMode = GestureDeviceSelectionMode(rawValue: defaults.string(forKey: Self.gestureDeviceSelectionModeKey) ?? "") ?? .automatic
         self.gestureSelectedDeviceIDs = Array(Set(defaults.stringArray(forKey: Self.gestureSelectedDeviceIDsKey) ?? [])).sorted()
+        self.gestureShowAllInputDevices = defaults.object(forKey: Self.gestureShowAllInputDevicesKey) as? Bool ?? false
         self.enableAnimations = UserDefaults.standard.object(forKey: "enableAnimations") as? Bool ?? true
         self.customIconFileURL = AppStore.customIconFileURL
 
