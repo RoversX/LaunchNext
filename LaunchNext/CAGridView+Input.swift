@@ -4,6 +4,68 @@ import QuartzCore
 extension CAGridView {
     // MARK: - Input Handling
 
+    enum ScrollAxisLock {
+        case undecided
+        case horizontal
+        case vertical
+    }
+
+    private func isContinuousScrollGesture(_ event: NSEvent) -> Bool {
+        !event.phase.isEmpty || !event.momentumPhase.isEmpty
+    }
+
+    private func resetAutomaticScrollAxis() {
+        automaticScrollAxis = .undecided
+        automaticScrollAccumulatedX = 0
+        automaticScrollAccumulatedY = 0
+    }
+
+    private func lockedAutomaticScrollDelta(deltaX: CGFloat, deltaY: CGFloat, isContinuousGesture: Bool) -> CGFloat? {
+        guard isContinuousGesture else {
+            return -deltaY
+        }
+
+        automaticScrollAccumulatedX += deltaX
+        automaticScrollAccumulatedY += deltaY
+
+        if automaticScrollAxis == .undecided {
+            let x = abs(automaticScrollAccumulatedX)
+            let y = abs(automaticScrollAccumulatedY)
+            if x >= automaticScrollAxisThreshold,
+               x >= y * automaticScrollAxisDominance {
+                automaticScrollAxis = .horizontal
+                let initialDelta = automaticScrollAccumulatedX
+                automaticScrollAccumulatedX = 0
+                automaticScrollAccumulatedY = 0
+                return initialDelta
+            } else if y >= automaticScrollAxisThreshold * 2,
+                      y >= x * (automaticScrollAxisDominance + 0.5) {
+                automaticScrollAxis = .vertical
+            } else {
+                return nil
+            }
+        }
+
+        switch automaticScrollAxis {
+        case .horizontal:
+            return deltaX
+        case .vertical:
+            return nil
+        case .undecided:
+            return nil
+        }
+    }
+
+    private func resolvedScrollAxes(for event: NSEvent) -> (x: CGFloat, y: CGFloat) {
+        if isContinuousScrollGesture(event) {
+            return (event.scrollingDeltaX, event.scrollingDeltaY)
+        }
+
+        let deltaX = event.deltaX != 0 ? event.deltaX : event.scrollingDeltaX
+        let deltaY = event.deltaY != 0 ? event.deltaY : event.scrollingDeltaY
+        return (deltaX, deltaY)
+    }
+
     override var acceptsFirstResponder: Bool { true }
 
     override func becomeFirstResponder() -> Bool {
@@ -16,12 +78,10 @@ extension CAGridView {
         return true
     }
 
-    // 确保视图接受第一次鼠标点击就能响应
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         return true
     }
 
-    // 确保视图可以接收鼠标事件
     override func hitTest(_ point: NSPoint) -> NSView? {
         let result = frame.contains(point) ? self : nil
         return result
@@ -68,7 +128,7 @@ extension CAGridView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        // 当本地 monitor 存在时，避免双重处理
+        // Avoid duplicate handling when a local event monitor is active.
         if scrollEventMonitor != nil {
             return
         }
@@ -77,70 +137,41 @@ extension CAGridView {
     }
 
     func handleScrollWheel(with event: NSEvent) {
-        // 优先使用水平滑动，如果没有则用垂直滑动（反向）
-        let deltaX = event.scrollingDeltaX
-        let deltaY = event.scrollingDeltaY
-        let delta = abs(deltaX) > abs(deltaY) ? deltaX : -deltaY
+        let axes = resolvedScrollAxes(for: event)
+        let deltaX = axes.x
+        let deltaY = axes.y
+        let isContinuousGesture = isContinuousScrollGesture(event)
         let baseline = max(AppStore.defaultScrollSensitivity, 0.0001)
         let sensitivityScale = CGFloat(max(scrollSensitivity, 0.0001) / baseline)
+        let ended = event.phase.contains(.ended)
+            || event.phase.contains(.cancelled)
+            || event.momentumPhase.contains(.ended)
+            || event.momentumPhase.contains(.cancelled)
+
+        if event.phase.contains(.began) {
+            resetAutomaticScrollAxis()
+            isDragging = false
+            accumulatedDelta = 0
+            scrollVelocity = 0
+        }
+
+        guard let delta = lockedAutomaticScrollDelta(deltaX: deltaX,
+                                                     deltaY: deltaY,
+                                                     isContinuousGesture: isContinuousGesture) else {
+            if ended {
+                resetAutomaticScrollAxis()
+            }
+            return
+        }
         let scaledDelta = delta * sensitivityScale
-        let isPrecise = event.hasPreciseScrollingDeltas
 
-        if !isPrecise {
-            /*
-            // 旧版滚轮跟手 + 定时器 snap 逻辑（保留注释，便于后续对比）
-            wheelSnapTimer?.invalidate()
-
-            // 累积滚动量
-            wheelAccumulatedDelta += scaledDelta * 8  // 放大系数，让跟手效果更明显
-
-            // 计算临时偏移（带橡皮筋效果）
-            let pageStride = bounds.width + pageSpacing
-            let baseOffset = -CGFloat(currentPage) * pageStride
-            var newOffset = baseOffset + wheelAccumulatedDelta
-
-            // 橡皮筋效果：边界阻力
-            let minOffset = -CGFloat(pageCount - 1) * pageStride
-            let maxOffset: CGFloat = 0
-            if newOffset > maxOffset {
-                let overscroll = newOffset - maxOffset
-                newOffset = maxOffset + rubberBand(overscroll, limit: bounds.width * 0.15)
-            } else if newOffset < minOffset {
-                let overscroll = newOffset - minOffset
-                newOffset = minOffset + rubberBand(overscroll, limit: bounds.width * 0.15)
-            }
-
-            // 更新显示
-            scrollOffset = newOffset
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            pageContainerLayer.transform = CATransform3DMakeTranslation(scrollOffset, 0, 0)
-            CATransaction.commit()
-
-            // 设置定时器，停止滚动后决定翻页或弹回
-            wheelSnapTimer = Timer.scheduledTimer(withTimeInterval: wheelSnapDelay, repeats: false) { [weak self] _ in
-                guard let self = self else { return }
-
-                let threshold = self.bounds.width * 0.15  // 15% 触发翻页
-                var targetPage = self.currentPage
-
-                if self.wheelAccumulatedDelta < -threshold {
-                    targetPage = self.currentPage + 1
-                } else if self.wheelAccumulatedDelta > threshold {
-                    targetPage = self.currentPage - 1
-                }
-
-                self.wheelAccumulatedDelta = 0
-                self.navigateToPage(targetPage, animated: true)
-            }
-            */
-
-            // 只优化普通滚轮，不改精准设备（触控板 / Magic Mouse）路径
+        if !isContinuousGesture {
+            // Keep wheel paging separate from continuous gestures.
             handleWheelPaging(with: scaledDelta)
             return
         }
 
-        // 触控板滑动
+        // Continuous gestures still use drag-like paging.
         switch event.phase {
         case .began:
             isDragging = true
@@ -150,29 +181,31 @@ extension CAGridView {
             scrollVelocity = 0
 
         case .changed:
+            if !isDragging {
+                isDragging = true
+                isScrollAnimating = false
+                dragStartOffset = scrollOffset
+                accumulatedDelta = 0
+                scrollVelocity = 0
+            }
             accumulatedDelta += scaledDelta
 
-            // 计算新的偏移量
             var newOffset = dragStartOffset + accumulatedDelta
 
-            // 橡皮筋效果：在边界处添加阻力
             let pageStride = bounds.width + pageSpacing
             let minOffset = -CGFloat(pageCount - 1) * pageStride
             let maxOffset: CGFloat = 0
 
             if newOffset > maxOffset {
-                // 超出左边界
                 let overscroll = newOffset - maxOffset
                 newOffset = maxOffset + rubberBand(overscroll, limit: bounds.width * 0.2)
             } else if newOffset < minOffset {
-                // 超出右边界
                 let overscroll = newOffset - minOffset
                 newOffset = minOffset + rubberBand(overscroll, limit: bounds.width * 0.2)
             }
 
             scrollOffset = newOffset
 
-            // 性能优化：使用 CATransaction 批量更新
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             CATransaction.setAnimationDuration(0)
@@ -180,15 +213,18 @@ extension CAGridView {
             CATransaction.commit()
 
         case .ended, .cancelled:
+            guard isDragging else {
+                accumulatedDelta = 0
+                resetAutomaticScrollAxis()
+                return
+            }
             isDragging = false
 
-            // 根据滑动距离和速度确定目标页面
-            let velocity = (abs(deltaX) > abs(deltaY) ? deltaX : -deltaY) * sensitivityScale
-            let threshold = (bounds.width + pageSpacing) * 0.15  // 15% 即可触发翻页
+            let velocity = scaledDelta
+            let threshold = (bounds.width + pageSpacing) * 0.15
             let velocityThreshold: CGFloat = 30
             var targetPage = currentPage
 
-            // 根据累计滑动方向决定翻页
             if accumulatedDelta < -threshold || velocity < -velocityThreshold {
                 targetPage = currentPage + 1
             } else if accumulatedDelta > threshold || velocity > velocityThreshold {
@@ -196,8 +232,12 @@ extension CAGridView {
             }
 
             navigateToPage(targetPage)
+            resetAutomaticScrollAxis()
 
         default:
+            if ended {
+                resetAutomaticScrollAxis()
+            }
             break
         }
     }
@@ -213,7 +253,6 @@ extension CAGridView {
         wheelLastDirection = direction
         wheelAccumulatedDelta += abs(scaledDelta)
 
-        // 固定阈值，灵敏度变化已反映在 scaledDelta
         let threshold: CGFloat = 2.0
         guard wheelAccumulatedDelta >= threshold else { return }
 
@@ -238,7 +277,6 @@ extension CAGridView {
 
     override func mouseDown(with event: NSEvent) {
         guard !externalAppDragSessionActive else { return }
-        // 确保成为第一响应者，这样后续的滚轮事件才能被接收
         window?.makeFirstResponder(self)
 
         let location = convert(event.locationInWindow, from: nil)
@@ -1221,6 +1259,7 @@ extension CAGridView {
         wheelAccumulatedDelta = 0
         wheelLastDirection = 0
         wheelLastFlipAt = nil
+        resetAutomaticScrollAxis()
     }
 
     /// 计算点击位置对应的网格位置（即使是空白区域）

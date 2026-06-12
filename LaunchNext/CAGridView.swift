@@ -175,6 +175,11 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     var wheelLastDirection: Int = 0
     var wheelLastFlipAt: Date?
     let wheelFlipCooldown: TimeInterval = 0.15
+    var automaticScrollAxis: ScrollAxisLock = .undecided
+    var automaticScrollAccumulatedX: CGFloat = 0
+    var automaticScrollAccumulatedY: CGFloat = 0
+    let automaticScrollAxisThreshold: CGFloat = 10
+    let automaticScrollAxisDominance: CGFloat = 1.4
     // Legacy reference:
     // var wheelSnapTimer: Timer?
     // let wheelSnapDelay: TimeInterval = 0.15  // 停止滚动后多久触发 snap

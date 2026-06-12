@@ -2,6 +2,152 @@ import SwiftUI
 import Combine
 import AppKit
 import CoreVideo
+import CoreImage
+import Darwin
+
+private struct WallpaperBackgroundView: NSViewRepresentable {
+    private typealias CGWindowListCreateImageFn = @convention(c) (CGRect, CGWindowListOption, CGWindowID, CGWindowImageOption) -> Unmanaged<CGImage>?
+    private static let windowImageFunction: CGWindowListCreateImageFn? = {
+        guard let handle = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_NOW),
+              let symbol = dlsym(handle, "CGWindowListCreateImage") else {
+            return nil
+        }
+        return unsafeBitCast(symbol, to: CGWindowListCreateImageFn.self)
+    }()
+
+    let screen: NSScreen?
+    let blurRadius: CGFloat
+    let saturation: CGFloat
+    let contrast: CGFloat
+    let brightness: CGFloat
+
+    func makeNSView(context: Context) -> NSImageView {
+        let view = NSImageView()
+        view.imageScaling = .scaleAxesIndependently
+        view.imageAlignment = .alignCenter
+        updateImage(for: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: NSImageView, context: Context) {
+        updateImage(for: nsView)
+    }
+
+    private func updateImage(for view: NSImageView) {
+        guard let screen else {
+            view.image = nil
+            view.identifier = nil
+            return
+        }
+
+        let signature = desktopWallpaperSignature(for: screen,
+                                                  blurRadius: blurRadius,
+                                                  saturation: saturation,
+                                                  contrast: contrast,
+                                                  brightness: brightness)
+        if view.identifier?.rawValue == signature {
+            return
+        }
+        view.identifier = NSUserInterfaceItemIdentifier(signature)
+        view.image = captureDesktopWallpaper(for: screen).flatMap { image in
+            processedImage(from: image,
+                           blurRadius: blurRadius,
+                           saturation: saturation,
+                           contrast: contrast,
+                           brightness: brightness)
+        }
+    }
+
+    private func desktopWallpaperSignature(for screen: NSScreen,
+                                           blurRadius: CGFloat,
+                                           saturation: CGFloat,
+                                           contrast: CGFloat,
+                                           brightness: CGFloat) -> String {
+        let frame = screen.frame
+        return "\(frame.origin.x),\(frame.origin.y),\(frame.size.width),\(frame.size.height),\(blurRadius),\(saturation),\(contrast),\(brightness)"
+    }
+
+    private func captureDesktopWallpaper(for screen: NSScreen) -> NSImage? {
+        let frame = screen.frame
+        let windowInfo = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+
+        let targetWindowID: CGWindowID? = windowInfo.first(where: { info in
+            let owner = info[kCGWindowOwnerName as String] as? String ?? ""
+            let name = info[kCGWindowName as String] as? String ?? ""
+            guard owner == "WindowManager", name == "Wallpaper" else { return false }
+            guard let bounds = info[kCGWindowBounds as String] as? [String: Any],
+                  let x = bounds["X"] as? CGFloat,
+                  let y = bounds["Y"] as? CGFloat,
+                  let width = bounds["Width"] as? CGFloat,
+                  let height = bounds["Height"] as? CGFloat else { return false }
+            let rect = CGRect(x: x, y: y, width: width, height: height)
+            return rect.intersects(frame)
+        }).flatMap { info in
+            info[kCGWindowNumber as String] as? CGWindowID
+        }
+
+        guard let targetWindowID,
+              let cgImage = dynamicCreateWindowImage(screenBounds: .null,
+                                                     listOption: .optionIncludingWindow,
+                                                     windowID: targetWindowID,
+                                                     imageOption: [.boundsIgnoreFraming, .bestResolution]) else {
+            return nil
+        }
+
+        return NSImage(cgImage: cgImage, size: frame.size)
+    }
+
+    private func dynamicCreateWindowImage(screenBounds: CGRect,
+                                          listOption: CGWindowListOption,
+                                          windowID: CGWindowID,
+                                          imageOption: CGWindowImageOption) -> CGImage? {
+        Self.windowImageFunction?(screenBounds, listOption, windowID, imageOption)?.takeRetainedValue()
+    }
+
+    private func processedImage(from image: NSImage,
+                                blurRadius: CGFloat,
+                                saturation: CGFloat,
+                                contrast: CGFloat,
+                                brightness: CGFloat) -> NSImage? {
+        guard let tiffData = image.tiffRepresentation,
+              let ciImage = CIImage(data: tiffData) else { return image }
+
+        var output = ciImage
+        if blurRadius > 0 {
+            let clampFilter = CIFilter(name: "CIAffineClamp")
+            clampFilter?.setValue(output, forKey: kCIInputImageKey)
+            clampFilter?.setValue(CGAffineTransform.identity, forKey: kCIInputTransformKey)
+            if let clamped = clampFilter?.outputImage {
+                output = clamped
+            }
+
+            let blurFilter = CIFilter(name: "CIGaussianBlur")
+            blurFilter?.setValue(output, forKey: kCIInputImageKey)
+            blurFilter?.setValue(blurRadius, forKey: kCIInputRadiusKey)
+            if let blurred = blurFilter?.outputImage {
+                output = blurred.cropped(to: ciImage.extent)
+            }
+        }
+
+        if saturation != 1 || contrast != 1 || brightness != 0 {
+            let colorFilter = CIFilter(name: "CIColorControls")
+            colorFilter?.setValue(output, forKey: kCIInputImageKey)
+            colorFilter?.setValue(saturation, forKey: kCIInputSaturationKey)
+            colorFilter?.setValue(contrast, forKey: kCIInputContrastKey)
+            colorFilter?.setValue(brightness, forKey: kCIInputBrightnessKey)
+            if let adjusted = colorFilter?.outputImage {
+                output = adjusted
+            }
+        }
+
+        let cropRect = ciImage.extent
+        let context = CIContext(options: nil)
+        guard let cgImage = context.createCGImage(output.cropped(to: cropRect), from: cropRect) else {
+            return image
+        }
+        return NSImage(cgImage: cgImage, size: image.size)
+    }
+}
 
 // MARK: - LaunchpadItem extension
 extension LaunchpadItem {
@@ -11,7 +157,7 @@ extension LaunchpadItem {
     }
 }
 
-// MARK: - 简化的翻页管理器
+// MARK: - Page flip manager
 private class PageFlipManager: ObservableObject {
     @Published var isCooldown: Bool = false
     private var lastFlipTime: Date?
@@ -81,6 +227,7 @@ private extension View {
     @ViewBuilder
     func launchpadBackgroundStyle(_ style: AppStore.BackgroundStyle,
                                   cornerRadius: CGFloat,
+                                  preferMaterialBlur: Bool = true,
                                   forcedColor: Color? = nil,
                                   maskColor: Color? = nil) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -96,11 +243,26 @@ private extension View {
                     base
                 }
             case .blur:
-                let base = self.background(.ultraThinMaterial, in: shape)
-                if let maskColor {
-                    base.background(maskColor, in: shape)
+                if preferMaterialBlur {
+                    let base = self
+                        .background(.ultraThinMaterial, in: shape)
+                        .overlay {
+                            shape
+                                .fill(Color.white.opacity(0.03))
+                                .allowsHitTesting(false)
+                        }
+                    if let maskColor {
+                        base.background(maskColor, in: shape)
+                    } else {
+                        base
+                    }
                 } else {
-                    base
+                    let base = self.background(Color.white.opacity(0.04), in: shape)
+                    if let maskColor {
+                        base.background(maskColor, in: shape)
+                    } else {
+                        base
+                    }
                 }
             }
         }
@@ -133,17 +295,23 @@ struct LaunchpadView: View {
     @State private var currentIconSize: CGFloat = 0
     @State private var headerTotalHeight: CGFloat = 0
     
-    // 性能优化：使用静态缓存避免状态修改问题
+    // Static cache avoids repeated geometry recomputation during drag updates.
     private static var geometryCache: [String: CGPoint] = [:]
     private static var lastGeometryUpdate: Date = Date.distantPast
-    private let geometryCacheTimeout: TimeInterval = 0.1 // 100ms缓存超时
+    private let geometryCacheTimeout: TimeInterval = 0.1
     private let searchEngine = LaunchpadSearchEngine()
     
-    // 性能监控
+    // Performance monitoring
     @State private var performanceMetrics: [String: TimeInterval] = [:]
-    private let enablePerformanceMonitoring = false // 设置为true启用性能监控
+    private let enablePerformanceMonitoring = false
     @State private var isHandoffDragging: Bool = false
     private struct ScrollState {
+        enum AxisLock {
+            case undecided
+            case horizontal
+            case vertical
+        }
+
         var isUserSwiping: Bool = false
         var accumulatedX: CGFloat = 0
         var wheelAccumulated: CGFloat = 0
@@ -152,10 +320,15 @@ struct LaunchpadView: View {
         var followOffset: CGFloat = 0
         var followLastUpdateAt: TimeInterval = 0
         var followLastOffset: CGFloat = 0
+        var automaticAxis: AxisLock = .undecided
+        var automaticAccumulatedX: CGFloat = 0
+        var automaticAccumulatedY: CGFloat = 0
     }
 
     @State private var scrollState = ScrollState()
     private let wheelFlipCooldown: TimeInterval = 0.15
+    private let automaticScrollAxisThreshold: CGFloat = 10
+    private let automaticScrollAxisDominance: CGFloat = 1.4
     @State private var dragPointerOffset: CGPoint = .zero
     @State private var blankDragStartPoint: CGPoint? = nil
     @State private var blankDragShouldIgnore: Bool = false
@@ -167,6 +340,7 @@ struct LaunchpadView: View {
     @State private var postOnboardingGridOpacity: Double = 1
     @State private var postOnboardingGridScale: CGFloat = 1
     @State private var pendingPostOnboardingReveal: Bool = false
+    @State private var currentBackgroundScreen: NSScreen? = NSApp.keyWindow?.screen ?? NSScreen.main
 
     private var isFolderOpen: Bool { appStore.openFolder != nil }
     private var currentScreenID: String? {
@@ -194,6 +368,49 @@ struct LaunchpadView: View {
         guard appStore.isFullscreenMode, appStore.shouldShowOnboarding, colorScheme == .light else { return 0.0 }
         return 0.20
     }
+
+    private var usesWallpaperBackground: Bool {
+        appStore.launchpadBackgroundImageSource == .wallpaper
+    }
+
+    private var effectiveBackgroundStyle: AppStore.BackgroundStyle {
+        usesWallpaperBackground ? .blur : appStore.launchpadBackgroundStyle
+    }
+
+    private var wallpaperContainerFillColor: Color {
+        let opacityScale = wallpaperBlurOpacityScale
+        return colorScheme == .dark
+            ? Color.black.opacity(0.22 * opacityScale)
+            : Color.white.opacity(0.10 * opacityScale)
+    }
+
+    private var searchFieldFillColor: Color {
+        let opacityScale = max(wallpaperBlurOpacityScale, 0.35)
+        return colorScheme == .dark
+            ? Color.white.opacity(0.09 * opacityScale)
+            : Color.white.opacity(0.22 * opacityScale)
+    }
+
+    private var wallpaperBlurOpacityScale: Double {
+        guard AppStore.wallpaperBlurRadiusRange.upperBound > 0 else { return 0 }
+        return min(max(appStore.wallpaperBlurRadius / AppStore.wallpaperBlurRadiusRange.upperBound, 0), 1)
+    }
+
+    @ViewBuilder
+    private var launchpadBackgroundImageLayer: some View {
+        if usesWallpaperBackground {
+            WallpaperBackgroundView(screen: currentBackgroundScreen,
+                                    blurRadius: wallpaperBlurRadius,
+                                    saturation: 1,
+                                    contrast: 1,
+                                    brightness: 0)
+                .ignoresSafeArea()
+                .scaleEffect(1.06)
+                .clipped()
+        }
+    }
+
+    private var wallpaperBlurRadius: CGFloat { CGFloat(appStore.wallpaperBlurRadius) }
 
     var filteredItems: [LaunchpadItem] {
         searchEngine.filter(items: appStore.items,
@@ -311,6 +528,7 @@ struct LaunchpadView: View {
          }
 
            .onAppear {
+              refreshBackgroundScreen()
               if !appStore.shouldShowOnboarding {
                   appStore.performInitialScanIfNeeded()
                   checkCacheStatus()
@@ -425,14 +643,27 @@ struct LaunchpadView: View {
     }
 
     private var launchpadBaseView: some View {
-        GeometryReader { geo in
-            launchpadMainContent(in: geo)
+        let containerCornerRadius = appStore.isFullscreenMode ? 0.0 : 30.0
+
+        return ZStack {
+            launchpadBackgroundImageLayer
+
+            GeometryReader { geo in
+                launchpadMainContent(in: geo)
+            }
+            .padding()
+            .background {
+                if usesWallpaperBackground && appStore.developmentBackgroundOverride.color == nil {
+                    RoundedRectangle(cornerRadius: containerCornerRadius, style: .continuous)
+                        .fill(wallpaperContainerFillColor)
+                }
+            }
+            .launchpadBackgroundStyle(effectiveBackgroundStyle,
+                                      cornerRadius: containerCornerRadius,
+                                      preferMaterialBlur: !usesWallpaperBackground,
+                                      forcedColor: appStore.developmentBackgroundOverride.color,
+                                      maskColor: appStore.backgroundMaskColor(for: colorScheme))
         }
-        .padding()
-        .launchpadBackgroundStyle(appStore.launchpadBackgroundStyle,
-                                  cornerRadius: appStore.isFullscreenMode ? 0 : 30,
-                                  forcedColor: appStore.developmentBackgroundOverride.color,
-                                  maskColor: appStore.backgroundMaskColor(for: colorScheme))
         .background(
             ZStack {
                 Color.black.opacity(backdropOpacity)
@@ -455,7 +686,6 @@ struct LaunchpadView: View {
         let indicatorOffset = appStore.effectivePageIndicatorOffset(for: currentScreenID)
 
         return VStack {
-            // 在顶部添加动态padding（全屏模式）
             if config.isFullscreen {
                 Spacer()
                     .frame(height: actualTopPadding)
@@ -469,7 +699,15 @@ struct LaunchpadView: View {
                 }
                 .padding(.vertical, 8)
                 .padding(.horizontal, 12)
-                .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(usesWallpaperBackground ? searchFieldFillColor : Color.clear)
+                )
+                .launchpadBackgroundStyle(effectiveBackgroundStyle,
+                                          cornerRadius: 16,
+                                          preferMaterialBlur: !usesWallpaperBackground,
+                                          forcedColor: nil,
+                                          maskColor: nil)
                 .overlay(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
@@ -478,7 +716,6 @@ struct LaunchpadView: View {
                 .disabled(isFolderOpen)
                 .onChange(of: appStore.searchQuery) {
                     guard !isFolderOpen else { return }
-                    // 避免在视图更新周期内直接发布变化，推迟到下一循环
                     let maxPageIndex = max(pages.count - 1, 0)
                     DispatchQueue.main.async {
                         appStore.currentPage = 0
@@ -506,6 +743,17 @@ struct LaunchpadView: View {
                         .buttonStyle(.plain)
                         .help(appStore.localized(.refresh))
                     }
+                    if appStore.showQuickCompactLayoutButton {
+                        Button {
+                            appStore.autoFillEmptySlots()
+                        } label: {
+                            Image(systemName: "square.grid.3x3.topleft.filled")
+                                .font(.title)
+                                .foregroundStyle(.placeholder.opacity(0.5))
+                        }
+                        .buttonStyle(.plain)
+                        .help(appStore.localized(.compactLayout))
+                    }
                     Button {
                         appStore.isSetting = true
                     } label: {
@@ -520,7 +768,6 @@ struct LaunchpadView: View {
             .padding(.horizontal)
             .background(
                 GeometryReader { proxy in
-                    // 记录顶部区域的总高度（包含顶部动态 padding + 此区域本身 + 额外余量）
                     Color.clear.onAppear {
                         let extra: CGFloat = 24
                         let total = (config.isFullscreen ? geo.size.height * config.topPadding : 0) + proxy.size.height + extra
@@ -536,7 +783,6 @@ struct LaunchpadView: View {
             .opacity(isFolderOpen ? 0.1 : 1)
             .allowsHitTesting(!isFolderOpen)
 
-            // 保持原有上下留白，去掉可见的分割线
             Spacer()
                 .frame(height: 16)
 
@@ -580,14 +826,14 @@ struct LaunchpadView: View {
         ZStack {
             // 全窗口滚动捕获层（不拦截点击，仅监听滚动）
             if !appStore.useCAGridRenderer {
-                ScrollEventCatcher { deltaX, deltaY, phase, isMomentum, isPrecise in
+                ScrollEventCatcher { deltaX, deltaY, phase, isMomentum, isContinuousGesture in
                     guard !appStore.isSetting else { return }
                     let pageWidth = currentContainerSize.width + config.pageSpacing
                     handleScroll(deltaX: deltaX,
                                  deltaY: deltaY,
                                  phase: phase,
                                  isMomentum: isMomentum,
-                                 isPrecise: isPrecise,
+                                 isContinuousGesture: isContinuousGesture,
                                  pageWidth: pageWidth)
                 }
                 .ignoresSafeArea()
@@ -1966,6 +2212,7 @@ extension LaunchpadView {
                                                columnWidth: CGFloat,
                                                appHeight: CGFloat,
                                                iconSize: CGFloat) {
+        guard appStore.closeOnBlankAreaClick else { return }
         guard appStore.openFolder == nil, draggingItem == nil else { return }
         if let idx = indexAt(point: point,
                              in: geoSize,
@@ -1999,12 +2246,17 @@ extension LaunchpadView {
 
 // MARK: - Keyboard Navigation
 extension LaunchpadView {
+    private func refreshBackgroundScreen() {
+        currentBackgroundScreen = NSApp.keyWindow?.screen ?? NSScreen.main
+    }
+
     private func setupWindowShownObserver() {
         if let observer = windowObserver {
             NotificationCenter.default.removeObserver(observer)
             windowObserver = nil
         }
         windowObserver = NotificationCenter.default.addObserver(forName: .launchpadWindowShown, object: nil, queue: .main) { _ in
+            refreshBackgroundScreen()
             isWindowVisible = true
             isKeyboardNavigationActive = false
             selectedIndex = 0
@@ -2600,6 +2852,66 @@ extension LaunchpadView {
 
 // MARK: - Scroll handling (mouse wheel and trackpad)
 extension LaunchpadView {
+    fileprivate static func isContinuousScrollGesture(phase: NSEvent.Phase, isMomentum: Bool) -> Bool {
+        !phase.isEmpty || isMomentum
+    }
+
+    fileprivate static func resolvedScrollAxes(for event: NSEvent) -> (x: CGFloat, y: CGFloat, phase: NSEvent.Phase, isMomentum: Bool, isContinuousGesture: Bool) {
+        let phase = event.phase != [] ? event.phase : event.momentumPhase
+        let isMomentum = event.momentumPhase != []
+        let isContinuousGesture = Self.isContinuousScrollGesture(phase: phase, isMomentum: isMomentum)
+
+        if isContinuousGesture {
+            return (event.scrollingDeltaX, event.scrollingDeltaY, phase, isMomentum, true)
+        }
+
+        let deltaX = event.deltaX != 0 ? event.deltaX : event.scrollingDeltaX
+        let deltaY = event.deltaY != 0 ? event.deltaY : event.scrollingDeltaY
+        return (deltaX, deltaY, phase, isMomentum, false)
+    }
+
+    private func resetAutomaticScrollAxis() {
+        scrollState.automaticAxis = .undecided
+        scrollState.automaticAccumulatedX = 0
+        scrollState.automaticAccumulatedY = 0
+    }
+
+    private func automaticScrollDelta(deltaX: CGFloat, deltaY: CGFloat, isContinuousGesture: Bool) -> CGFloat? {
+        guard isContinuousGesture else {
+            return -deltaY
+        }
+
+        scrollState.automaticAccumulatedX += deltaX
+        scrollState.automaticAccumulatedY += deltaY
+
+        if scrollState.automaticAxis == .undecided {
+            let x = abs(scrollState.automaticAccumulatedX)
+            let y = abs(scrollState.automaticAccumulatedY)
+            if x >= automaticScrollAxisThreshold,
+               x >= y * automaticScrollAxisDominance {
+                scrollState.automaticAxis = .horizontal
+                let initialDelta = scrollState.automaticAccumulatedX
+                scrollState.automaticAccumulatedX = 0
+                scrollState.automaticAccumulatedY = 0
+                return initialDelta
+            } else if y >= automaticScrollAxisThreshold * 2,
+                      y >= x * (automaticScrollAxisDominance + 0.5) {
+                scrollState.automaticAxis = .vertical
+            } else {
+                return nil
+            }
+        }
+
+        switch scrollState.automaticAxis {
+        case .horizontal:
+            return deltaX
+        case .vertical:
+            return nil
+        case .undecided:
+            return nil
+        }
+    }
+
     private func rubberbandOffset(_ value: CGFloat, limit: CGFloat) -> CGFloat {
         let factor: CGFloat = 0.5
         let distance = abs(value)
@@ -2646,14 +2958,35 @@ extension LaunchpadView {
                               deltaY: CGFloat,
                               phase: NSEvent.Phase,
                               isMomentum: Bool,
-                              isPrecise: Bool,
+                              isContinuousGesture: Bool,
                               pageWidth: CGFloat) {
         guard !isFolderOpen else { return }
 
-        let primaryDelta = abs(deltaX) >= abs(deltaY) ? deltaX : -deltaY
+        if phase.contains(.began) {
+            resetAutomaticScrollAxis()
+            scrollState.accumulatedX = 0
+            scrollState.isUserSwiping = false
+            scrollState.followLastUpdateAt = 0
+            scrollState.followLastOffset = 0
+            resetFollowOffset(animated: false)
+        }
 
-        // Non-precise wheel: accumulate deltas and apply a short cooldown.
-        if !isPrecise {
+        guard let primaryDelta = automaticScrollDelta(deltaX: deltaX,
+                                                      deltaY: deltaY,
+                                                      isContinuousGesture: isContinuousGesture) else {
+            if phase.contains(.ended) || phase.contains(.cancelled) {
+                resetAutomaticScrollAxis()
+                scrollState.accumulatedX = 0
+                scrollState.isUserSwiping = false
+                scrollState.followLastUpdateAt = 0
+                scrollState.followLastOffset = 0
+                resetFollowOffset(animated: appStore.enableAnimations)
+            }
+            return
+        }
+
+        // Wheel input: accumulate deltas and apply a short cooldown.
+        if !isContinuousGesture {
             handleWheelScroll(primaryDelta)
             return
         }
@@ -2680,6 +3013,7 @@ extension LaunchpadView {
                 }
                 scrollState.accumulatedX = 0
                 scrollState.isUserSwiping = false
+                resetAutomaticScrollAxis()
             default:
                 break
             }
@@ -2702,6 +3036,13 @@ extension LaunchpadView {
             scrollState.followLastUpdateAt = 0
             scrollState.followLastOffset = 0
         case .changed:
+            if !scrollState.isUserSwiping {
+                scrollState.isUserSwiping = true
+                scrollState.accumulatedX = 0
+                scrollState.followOffset = 0
+                scrollState.followLastUpdateAt = 0
+                scrollState.followLastOffset = 0
+            }
             scrollState.isUserSwiping = true
             scrollState.accumulatedX += delta
             var proposed = scrollState.accumulatedX
@@ -2735,6 +3076,7 @@ extension LaunchpadView {
             scrollState.isUserSwiping = false
             scrollState.followLastUpdateAt = 0
             scrollState.followLastOffset = 0
+            resetAutomaticScrollAxis()
         default:
             break
         }
@@ -2763,15 +3105,12 @@ struct ScrollEventCatcher: NSViewRepresentable {
         override var acceptsFirstResponder: Bool { true }
 
         override func scrollWheel(with event: NSEvent) {
-            // Prefer primary phase; fallback to momentum
-            let phase = event.phase != [] ? event.phase : event.momentumPhase
-            let isMomentum = event.momentumPhase != []
-            let isPreciseOrTrackpad = event.hasPreciseScrollingDeltas || event.phase != [] || event.momentumPhase != []
-            onScroll?(event.scrollingDeltaX,
-                      event.scrollingDeltaY,
-                      phase,
-                      isMomentum,
-                      isPreciseOrTrackpad)
+            let axes = LaunchpadView.resolvedScrollAxes(for: event)
+            onScroll?(axes.x,
+                      axes.y,
+                      axes.phase,
+                      axes.isMomentum,
+                      axes.isContinuousGesture)
         }
 
         override func viewDidMoveToWindow() {
@@ -2779,14 +3118,12 @@ struct ScrollEventCatcher: NSViewRepresentable {
             if let monitor = eventMonitor { NSEvent.removeMonitor(monitor); eventMonitor = nil }
             // 全局监听当前窗口的滚动事件，不消费事件
             eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel]) { [weak self] event in
-                let phase = event.phase != [] ? event.phase : event.momentumPhase
-                let isMomentum = event.momentumPhase != []
-                let isPreciseOrTrackpad = event.hasPreciseScrollingDeltas || event.phase != [] || event.momentumPhase != []
-                self?.onScroll?(event.scrollingDeltaX,
-                                event.scrollingDeltaY,
-                                phase,
-                                isMomentum,
-                                isPreciseOrTrackpad)
+                let axes = LaunchpadView.resolvedScrollAxes(for: event)
+                self?.onScroll?(axes.x,
+                                axes.y,
+                                axes.phase,
+                                axes.isMomentum,
+                                axes.isContinuousGesture)
                 return event
             }
         }
@@ -3499,7 +3836,7 @@ extension LaunchpadView {
         folderHoverBeganAt = nil
     }
     
-    // 性能监控辅助函数
+    // Performance monitoring helper.
     private func measurePerformance<T>(_ operation: String, _ block: () -> T) -> T {
         guard enablePerformanceMonitoring else { return block() }
         
@@ -3508,9 +3845,6 @@ extension LaunchpadView {
         let timeElapsed = CFAbsoluteTimeGetCurrent() - startTime
         
         performanceMetrics[operation] = timeElapsed
-        if timeElapsed > 0.016 { // 超过16ms（60fps阈值）
-            print("⚠️ 性能警告: \(operation) 耗时 \(String(format: "%.3f", timeElapsed * 1000))ms")
-        }
         
         return result
     }

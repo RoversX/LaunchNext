@@ -155,6 +155,10 @@ enum LocalizationKey: String {
     case backgroundMaskTitle
     case backgroundMaskLightLabel
     case backgroundMaskDarkLabel
+    case backgroundImageSourceTitle
+    case backgroundImageSourceLiveDesktop
+    case backgroundImageSourceWallpaper
+    case wallpaperBlurStrengthTitle
     case folderPreviewHighResTitle
     case folderPreviewHighResHint
     case folderLayoutTitle
@@ -220,9 +224,12 @@ enum LocalizationKey: String {
     case layoutPresetApplyFailedMessage
     case layoutPresetOtherFolderTitle
     case refresh
+    case compactLayout
     case showQuickRefreshButton
+    case showQuickCompactLayoutButton
     case launchAtLoginTitle
     case launchAtLoginDescription
+    case closeOnBlankAreaClickTitle
     case lockLayoutTitle
     case lockLayoutDescription
     case scanSourcesIntroTitle
@@ -655,9 +662,12 @@ final class LocalizationManager {
                 .layoutPresetApplyFailedMessage: "Unable to apply the preset because no available apps were found.",
                 .layoutPresetOtherFolderTitle: "Other",
                 .refresh: "Refresh",
+                .compactLayout: "Compact layout",
                 .showQuickRefreshButton: "Show quick refresh button",
+                .showQuickCompactLayoutButton: "Show quick compact layout button",
                 .launchAtLoginTitle: "Silent launch at login",
                 .launchAtLoginDescription: "After logging into macOS, LaunchNext starts in the background without showing its window.",
+                .closeOnBlankAreaClickTitle: "Close when clicking blank area",
                 .lockLayoutTitle: "Lock layout",
                 .lockLayoutDescription: "Prevent rearranging apps and folders until you turn this off.",
                 .scanSourcesIntroTitle: "Manage additional app libraries",
@@ -691,6 +701,10 @@ final class LocalizationManager {
                 .backgroundMaskTitle: "Background mask",
                 .backgroundMaskLightLabel: "Light appearance mask",
                 .backgroundMaskDarkLabel: "Dark appearance mask",
+                .backgroundImageSourceTitle: "Background image source",
+                .backgroundImageSourceLiveDesktop: "Live desktop",
+                .backgroundImageSourceWallpaper: "Wallpaper image",
+                .wallpaperBlurStrengthTitle: "Wallpaper blur strength",
                 .folderPreviewHighResTitle: "High-resolution folder previews",
                 .folderPreviewHighResHint: "Render folder icons at Retina scale for sharper previews (uses more memory).",
                 .folderLayoutTitle: "Folder Layout",
@@ -1430,9 +1444,12 @@ final class LocalizationManager {
                 .layoutPresetApplyFailedMessage: "未找到可用应用，无法应用该预设。",
                 .layoutPresetOtherFolderTitle: "其他",
                 .refresh: "刷新",
+                .compactLayout: "整理图标",
                 .showQuickRefreshButton: "显示快速刷新按钮",
+                .showQuickCompactLayoutButton: "显示快速整理图标按钮",
                 .launchAtLoginTitle: "开机静默启动",
                 .launchAtLoginDescription: "登录后自动后台启动 LaunchNext，窗口保持隐藏，可随时用快捷键唤出。",
+                .closeOnBlankAreaClickTitle: "点击空白处关闭启动台",
                 .lockLayoutTitle: "锁定布局",
                 .lockLayoutDescription: "启用后将禁止拖动图标或文件夹，关闭后可继续调整。",
                 .scanSourcesIntroTitle: "管理额外的应用来源",
@@ -1462,6 +1479,10 @@ final class LocalizationManager {
                 .backgroundMaskTitle: "背景遮罩",
                 .backgroundMaskLightLabel: "浅色模式遮罩",
                 .backgroundMaskDarkLabel: "暗色模式遮罩",
+                .backgroundImageSourceTitle: "背景图来源",
+                .backgroundImageSourceLiveDesktop: "实时桌面",
+                .backgroundImageSourceWallpaper: "壁纸图像",
+                .wallpaperBlurStrengthTitle: "壁纸模糊强度",
                 .folderPreviewHighResTitle: "高分辨率文件夹预览",
                 .folderPreviewHighResHint: "以 Retina 像素渲染文件夹图标，更清晰（占用更多内存）。",
                 .folderLayoutTitle: "文件夹布局",
@@ -3792,6 +3813,10 @@ final class LocalizationManager {
             .backgroundMaskTitle: "背景遮罩",
             .backgroundMaskLightLabel: "淺色模式遮罩",
             .backgroundMaskDarkLabel: "暗色模式遮罩",
+            .backgroundImageSourceTitle: "背景圖來源",
+            .backgroundImageSourceLiveDesktop: "即時桌面",
+            .backgroundImageSourceWallpaper: "桌布影像",
+            .wallpaperBlurStrengthTitle: "桌布模糊強度",
             .folderPreviewHighResTitle: "高解析度資料夾預覽",
             .folderPreviewHighResHint: "以 Retina 畫素渲染資料夾圖示，更清晰（佔用更多記憶體）。",
             .folderLayoutTitle: "資料夾佈局",
@@ -3857,9 +3882,12 @@ final class LocalizationManager {
             .layoutPresetApplyFailedMessage: "未找到可用應用，無法應用該預設。",
             .layoutPresetOtherFolderTitle: "其他",
             .refresh: "重新整理",
+            .compactLayout: "整理圖示",
             .showQuickRefreshButton: "顯示快速重新整理按鈕",
+            .showQuickCompactLayoutButton: "顯示快速整理圖示按鈕",
             .launchAtLoginTitle: "開機靜默啟動",
             .launchAtLoginDescription: "登入後自動後台啟動 LaunchNext，視窗保持隱藏，可隨時用快速鍵喚出。",
+            .closeOnBlankAreaClickTitle: "點擊空白處關閉啟動台",
             .lockLayoutTitle: "鎖定佈局",
             .lockLayoutDescription: "啟用後將禁止拖動圖示或資料夾，關閉後可繼續調整。",
             .scanSourcesIntroTitle: "管理額外的應用來源",

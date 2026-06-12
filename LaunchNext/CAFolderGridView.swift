@@ -2,6 +2,12 @@ import AppKit
 import QuartzCore
 
 final class CAFolderGridView: NSView {
+    private enum ScrollAxisLock {
+        case undecided
+        case horizontal
+        case vertical
+    }
+
     var apps: [AppInfo] = [] {
         didSet { rebuildLayers() }
     }
@@ -133,6 +139,11 @@ final class CAFolderGridView: NSView {
     private var wheelLastDirection = 0
     private var wheelLastFlipAt: Date?
     private let wheelFlipCooldown: TimeInterval = 0.15
+    private var automaticScrollAxis: ScrollAxisLock = .undecided
+    private var automaticScrollAccumulatedX: CGFloat = 0
+    private var automaticScrollAccumulatedY: CGFloat = 0
+    private let automaticScrollAxisThreshold: CGFloat = 10
+    private let automaticScrollAxisDominance: CGFloat = 1.4
     private var currentHoverIndex: Int?
     private var lastReportedPage: Int?
     private var lastReportedPageCount: Int?
@@ -676,11 +687,24 @@ final class CAFolderGridView: NSView {
     }
 
     private func handlePagedScroll(_ event: NSEvent) {
-        let deltaX = event.scrollingDeltaX
-        let deltaY = event.scrollingDeltaY
-        let dominant = scaledPageDelta(deltaX: deltaX, deltaY: deltaY)
+        let axes = resolvedPagedAxes(for: event)
+        let deltaX = axes.x
+        let deltaY = axes.y
+        let isContinuousGesture = isContinuousScrollGesture(event)
+        if event.phase.contains(.began) {
+            resetAutomaticScrollAxis()
+        }
 
-        if !event.hasPreciseScrollingDeltas {
+        guard let dominant = scaledPageDelta(deltaX: deltaX,
+                                            deltaY: deltaY,
+                                            isContinuousGesture: isContinuousGesture) else {
+            if event.phase.contains(.ended) || event.phase.contains(.cancelled) {
+                resetAutomaticScrollAxis()
+            }
+            return
+        }
+
+        if !isContinuousGesture {
             if dominant != 0 {
                 handleWheelPaging(with: dominant)
             }
@@ -700,18 +724,20 @@ final class CAFolderGridView: NSView {
         }
 
         if (phase.contains(.changed) || phaseLessScroll), dominant != 0 {
-            if !(isPageScrollAnimating && !isPageScrollDragging) {
-                if !isPageScrollDragging { beginPageScroll() }
-                updatePageScroll(by: dominant)
+            if !isPageScrollDragging {
+                beginPageScroll()
+            }
 
-                if phaseLessScroll {
-                    schedulePageScrollSnap(velocity: dominant)
-                }
+            updatePageScroll(by: dominant)
+
+            if phaseLessScroll {
+                schedulePageScrollSnap(velocity: dominant)
             }
         }
 
         if ended {
             finishPageScroll(velocity: dominant)
+            resetAutomaticScrollAxis()
         }
     }
 
@@ -724,8 +750,66 @@ final class CAFolderGridView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: workItem)
     }
 
-    private func scaledPageDelta(deltaX: CGFloat, deltaY: CGFloat) -> CGFloat {
-        let rawDelta = abs(deltaX) > abs(deltaY) ? deltaX : -deltaY
+    private func resetAutomaticScrollAxis() {
+        automaticScrollAxis = .undecided
+        automaticScrollAccumulatedX = 0
+        automaticScrollAccumulatedY = 0
+    }
+
+    private func lockedAutomaticPagedDelta(deltaX: CGFloat, deltaY: CGFloat, isContinuousGesture: Bool) -> CGFloat? {
+        guard isContinuousGesture else {
+            return -deltaY
+        }
+
+        automaticScrollAccumulatedX += deltaX
+        automaticScrollAccumulatedY += deltaY
+
+        if automaticScrollAxis == .undecided {
+            let x = abs(automaticScrollAccumulatedX)
+            let y = abs(automaticScrollAccumulatedY)
+            if x >= automaticScrollAxisThreshold,
+               x >= y * automaticScrollAxisDominance {
+                automaticScrollAxis = .horizontal
+                let initialDelta = automaticScrollAccumulatedX
+                automaticScrollAccumulatedX = 0
+                automaticScrollAccumulatedY = 0
+                return initialDelta
+            } else if y >= automaticScrollAxisThreshold * 2,
+                      y >= x * (automaticScrollAxisDominance + 0.5) {
+                automaticScrollAxis = .vertical
+            } else {
+                return nil
+            }
+        }
+
+        switch automaticScrollAxis {
+        case .horizontal:
+            return deltaX
+        case .vertical:
+            return nil
+        case .undecided:
+            return nil
+        }
+    }
+
+    private func isContinuousScrollGesture(_ event: NSEvent) -> Bool {
+        !event.phase.isEmpty || !event.momentumPhase.isEmpty
+    }
+
+    private func resolvedPagedAxes(for event: NSEvent) -> (x: CGFloat, y: CGFloat) {
+        if isContinuousScrollGesture(event) {
+            return (event.scrollingDeltaX, event.scrollingDeltaY)
+        }
+
+        let deltaX = event.deltaX != 0 ? event.deltaX : event.scrollingDeltaX
+        let deltaY = event.deltaY != 0 ? event.deltaY : event.scrollingDeltaY
+        return (deltaX, deltaY)
+    }
+
+    private func scaledPageDelta(deltaX: CGFloat, deltaY: CGFloat, isContinuousGesture: Bool) -> CGFloat? {
+        guard let rawDelta = lockedAutomaticPagedDelta(deltaX: deltaX,
+                                                       deltaY: deltaY,
+                                                       isContinuousGesture: isContinuousGesture) else { return nil }
         let baseline = max(AppStore.defaultScrollSensitivity, 0.0001)
         let sensitivityScale = CGFloat(max(scrollSensitivity, 0.0001) / baseline)
         return rawDelta * sensitivityScale
@@ -821,10 +905,10 @@ final class CAFolderGridView: NSView {
 
     private func handleVerticalScroll(_ event: NSEvent) {
         let metrics = makeMetrics()
-        let raw = event.scrollingDeltaY
+        let raw = resolvedPagedAxes(for: event).y
         let baseline = max(AppStore.defaultScrollSensitivity, 0.0001)
         let sensitivityScale = CGFloat(max(scrollSensitivity, 0.0001) / baseline)
-        var delta = (event.hasPreciseScrollingDeltas ? raw : -raw) * sensitivityScale
+        var delta = (isContinuousScrollGesture(event) ? raw : -raw) * sensitivityScale
         if reverseWheelPagingDirection {
             delta = -delta
         }
@@ -844,6 +928,7 @@ final class CAFolderGridView: NSView {
         targetHorizontalOffset = resolvedOffset
         wheelAccumulatedDelta = 0
         wheelLastDirection = 0
+        resetAutomaticScrollAxis()
         let needsAnimation = animated && animationsEnabled && abs(horizontalOffset - targetHorizontalOffset) > 0.5
         if needsAnimation {
             setupDisplayLinkIfNeeded()

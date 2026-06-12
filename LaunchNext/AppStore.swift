@@ -194,6 +194,23 @@ final class AppStore: ObservableObject {
         }
     }
 
+    enum BackgroundImageSource: String, CaseIterable, Codable, Identifiable {
+        case liveDesktop
+        case wallpaper
+
+        var id: String { rawValue }
+
+        var localizationKey: LocalizationKey {
+            switch self {
+            case .liveDesktop: return .backgroundImageSourceLiveDesktop
+            case .wallpaper: return .backgroundImageSourceWallpaper
+            }
+        }
+    }
+
+    static let wallpaperBlurRadiusRange: ClosedRange<Double> = 0...40
+    static let defaultWallpaperBlurRadius: Double = 24
+
     enum DockDragSide: String, CaseIterable, Codable, Identifiable {
         case disabled
         case bottom
@@ -341,6 +358,8 @@ final class AppStore: ObservableObject {
     static let rowSpacingKey = "gridRowSpacing"
     static let iconLabelFontWeightKey = "iconLabelFontWeight"
     static let showQuickRefreshButtonKey = "showQuickRefreshButton"
+    static let showQuickCompactLayoutButtonKey = "showQuickCompactLayoutButton"
+    static let closeOnBlankAreaClickKey = "closeOnBlankAreaClick"
     static let lockLayoutKey = "lockLayoutEnabled"
     static let rememberPageKey = "rememberLastPage"
     static let rememberedPageIndexKey = "rememberedPageIndex"
@@ -381,6 +400,8 @@ final class AppStore: ObservableObject {
     private static let cliPathSnippetHeader = "# >>> LaunchNext CLI >>>"
     private static let cliPathSnippetFooter = "# <<< LaunchNext CLI <<<"
     static let backgroundStyleKey = "launchpadBackgroundStyle"
+    static let backgroundImageSourceKey = "launchpadBackgroundImageSource"
+    static let wallpaperBlurRadiusKey = "launchpadWallpaperBlurRadius"
     static let backgroundMaskEnabledKey = "launchpadBackgroundMaskEnabled"
     static let backgroundMaskLightKey = "launchpadBackgroundMaskLight"
     static let backgroundMaskDarkKey = "launchpadBackgroundMaskDark"
@@ -423,6 +444,23 @@ final class AppStore: ObservableObject {
             return style
         }
         return .glass
+    }
+
+    private static func loadBackgroundImageSource() -> BackgroundImageSource {
+        if let raw = UserDefaults.standard.string(forKey: backgroundImageSourceKey),
+           let source = BackgroundImageSource(rawValue: raw) {
+            return source
+        }
+        return .liveDesktop
+    }
+
+    private static func loadWallpaperBlurRadius() -> Double {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: wallpaperBlurRadiusKey) == nil {
+            return defaultWallpaperBlurRadius
+        }
+        let value = defaults.double(forKey: wallpaperBlurRadiusKey)
+        return min(max(value, wallpaperBlurRadiusRange.lowerBound), wallpaperBlurRadiusRange.upperBound)
     }
 
     private static func loadFolderLayoutMode(from defaults: UserDefaults = .standard,
@@ -650,6 +688,25 @@ final class AppStore: ObservableObject {
         }
     }
 
+    @Published var launchpadBackgroundImageSource: BackgroundImageSource = AppStore.loadBackgroundImageSource() {
+        didSet {
+            guard launchpadBackgroundImageSource != oldValue else { return }
+            UserDefaults.standard.set(launchpadBackgroundImageSource.rawValue, forKey: Self.backgroundImageSourceKey)
+        }
+    }
+
+    @Published var wallpaperBlurRadius: Double = AppStore.loadWallpaperBlurRadius() {
+        didSet {
+            let clamped = min(max(wallpaperBlurRadius, Self.wallpaperBlurRadiusRange.lowerBound), Self.wallpaperBlurRadiusRange.upperBound)
+            if wallpaperBlurRadius != clamped {
+                wallpaperBlurRadius = clamped
+                return
+            }
+            guard wallpaperBlurRadius != oldValue else { return }
+            UserDefaults.standard.set(wallpaperBlurRadius, forKey: Self.wallpaperBlurRadiusKey)
+        }
+    }
+
     // Development-only override to capture flat screenshots quickly.
     @Published var developmentBackgroundOverride: DevelopmentBackgroundOverride = .none
 
@@ -702,6 +759,8 @@ final class AppStore: ObservableObject {
         defaults.set(SidebarIconPreset.large.rawValue, forKey: Self.sidebarIconPresetKey)
         defaults.set(AppearancePreference.system.rawValue, forKey: "appearancePreference")
         defaults.set(BackgroundStyle.glass.rawValue, forKey: Self.backgroundStyleKey)
+        defaults.set(BackgroundImageSource.liveDesktop.rawValue, forKey: Self.backgroundImageSourceKey)
+        defaults.set(Self.defaultWallpaperBlurRadius, forKey: Self.wallpaperBlurRadiusKey)
         defaults.set(false, forKey: Self.backgroundMaskEnabledKey)
         Self.persistBackgroundMaskColor(Self.defaultBackgroundMaskColor, forKey: Self.backgroundMaskLightKey)
         Self.persistBackgroundMaskColor(Self.defaultBackgroundMaskColor, forKey: Self.backgroundMaskDarkKey)
@@ -762,6 +821,8 @@ final class AppStore: ObservableObject {
         }
 
         launchpadBackgroundStyle = Self.loadBackgroundStyle()
+        launchpadBackgroundImageSource = Self.loadBackgroundImageSource()
+        wallpaperBlurRadius = Self.loadWallpaperBlurRadius()
         backgroundMaskEnabled = Self.loadBackgroundMaskEnabled()
         backgroundMaskLightColor = Self.loadBackgroundMaskColor(forKey: Self.backgroundMaskLightKey)
         backgroundMaskDarkColor = Self.loadBackgroundMaskColor(forKey: Self.backgroundMaskDarkKey)
@@ -823,6 +884,9 @@ final class AppStore: ObservableObject {
         }
 
         uninstallToolAppPath = UserDefaults.standard.string(forKey: AppStore.uninstallToolAppPathKey) ?? ""
+        showQuickRefreshButton = UserDefaults.standard.object(forKey: AppStore.showQuickRefreshButtonKey) as? Bool ?? false
+        showQuickCompactLayoutButton = UserDefaults.standard.object(forKey: AppStore.showQuickCompactLayoutButtonKey) as? Bool ?? false
+        closeOnBlankAreaClick = UserDefaults.standard.object(forKey: AppStore.closeOnBlankAreaClickKey) as? Bool ?? false
         reloadAppearancePreferencesFromDefaults()
 
         developmentEnableCLICode = UserDefaults.standard.object(forKey: Self.developmentEnableCLICodeKey) as? Bool ?? false
@@ -1513,6 +1577,26 @@ final class AppStore: ObservableObject {
         didSet {
             guard showQuickRefreshButton != oldValue else { return }
             UserDefaults.standard.set(showQuickRefreshButton, forKey: AppStore.showQuickRefreshButtonKey)
+        }
+    }
+
+    @Published var showQuickCompactLayoutButton: Bool = {
+        if UserDefaults.standard.object(forKey: AppStore.showQuickCompactLayoutButtonKey) == nil { return false }
+        return UserDefaults.standard.bool(forKey: AppStore.showQuickCompactLayoutButtonKey)
+    }() {
+        didSet {
+            guard showQuickCompactLayoutButton != oldValue else { return }
+            UserDefaults.standard.set(showQuickCompactLayoutButton, forKey: AppStore.showQuickCompactLayoutButtonKey)
+        }
+    }
+
+    @Published var closeOnBlankAreaClick: Bool = {
+        if UserDefaults.standard.object(forKey: AppStore.closeOnBlankAreaClickKey) == nil { return false }
+        return UserDefaults.standard.bool(forKey: AppStore.closeOnBlankAreaClickKey)
+    }() {
+        didSet {
+            guard closeOnBlankAreaClick != oldValue else { return }
+            UserDefaults.standard.set(closeOnBlankAreaClick, forKey: AppStore.closeOnBlankAreaClickKey)
         }
     }
 
@@ -4357,6 +4441,8 @@ final class AppStore: ObservableObject {
             Self.sidebarIconPresetKey,
             "appearancePreference",
             Self.backgroundStyleKey,
+            Self.backgroundImageSourceKey,
+            Self.wallpaperBlurRadiusKey,
             Self.backgroundMaskEnabledKey,
             Self.backgroundMaskLightKey,
             Self.backgroundMaskDarkKey,
@@ -5386,6 +5472,51 @@ final class AppStore: ObservableObject {
         // 强制界面刷新
         triggerFolderUpdate()
         triggerGridRefresh()
+    }
+
+    func autoFillEmptySlots() {
+        let sourceItems = filteredItemsRemovingHidden(from: items)
+        let compacted = sourceItems.filter { item in
+            switch item {
+            case .empty:
+                return false
+            default:
+                return true
+            }
+        }
+
+        let existingPlaceholders = sourceItems.compactMap { item -> LaunchpadItem? in
+            guard case .empty = item else { return nil }
+            return item
+        }
+        let fillCount = max(0, sourceItems.count - compacted.count)
+        let preservedPlaceholders = Array(existingPlaceholders.prefix(fillCount))
+        let newPlaceholderCount = fillCount - preservedPlaceholders.count
+        let appendedPlaceholders = (0..<newPlaceholderCount).map { _ in
+            LaunchpadItem.empty(UUID().uuidString)
+        }
+
+        items = compacted + preservedPlaceholders + appendedPlaceholders
+
+        removeEmptyPages()
+        cleanupUnusedNewPage()
+        let maxPageIndex = max(0, (items.count - 1) / max(itemsPerPage, 1))
+        if currentPage > maxPageIndex {
+            currentPage = maxPageIndex
+        }
+        triggerFolderUpdate()
+        triggerGridRefresh()
+        saveAllOrder()
+    }
+
+    func compactLayout() {
+        compactItemsWithinPages()
+        removeEmptyPages()
+        cleanupUnusedNewPage()
+        clampCurrentPageWithinBounds()
+        triggerFolderUpdate()
+        triggerGridRefresh()
+        saveAllOrder()
     }
     
     /// 清除缓存
