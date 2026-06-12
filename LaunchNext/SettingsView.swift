@@ -85,6 +85,8 @@ struct SettingsView: View {
     @State private var cliCommandActionMessage: String? = nil
     @State private var layoutModePreviewScope: LayoutModePreviewScope = .fullscreen
     @State private var lastUpdatesTabRefreshAt: Date? = nil
+    @State private var wallpaperBlurRadiusDraft: Double = AppStore.defaultWallpaperBlurRadius
+    @State private var isEditingWallpaperBlurRadius = false
     private let dockDragSelectableSides: [AppStore.DockDragSide] = [.bottom, .left, .right]
 
     // Sidebar sizing presets
@@ -232,6 +234,13 @@ struct SettingsView: View {
         // }
         .onDisappear {
             stopShortcutCapture(cancel: false)
+        }
+        .onAppear {
+            wallpaperBlurRadiusDraft = appStore.wallpaperBlurRadius
+        }
+        .onChange(of: appStore.wallpaperBlurRadius) { _, newValue in
+            guard !isEditingWallpaperBlurRadius else { return }
+            wallpaperBlurRadiusDraft = newValue
         }
         .onChange(of: appStore.isFullscreenMode) { _, _ in
             guard selectedSection == .appearance else { return }
@@ -2906,10 +2915,32 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
             HStack(alignment: .center, spacing: 24) {
                 HStack {
+                    Text(appStore.localized(.showQuickCompactLayoutButton))
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Toggle("", isOn: $appStore.showQuickCompactLayoutButton)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack {
                     Text(appStore.localized(.lockLayoutTitle))
                         .font(.subheadline.weight(.semibold))
                     Spacer()
                     Toggle("", isOn: $appStore.isLayoutLocked)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            HStack(alignment: .center, spacing: 24) {
+                HStack {
+                    Text(appStore.localized(.closeOnBlankAreaClickTitle))
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Toggle("", isOn: $appStore.closeOnBlankAreaClick)
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }
@@ -4800,8 +4831,53 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 }
             }
 
-            backgroundStyleCard
+            backgroundImageSourceCard
+            if appStore.launchpadBackgroundImageSource == .wallpaper {
+                wallpaperBlurStrengthSection
+            } else {
+                backgroundStyleCard
+            }
         }
+    }
+
+    private var backgroundImageSourceCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.14))
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .frame(width: 32, height: 32)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(appStore.localized(.backgroundImageSourceTitle))
+                        .font(.headline)
+                    Text(appStore.localized(appStore.launchpadBackgroundImageSource.localizationKey))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+
+            HStack(spacing: 10) {
+                backgroundImageSourceOption(.liveDesktop, systemImage: "sparkles.tv")
+                backgroundImageSourceOption(.wallpaper, systemImage: "photo")
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(nsColor: .quaternarySystemFill))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.28), lineWidth: 0.7)
+        )
     }
 
     private var backgroundStyleCard: some View {
@@ -4844,6 +4920,35 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         )
     }
 
+    private var wallpaperBlurStrengthSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(appStore.localized(.wallpaperBlurStrengthTitle))
+                .font(.headline)
+            Slider(value: Binding(
+                get: { wallpaperBlurRadiusDraft },
+                set: { wallpaperBlurRadiusDraft = $0 }
+            ), in: AppStore.wallpaperBlurRadiusRange, step: 1) { editing in
+                isEditingWallpaperBlurRadius = editing
+                if !editing {
+                    appStore.wallpaperBlurRadius = wallpaperBlurRadiusDraft
+                }
+            }
+            HStack {
+                Text(String(format: "%.0f", AppStore.wallpaperBlurRadiusRange.lowerBound))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(String(format: "%.0f", wallpaperBlurRadiusDraft))
+                    .font(.footnote.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(String(format: "%.0f", AppStore.wallpaperBlurRadiusRange.upperBound))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private func backgroundStyleOption(_ style: AppStore.BackgroundStyle, systemImage: String) -> some View {
         let selected = appStore.launchpadBackgroundStyle == style
 
@@ -4854,6 +4959,40 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 Image(systemName: systemImage)
                     .font(.system(size: 13, weight: .semibold))
                 Text(appStore.localized(style.localizationKey))
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if selected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+            }
+            .foregroundStyle(selected ? Color.accentColor : Color.primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(selected ? Color.accentColor.opacity(0.16) : Color(nsColor: .controlBackgroundColor).opacity(0.72))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .strokeBorder(selected ? Color.accentColor.opacity(0.42) : Color(nsColor: .separatorColor).opacity(0.22), lineWidth: 0.8)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func backgroundImageSourceOption(_ source: AppStore.BackgroundImageSource, systemImage: String) -> some View {
+        let selected = appStore.launchpadBackgroundImageSource == source
+
+        return Button {
+            appStore.launchpadBackgroundImageSource = source
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(appStore.localized(source.localizationKey))
                     .font(.callout.weight(.semibold))
                     .lineLimit(1)
                 Spacer(minLength: 0)
@@ -5470,6 +5609,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert("appearancePreference")
                     keys.insert("isStartOnLogin")
                     keys.insert(AppStore.showQuickRefreshButtonKey)
+                    keys.insert(AppStore.showQuickCompactLayoutButtonKey)
+                    keys.insert(AppStore.closeOnBlankAreaClickKey)
                     keys.insert(AppStore.lockLayoutKey)
                     keys.insert(AppStore.uninstallToolAppPathKey)
                     keys.insert(AppStore.dockDragSideKey)
@@ -5493,6 +5634,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 if appearanceCheckbox.state == .on {
                     keys.insert(AppStore.sidebarIconPresetKey)
                     keys.insert(AppStore.backgroundStyleKey)
+                    keys.insert(AppStore.backgroundImageSourceKey)
                     keys.insert(AppStore.backgroundMaskEnabledKey)
                     keys.insert(AppStore.backgroundMaskLightKey)
                     keys.insert(AppStore.backgroundMaskDarkKey)
