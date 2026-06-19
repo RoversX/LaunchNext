@@ -824,10 +824,8 @@ final class CAFolderGridView: NSView {
         let raw = event.scrollingDeltaY
         let baseline = max(AppStore.defaultScrollSensitivity, 0.0001)
         let sensitivityScale = CGFloat(max(scrollSensitivity, 0.0001) / baseline)
-        var delta = (event.hasPreciseScrollingDeltas ? raw : -raw) * sensitivityScale
-        if reverseWheelPagingDirection {
-            delta = -delta
-        }
+        // Reverse wheel page direction only applies to paging, not vertical content scrolling.
+        let delta = (event.hasPreciseScrollingDeltas ? raw : -raw) * sensitivityScale
         verticalOffset = clampVerticalOffset(verticalOffset - delta, metrics: metrics)
         updateLayout(animated: false)
     }
