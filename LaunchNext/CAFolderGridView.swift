@@ -57,6 +57,7 @@ final class CAFolderGridView: NSView {
     var isLayoutLocked: Bool = false
     var scrollSensitivity: Double = AppStore.defaultScrollSensitivity
     var reverseWheelPagingDirection: Bool = false
+    var reverseWheelVerticalDirection: Bool = false
     var verticalHeaderHeight: CGFloat = 0 {
         didSet {
             guard verticalHeaderHeight != oldValue else { return }
@@ -824,8 +825,10 @@ final class CAFolderGridView: NSView {
         let raw = event.scrollingDeltaY
         let baseline = max(AppStore.defaultScrollSensitivity, 0.0001)
         let sensitivityScale = CGFloat(max(scrollSensitivity, 0.0001) / baseline)
-        // Reverse wheel page direction only applies to paging, not vertical content scrolling.
-        let delta = (event.hasPreciseScrollingDeltas ? raw : -raw) * sensitivityScale
+        // Trackpad (precise) always follows natural scrolling. The reverse toggle only
+        // flips the mouse wheel: default is -raw, reversed becomes +raw.
+        let mouseSign: CGFloat = reverseWheelVerticalDirection ? 1 : -1
+        let delta = (event.hasPreciseScrollingDeltas ? raw : mouseSign * raw) * sensitivityScale
         verticalOffset = clampVerticalOffset(verticalOffset - delta, metrics: metrics)
         updateLayout(animated: false)
     }

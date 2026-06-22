@@ -351,6 +351,7 @@ final class AppStore: ObservableObject {
     static let activePressScaleKey = "activePressScale"
     static let followScrollPagingKey = "followScrollPagingEnabled"
     static let reverseWheelPagingKey = "reverseWheelPagingDirection"
+    static let reverseWheelVerticalKey = "reverseWheelVerticalDirection"
     static let hideMenuBarKey = "hideMenuBar"
     static let useCAGridRendererKey = "useCAGridRenderer"
     static let folderLayoutModeKey = "folderLayoutMode"
@@ -723,6 +724,7 @@ final class AppStore: ObservableObject {
         defaults.set(false, forKey: Self.activePressEffectKey)
         defaults.set(false, forKey: Self.followScrollPagingKey)
         defaults.set(false, forKey: Self.reverseWheelPagingKey)
+        defaults.set(false, forKey: Self.reverseWheelVerticalKey)
         defaults.set(Self.defaultActivePressScale, forKey: Self.activePressScaleKey)
         defaults.set(Self.defaultIconScale, forKey: "iconScale")
         defaults.set(Self.defaultIconLabelFontSize, forKey: "iconLabelFontSize")
@@ -784,6 +786,7 @@ final class AppStore: ObservableObject {
         enableActivePressEffect = defaults.object(forKey: Self.activePressEffectKey) as? Bool ?? false
         followScrollPagingEnabled = defaults.object(forKey: Self.followScrollPagingKey) as? Bool ?? false
         reverseWheelPagingDirection = defaults.object(forKey: Self.reverseWheelPagingKey) as? Bool ?? false
+        reverseWheelVerticalDirection = defaults.object(forKey: Self.reverseWheelVerticalKey) as? Bool ?? false
         activePressScale = defaults.object(forKey: Self.activePressScaleKey) as? Double ?? Self.defaultActivePressScale
         useLocalizedThirdPartyTitles = defaults.object(forKey: "useLocalizedThirdPartyTitles") as? Bool ?? true
         useCAGridRenderer = defaults.object(forKey: Self.useCAGridRendererKey) as? Bool ?? true
@@ -1439,6 +1442,13 @@ final class AppStore: ObservableObject {
         return UserDefaults.standard.bool(forKey: AppStore.reverseWheelPagingKey)
     }() {
         didSet { UserDefaults.standard.set(reverseWheelPagingDirection, forKey: Self.reverseWheelPagingKey) }
+    }
+
+    @Published var reverseWheelVerticalDirection: Bool = {
+        if UserDefaults.standard.object(forKey: AppStore.reverseWheelVerticalKey) == nil { return false }
+        return UserDefaults.standard.bool(forKey: AppStore.reverseWheelVerticalKey)
+    }() {
+        didSet { UserDefaults.standard.set(reverseWheelVerticalDirection, forKey: Self.reverseWheelVerticalKey) }
     }
 
     @Published var useCAGridRenderer: Bool = {
@@ -2564,6 +2574,9 @@ final class AppStore: ObservableObject {
         }
         if UserDefaults.standard.object(forKey: AppStore.reverseWheelPagingKey) == nil {
             UserDefaults.standard.set(false, forKey: AppStore.reverseWheelPagingKey)
+        }
+        if UserDefaults.standard.object(forKey: AppStore.reverseWheelVerticalKey) == nil {
+            UserDefaults.standard.set(false, forKey: AppStore.reverseWheelVerticalKey)
         }
         if defaults.object(forKey: Self.dockDragEnabledKey) == nil {
             let legacySideRaw = defaults.string(forKey: Self.dockDragSideKey)
@@ -4379,6 +4392,7 @@ final class AppStore: ObservableObject {
             Self.activePressEffectKey,
             Self.followScrollPagingKey,
             Self.reverseWheelPagingKey,
+            Self.reverseWheelVerticalKey,
             Self.activePressScaleKey,
             "iconScale",
             "iconLabelFontSize",

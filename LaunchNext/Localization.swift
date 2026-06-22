@@ -145,6 +145,9 @@ enum LocalizationKey: String {
     case followScrollPagingTitle
     case followScrollPagingDescription
     case reverseWheelPagingTitle
+    case reverseWheelVerticalTitle
+    case reverseWheelDirectionCardTitle
+    case reverseWheelDirectionCardDescription
     case hideDockOption
     case hideMenuBarOption
     case hideMenuBarInfoBody
@@ -569,6 +572,9 @@ final class LocalizationManager {
                 .followScrollPagingTitle: "Follow-scroll paging",
                 .followScrollPagingDescription: "Pages follow precise scrolling gestures (default off).",
                 .reverseWheelPagingTitle: "Reverse wheel page direction",
+                .reverseWheelVerticalTitle: "Reverse wheel vertical scroll",
+                .reverseWheelDirectionCardTitle: "Scroll & paging direction",
+                .reverseWheelDirectionCardDescription: "Only affects the mouse wheel. The trackpad always follows the system's natural scrolling.",
                 .hideDockOption: "Hide Dock",
                 .hideMenuBarOption: "Hide menu bar in fullscreen",
                 .hideMenuBarInfoBody: "Dock will also be hidden while this option is active. macOS requires hiding the Dock when hiding the menu bar.",
@@ -767,6 +773,10 @@ final class LocalizationManager {
             .updaterHoldPrompt: "Press Enter to close this window. LaunchNext will reopen automatically."
         ],
         .portugueseBrazil: [
+            .reverseWheelPagingTitle: "Inverter a direção de paginação da roda",
+            .reverseWheelVerticalTitle: "Inverter a rolagem vertical da roda",
+            .reverseWheelDirectionCardTitle: "Direção de rolagem e paginação",
+            .reverseWheelDirectionCardDescription: "Afeta apenas a roda do mouse. O trackpad sempre segue a rolagem natural do sistema.",
             .noAppsFound: "Nenhum app encontrado",
             .searchPlaceholder: "Pesquisar",
             .renameSearchPlaceholder: "Buscar apps",
@@ -1069,6 +1079,10 @@ final class LocalizationManager {
             // .aiOverlayPreviewButtonLabel: "Mostrar pré-visualização flutuante"
         ],
             .vietnamese: [
+                .reverseWheelPagingTitle: "Đảo hướng lật trang bằng con lăn",
+                .reverseWheelVerticalTitle: "Đảo hướng cuộn dọc bằng con lăn",
+                .reverseWheelDirectionCardTitle: "Hướng cuộn và lật trang",
+                .reverseWheelDirectionCardDescription: "Chỉ ảnh hưởng đến con lăn chuột. Trackpad luôn theo cuộn tự nhiên của hệ thống.",
                 .noAppsFound: "Không tìm thấy ứng dụng nào",
                 .searchPlaceholder: "Tìm kiếm",
                 .renameSearchPlaceholder: "Tìm ứng dụng",
@@ -1344,6 +1358,9 @@ final class LocalizationManager {
                 .followScrollPagingTitle: "跟手翻页",
                 .followScrollPagingDescription: "精确滚动时页面跟随手势移动（默认关闭）。",
                 .reverseWheelPagingTitle: "反转滚轮翻页方向",
+                .reverseWheelVerticalTitle: "反转滚轮垂直滚动方向",
+                .reverseWheelDirectionCardTitle: "滚动与翻页方向",
+                .reverseWheelDirectionCardDescription: "仅影响鼠标滚轮；触摸板始终跟随系统自然滚动。",
                 .hideDockOption: "隐藏 Dock",
                 .hideMenuBarOption: "全屏时隐藏菜单栏",
                 .hideMenuBarInfoBody: "开启后 Dock 也会一起隐藏。macOS 要求隐藏菜单栏时必须同时隐藏 Dock。",
@@ -1540,6 +1557,10 @@ final class LocalizationManager {
                 .updaterHoldPrompt: "更新完成后，按回车键关闭窗口，LaunchNext 会自动重新打开。"
             ],
             .japanese: [
+                .reverseWheelPagingTitle: "ホイールのページ送り方向を反転",
+                .reverseWheelVerticalTitle: "ホイールの縦スクロール方向を反転",
+                .reverseWheelDirectionCardTitle: "スクロールとページ送りの方向",
+                .reverseWheelDirectionCardDescription: "マウスホイールにのみ適用されます。トラックパッドは常にシステムのナチュラルスクロールに従います。",
                 .noAppsFound: "アプリが見つかりません",
                 .searchPlaceholder: "検索",
                 .renameSearchPlaceholder: "アプリを検索",
@@ -1762,6 +1783,10 @@ final class LocalizationManager {
                 .updaterHoldPrompt: "アップデート後は Enter キーを押してこのウィンドウを閉じてください。LaunchNext は自動的に再起動します。"
             ],
             .korean: [
+                .reverseWheelPagingTitle: "휠 페이지 전환 방향 반전",
+                .reverseWheelVerticalTitle: "휠 세로 스크롤 방향 반전",
+                .reverseWheelDirectionCardTitle: "스크롤 및 페이지 전환 방향",
+                .reverseWheelDirectionCardDescription: "마우스 휠에만 적용됩니다. 트랙패드는 항상 시스템의 자연스러운 스크롤을 따릅니다.",
                 .noAppsFound: "앱을 찾을 수 없어요",
                 .searchPlaceholder: "검색",
                 .renameSearchPlaceholder: "앱 검색",
@@ -1984,6 +2009,10 @@ final class LocalizationManager {
                 .updaterHoldPrompt: "업데이트가 끝나면 Enter 키를 눌러 창을 닫으세요. LaunchNext가 자동으로 다시 열려요."
             ],
             .french: [
+                .reverseWheelPagingTitle: "Inverser le sens de pagination de la molette",
+                .reverseWheelVerticalTitle: "Inverser le défilement vertical de la molette",
+                .reverseWheelDirectionCardTitle: "Direction de défilement et de pagination",
+                .reverseWheelDirectionCardDescription: "N'affecte que la molette de la souris. Le trackpad suit toujours le défilement naturel du système.",
                 .noAppsFound: "Aucune application trouvée",
                 .searchPlaceholder: "Recherche",
                 .renameSearchPlaceholder: "Rechercher une application",
@@ -2202,6 +2231,10 @@ final class LocalizationManager {
                 .updaterHoldPrompt: "Appuyez sur Entrée pour fermer cette fenêtre. LaunchNext va se relancer automatiquement."
             ],
             .spanish: [
+                .reverseWheelPagingTitle: "Invertir la dirección de paginación de la rueda",
+                .reverseWheelVerticalTitle: "Invertir el desplazamiento vertical de la rueda",
+                .reverseWheelDirectionCardTitle: "Dirección de desplazamiento y paginación",
+                .reverseWheelDirectionCardDescription: "Solo afecta a la rueda del ratón. El trackpad siempre sigue el desplazamiento natural del sistema.",
                 .noAppsFound: "No se encontraron apps",
                 .searchPlaceholder: "Buscar",
                 .renameSearchPlaceholder: "Buscar app",
@@ -2486,6 +2519,9 @@ final class LocalizationManager {
                 .followScrollPagingTitle: "Scorrimento pagina preciso",
                 .followScrollPagingDescription: "Le pagine seguono con precisione le gesture di scorrimento (disattivato di default).",
                 .reverseWheelPagingTitle: "Inverti direzione scorrimento pagine",
+                .reverseWheelVerticalTitle: "Inverti scorrimento verticale rotella",
+                .reverseWheelDirectionCardTitle: "Direzione di scorrimento e paginazione",
+                .reverseWheelDirectionCardDescription: "Influisce solo sulla rotellina del mouse. Il trackpad segue sempre lo scorrimento naturale del sistema.",
                 .hideDockOption: "Nascondi Dock",
                 .hideMenuBarOption: "Nascondi la barra dei menu a schermo intero",
                 .hideMenuBarInfoBody: "Anche il Dock verrà nascosto mentre questa opzione è attiva. macOS richiede di nascondere il Dock quando si nasconde la barra dei menu.",
@@ -2684,6 +2720,10 @@ final class LocalizationManager {
                 .updaterHoldPrompt: "Premi Invio per chiudere questa finestra. LaunchNext si riaprirà automaticamente."
             ],
             .czech: [
+                .reverseWheelPagingTitle: "Obrátit směr listování kolečkem",
+                .reverseWheelVerticalTitle: "Obrátit svislé posouvání kolečkem",
+                .reverseWheelDirectionCardTitle: "Směr posouvání a listování",
+                .reverseWheelDirectionCardDescription: "Ovlivňuje pouze kolečko myši. Trackpad vždy sleduje přirozené posouvání systému.",
                 .noAppsFound: "Nebyla nalezena žádná aplikace",
                 .searchPlaceholder: "Hledat",
                 .renameSearchPlaceholder: "Hledat aplikace",
@@ -2903,6 +2943,10 @@ final class LocalizationManager {
                 .updaterHoldPrompt: "Stiskněte Enter pro zavření tohoto okna. LaunchNext se automaticky znovu otevře."
             ],
             .german: [
+                .reverseWheelPagingTitle: "Seitenrichtung des Mausrads umkehren",
+                .reverseWheelVerticalTitle: "Vertikales Scrollen des Mausrads umkehren",
+                .reverseWheelDirectionCardTitle: "Scroll- und Seitenrichtung",
+                .reverseWheelDirectionCardDescription: "Betrifft nur das Mausrad. Das Trackpad folgt immer dem natürlichen Scrollen des Systems.",
                 .noAppsFound: "Keine Apps gefunden",
                 .searchPlaceholder: "Suchen",
                 .renameSearchPlaceholder: "Apps durchsuchen",
@@ -3122,6 +3166,10 @@ final class LocalizationManager {
                 .updaterHoldPrompt: "Nach dem Update Enter drücken, um dieses Fenster zu schließen. LaunchNext wird automatisch wieder geöffnet."
             ],
             .russian: [
+                .reverseWheelPagingTitle: "Обратить направление листания колёсиком",
+                .reverseWheelVerticalTitle: "Обратить вертикальную прокрутку колёсиком",
+                .reverseWheelDirectionCardTitle: "Направление прокрутки и листания",
+                .reverseWheelDirectionCardDescription: "Влияет только на колёсико мыши. Трекпад всегда следует естественной прокрутке системы.",
                 .noAppsFound: "Приложения не найдены",
                 .searchPlaceholder: "Поиск",
                 .renameSearchPlaceholder: "Поиск приложений",
@@ -3813,6 +3861,9 @@ final class LocalizationManager {
             .followScrollPagingTitle: "跟手翻頁",
             .followScrollPagingDescription: "精確滾動時頁面跟隨手勢移動（預設關閉）。",
             .reverseWheelPagingTitle: "反轉滾輪翻頁方向",
+            .reverseWheelVerticalTitle: "反轉滾輪垂直滾動方向",
+            .reverseWheelDirectionCardTitle: "滾動與翻頁方向",
+            .reverseWheelDirectionCardDescription: "僅影響滑鼠滾輪；觸控板始終跟隨系統自然滾動。",
             .hideDockOption: "隱藏 Dock",
             .hideMenuBarOption: "全螢幕時隱藏選單列",
             .hideMenuBarInfoBody: "開啟後 Dock 也會一起隱藏。macOS 要求隱藏選單列時必須同時隱藏 Dock。",
@@ -6355,6 +6406,10 @@ final class LocalizationManager {
             .useLocalizedThirdPartyTitles: "लोकलाइज़्ड ऐप नाम उपयोग करें",
             .enableAnimations: "स्लाइड एनीमेशन सक्षम करें",
             .windowOpenAnimationTitle: "विंडो खोलने/बंद करने की एनीमेशन",
+            .reverseWheelPagingTitle: "व्हील पेज दिशा उलटें",
+            .reverseWheelVerticalTitle: "व्हील वर्टिकल स्क्रॉल उलटें",
+            .reverseWheelDirectionCardTitle: "स्क्रॉल और पेजिंग दिशा",
+            .reverseWheelDirectionCardDescription: "केवल माउस व्हील को प्रभावित करता है। ट्रैकपैड हमेशा सिस्टम के नैचुरल स्क्रॉलिंग का पालन करता है।",
             .hideDockOption: "डॉक छुपाएँ",
             .hideMenuBarOption: "पूर्ण स्क्रीन में मेन्यू बार छुपाएँ",
             .hideMenuBarInfoBody: "यह विकल्प चालू रहने पर Dock भी छुपेगा। macOS में मेन्यू बार छुपाने के लिए Dock को भी छुपाना ज़रूरी है।",

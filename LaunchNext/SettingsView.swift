@@ -4025,6 +4025,37 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
             VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(appStore.localized(.reverseWheelDirectionCardTitle), systemImage: "arrow.up.arrow.down")
+                        .font(.headline)
+                    Text(appStore.localized(.reverseWheelDirectionCardDescription))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    Text(appStore.localized(.reverseWheelPagingTitle))
+                    Spacer()
+                    Toggle("", isOn: $appStore.reverseWheelPagingDirection)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+
+                HStack {
+                    Text(appStore.localized(.reverseWheelVerticalTitle))
+                    Spacer()
+                    Toggle("", isOn: $appStore.reverseWheelVerticalDirection)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+                .disabled(!appStore.useCAGridRenderer)
+                .opacity(appStore.useCAGridRenderer ? 1 : 0.45)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top, spacing: 16) {
                     VStack(alignment: .leading, spacing: 6) {
                         Label(appStore.localized(.gestureSectionTitle), systemImage: "hand.raised")
@@ -4697,14 +4728,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             }
             .disabled(appStore.useCAGridRenderer)
             .opacity(appStore.useCAGridRenderer ? 0.5 : 1)
-
-            HStack {
-                Text(appStore.localized(.reverseWheelPagingTitle))
-                Spacer()
-                Toggle("", isOn: $appStore.reverseWheelPagingDirection)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-            }
 
             HStack {
                 Text(appStore.localized(.hideDockOption))
