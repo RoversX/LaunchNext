@@ -77,14 +77,15 @@ extension CAGridView {
     }
 
     func handleScrollWheel(with event: NSEvent) {
-        // 优先使用水平滑动，如果没有则用垂直滑动（反向）
+        // Prefer horizontal movement; vertical precise input can be flipped separately.
         let deltaX = event.scrollingDeltaX
         let deltaY = event.scrollingDeltaY
-        let delta = abs(deltaX) > abs(deltaY) ? deltaX : -deltaY
+        let isPrecise = event.hasPreciseScrollingDeltas
+        let verticalDelta = preciseVerticalDelta(from: deltaY, isPrecise: isPrecise)
+        let delta = abs(deltaX) > abs(deltaY) ? deltaX : verticalDelta
         let baseline = max(AppStore.defaultScrollSensitivity, 0.0001)
         let sensitivityScale = CGFloat(max(scrollSensitivity, 0.0001) / baseline)
         let scaledDelta = delta * sensitivityScale
-        let isPrecise = event.hasPreciseScrollingDeltas
 
         if !isPrecise {
             /*
@@ -135,7 +136,7 @@ extension CAGridView {
             }
             */
 
-            // 只优化普通滚轮，不改精准设备（触控板 / Magic Mouse）路径
+            // Mouse wheel paging keeps its own reverse setting.
             handleWheelPaging(with: scaledDelta)
             return
         }
@@ -183,7 +184,7 @@ extension CAGridView {
             isDragging = false
 
             // 根据滑动距离和速度确定目标页面
-            let velocity = (abs(deltaX) > abs(deltaY) ? deltaX : -deltaY) * sensitivityScale
+            let velocity = (abs(deltaX) > abs(deltaY) ? deltaX : verticalDelta) * sensitivityScale
             let threshold = (bounds.width + pageSpacing) * 0.15  // 15% 即可触发翻页
             let velocityThreshold: CGFloat = 30
             var targetPage = currentPage
@@ -227,6 +228,11 @@ extension CAGridView {
         wheelLastFlipAt = now
         wheelAccumulatedDelta = 0
         navigateToPage(targetPage, animated: true)
+    }
+
+    private func preciseVerticalDelta(from deltaY: CGFloat, isPrecise: Bool) -> CGFloat {
+        guard isPrecise else { return -deltaY }
+        return trackpadVerticalDirection == .natural ? deltaY : -deltaY
     }
 
     func rubberBand(_ offset: CGFloat, limit: CGFloat) -> CGFloat {

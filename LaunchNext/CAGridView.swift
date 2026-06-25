@@ -67,6 +67,7 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     var isScrollAnimating = false
     var scrollSensitivity: Double = AppStore.defaultScrollSensitivity
     var reverseWheelPagingDirection: Bool = false
+    var trackpadVerticalDirection: AppStore.TrackpadVerticalDirection = .natural
     var animationsEnabled: Bool = true
     var animationDuration: Double = 0.3
     var scrollAnimationStartTime: CFTimeInterval = 0

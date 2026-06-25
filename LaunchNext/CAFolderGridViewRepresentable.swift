@@ -46,6 +46,7 @@ struct CAFolderGridViewRepresentable: NSViewRepresentable {
         view.scrollSensitivity = appStore.scrollSensitivity
         view.reverseWheelPagingDirection = appStore.reverseWheelPagingDirection
         view.reverseWheelVerticalDirection = appStore.reverseWheelVerticalDirection
+        view.trackpadVerticalDirection = appStore.trackpadVerticalDirection
         view.verticalHeaderHeight = verticalHeaderHeight
         view.showInFinderMenuTitle = appStore.localized(.contextMenuShowInFinder)
         view.copyAppPathMenuTitle = appStore.localized(.contextMenuCopyAppPath)

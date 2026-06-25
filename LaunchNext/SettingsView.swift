@@ -4050,6 +4050,17 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 }
                 .disabled(!appStore.useCAGridRenderer)
                 .opacity(appStore.useCAGridRenderer ? 1 : 0.45)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Label(appStore.localized(.trackpadVerticalDirectionTitle), systemImage: "arrow.left.arrow.right")
+                        .font(.subheadline.weight(.semibold))
+
+                    HStack(spacing: 8) {
+                        ForEach(AppStore.TrackpadVerticalDirection.allCases) { direction in
+                            trackpadVerticalDirectionButton(for: direction)
+                        }
+                    }
+                }
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -4307,6 +4318,36 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 Text(appStore.localized(action.localizationKey))
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(colorScheme == .dark ? 0.18 : 0.12)
+                                     : Color(nsColor: .windowBackgroundColor).opacity(colorScheme == .dark ? 0.25 : 0.75))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor.opacity(0.65) : Color.primary.opacity(0.08), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func trackpadVerticalDirectionButton(for direction: AppStore.TrackpadVerticalDirection) -> some View {
+        let isSelected = appStore.trackpadVerticalDirection == direction
+
+        return Button {
+            appStore.trackpadVerticalDirection = direction
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: direction == .natural ? "arrow.down" : "arrow.up")
+                    .font(.caption.weight(.semibold))
+                Text(appStore.localized(direction.localizationKey))
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 12)
@@ -5529,6 +5570,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert("useLocalizedThirdPartyTitles")
                     keys.insert("enableDropPrediction")
                     keys.insert(AppStore.reverseWheelPagingKey)
+                    keys.insert(AppStore.reverseWheelVerticalKey)
+                    keys.insert(AppStore.trackpadVerticalDirectionKey)
                     keys.insert(AppStore.rememberPageKey)
                     keys.insert(AppStore.rememberedPageIndexKey)
                     keys.insert("iconScale")

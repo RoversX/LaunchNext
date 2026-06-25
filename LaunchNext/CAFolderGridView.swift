@@ -58,6 +58,7 @@ final class CAFolderGridView: NSView {
     var scrollSensitivity: Double = AppStore.defaultScrollSensitivity
     var reverseWheelPagingDirection: Bool = false
     var reverseWheelVerticalDirection: Bool = false
+    var trackpadVerticalDirection: AppStore.TrackpadVerticalDirection = .natural
     var verticalHeaderHeight: CGFloat = 0 {
         didSet {
             guard verticalHeaderHeight != oldValue else { return }
@@ -679,9 +680,10 @@ final class CAFolderGridView: NSView {
     private func handlePagedScroll(_ event: NSEvent) {
         let deltaX = event.scrollingDeltaX
         let deltaY = event.scrollingDeltaY
-        let dominant = scaledPageDelta(deltaX: deltaX, deltaY: deltaY)
+        let isPrecise = event.hasPreciseScrollingDeltas
+        let dominant = scaledPageDelta(deltaX: deltaX, deltaY: deltaY, isPrecise: isPrecise)
 
-        if !event.hasPreciseScrollingDeltas {
+        if !isPrecise {
             if dominant != 0 {
                 handleWheelPaging(with: dominant)
             }
@@ -725,8 +727,9 @@ final class CAFolderGridView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: workItem)
     }
 
-    private func scaledPageDelta(deltaX: CGFloat, deltaY: CGFloat) -> CGFloat {
-        let rawDelta = abs(deltaX) > abs(deltaY) ? deltaX : -deltaY
+    private func scaledPageDelta(deltaX: CGFloat, deltaY: CGFloat, isPrecise: Bool) -> CGFloat {
+        let verticalDelta = precisePageVerticalDelta(from: deltaY, isPrecise: isPrecise)
+        let rawDelta = abs(deltaX) > abs(deltaY) ? deltaX : verticalDelta
         let baseline = max(AppStore.defaultScrollSensitivity, 0.0001)
         let sensitivityScale = CGFloat(max(scrollSensitivity, 0.0001) / baseline)
         return rawDelta * sensitivityScale
@@ -825,12 +828,18 @@ final class CAFolderGridView: NSView {
         let raw = event.scrollingDeltaY
         let baseline = max(AppStore.defaultScrollSensitivity, 0.0001)
         let sensitivityScale = CGFloat(max(scrollSensitivity, 0.0001) / baseline)
-        // Trackpad (precise) always follows natural scrolling. The reverse toggle only
-        // flips the mouse wheel: default is -raw, reversed becomes +raw.
+        // Precise devices use their own vertical direction setting; mouse wheel uses
+        // the wheel-only reverse toggle.
         let mouseSign: CGFloat = reverseWheelVerticalDirection ? 1 : -1
-        let delta = (event.hasPreciseScrollingDeltas ? raw : mouseSign * raw) * sensitivityScale
+        let preciseSign: CGFloat = trackpadVerticalDirection == .natural ? -1 : 1
+        let delta = (event.hasPreciseScrollingDeltas ? preciseSign * raw : mouseSign * raw) * sensitivityScale
         verticalOffset = clampVerticalOffset(verticalOffset - delta, metrics: metrics)
         updateLayout(animated: false)
+    }
+
+    private func precisePageVerticalDelta(from deltaY: CGFloat, isPrecise: Bool) -> CGFloat {
+        guard isPrecise else { return -deltaY }
+        return trackpadVerticalDirection == .natural ? deltaY : -deltaY
     }
 
     private func navigateToPage(_ page: Int, animated: Bool) {

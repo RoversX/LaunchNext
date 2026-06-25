@@ -2650,7 +2650,13 @@ extension LaunchpadView {
                               pageWidth: CGFloat) {
         guard !isFolderOpen else { return }
 
-        let primaryDelta = abs(deltaX) >= abs(deltaY) ? deltaX : -deltaY
+        let verticalDelta: CGFloat
+        if isPrecise {
+            verticalDelta = appStore.trackpadVerticalDirection == .natural ? deltaY : -deltaY
+        } else {
+            verticalDelta = -deltaY
+        }
+        let primaryDelta = abs(deltaX) >= abs(deltaY) ? deltaX : verticalDelta
 
         // Non-precise wheel: accumulate deltas and apply a short cooldown.
         if !isPrecise {
