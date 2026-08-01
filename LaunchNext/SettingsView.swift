@@ -4936,6 +4936,23 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     .toggleStyle(.switch)
             }
 
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(appStore.localized(.windowAnimationDurationLabel))
+                    Spacer()
+                    Text(String(format: "%.2fs", appStore.windowAnimationDuration))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(
+                    value: $appStore.windowAnimationDuration,
+                    in: AppStore.windowAnimationDurationRange,
+                    step: 0.05
+                )
+            }
+            .disabled(!appStore.enableWindowOpenAnimation)
+            .opacity(appStore.enableWindowOpenAnimation ? 1 : 0.5)
+
             HStack {
                 Text(appStore.localized(.backgroundMaskTitle))
                 Spacer()
@@ -5767,6 +5784,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert(AppStore.hideMenuBarKey)
                     keys.insert("enableAnimations")
                     keys.insert(AppStore.windowOpenAnimationKey)
+                    keys.insert(AppStore.windowAnimationDurationKey)
                     keys.insert("useLocalizedThirdPartyTitles")
                     keys.insert("enableDropPrediction")
                     keys.insert(AppStore.reverseWheelPagingKey)

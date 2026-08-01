@@ -1718,7 +1718,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
 
         isAnimatingWindow = true
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.25
+            ctx.duration = appStore.windowAnimationDuration
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             window.animator().alphaValue = targetAlpha
             window.contentView?.animator().alphaValue = targetAlpha

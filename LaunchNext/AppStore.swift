@@ -385,6 +385,7 @@ final class AppStore: ObservableObject {
     static let useCAGridRendererKey = "useCAGridRenderer"
     static let folderLayoutModeKey = "folderLayoutMode"
     static let windowOpenAnimationKey = "windowOpenAnimationEnabled"
+    static let windowAnimationDurationKey = "windowAnimationDuration"
     static let developmentEnableCLICodeKey = "developmentEnableCLICode"
     static let fuzzySearchEnabledKey = "fuzzySearchEnabled"
     static let searchDebounceMillisecondsKey = "searchDebounceMilliseconds"
@@ -532,6 +533,8 @@ final class AppStore: ObservableObject {
     static let pageIndicatorTopPaddingRange: ClosedRange<Double> = 0...60
     static let defaultPageIndicatorTopPadding: Double = 12
     private static let defaultAnimationDuration: Double = 0.3
+    static let windowAnimationDurationRange: ClosedRange<Double> = 0.1...0.5
+    private static let defaultWindowAnimationDuration: Double = 0.25
     private static let lastUpdateCheckKey = "lastUpdateCheckTimestamp"
     private static let automaticUpdateInterval: TimeInterval = 60 * 60 * 24
     private static let automaticUpdateRetryCount = 3
@@ -805,6 +808,7 @@ final class AppStore: ObservableObject {
         defaults.set(IconLabelFontWeightOption.medium.rawValue, forKey: Self.iconLabelFontWeightKey)
         defaults.set(Self.defaultAnimationDuration, forKey: "animationDuration")
         defaults.set(true, forKey: Self.windowOpenAnimationKey)
+        defaults.set(Self.defaultWindowAnimationDuration, forKey: Self.windowAnimationDurationKey)
         defaults.set(true, forKey: "useLocalizedThirdPartyTitles")
         defaults.set(Self.defaultPageIndicatorOffset, forKey: "pageIndicatorOffset")
         defaults.set(Self.defaultPageIndicatorTopPadding, forKey: Self.pageIndicatorTopPaddingKey)
@@ -878,6 +882,9 @@ final class AppStore: ObservableObject {
         iconLabelFontWeight = defaults.string(forKey: Self.iconLabelFontWeightKey).flatMap(IconLabelFontWeightOption.init(rawValue:)) ?? .medium
         showFPSOverlay = defaults.object(forKey: "showFPSOverlay") as? Bool ?? false
         enableWindowOpenAnimation = defaults.object(forKey: Self.windowOpenAnimationKey) as? Bool ?? true
+        windowAnimationDuration = Self.clampWindowAnimationDuration(
+            defaults.object(forKey: Self.windowAnimationDurationKey) as? Double ?? Self.defaultWindowAnimationDuration
+        )
         rememberLastPage = defaults.object(forKey: Self.rememberPageKey) as? Bool ?? true
         folderPopoverWidthFactor = Self.clampFolderWidth(defaults.object(forKey: "folderPopoverWidthFactor") as? Double ?? Self.defaultFolderPopoverWidth)
         folderPopoverHeightFactor = Self.clampFolderHeight(defaults.object(forKey: "folderPopoverHeightFactor") as? Double ?? Self.defaultFolderPopoverHeight)
@@ -1084,6 +1091,10 @@ final class AppStore: ObservableObject {
 
     private static func clampPageIndicatorTopPadding(_ value: Double) -> Double {
         min(max(value, pageIndicatorTopPaddingRange.lowerBound), pageIndicatorTopPaddingRange.upperBound)
+    }
+
+    private static func clampWindowAnimationDuration(_ value: Double) -> Double {
+        min(max(value, windowAnimationDurationRange.lowerBound), windowAnimationDurationRange.upperBound)
     }
 
     private static func clampDockDragTriggerDistance(_ value: Double) -> Double {
@@ -1684,6 +1695,21 @@ final class AppStore: ObservableObject {
         return UserDefaults.standard.bool(forKey: AppStore.windowOpenAnimationKey)
     }() {
         didSet { UserDefaults.standard.set(enableWindowOpenAnimation, forKey: Self.windowOpenAnimationKey) }
+    }
+
+    @Published var windowAnimationDuration: Double = {
+        let stored = UserDefaults.standard.object(forKey: AppStore.windowAnimationDurationKey) as? Double
+            ?? AppStore.defaultWindowAnimationDuration
+        return AppStore.clampWindowAnimationDuration(stored)
+    }() {
+        didSet {
+            let clamped = Self.clampWindowAnimationDuration(windowAnimationDuration)
+            if windowAnimationDuration != clamped {
+                windowAnimationDuration = clamped
+                return
+            }
+            UserDefaults.standard.set(windowAnimationDuration, forKey: Self.windowAnimationDurationKey)
+        }
     }
 
     @Published var useLocalizedThirdPartyTitles: Bool = {
@@ -2795,6 +2821,9 @@ final class AppStore: ObservableObject {
         if defaults.object(forKey: Self.windowOpenAnimationKey) == nil {
             defaults.set(true, forKey: Self.windowOpenAnimationKey)
         }
+        if defaults.object(forKey: Self.windowAnimationDurationKey) == nil {
+            defaults.set(Self.defaultWindowAnimationDuration, forKey: Self.windowAnimationDurationKey)
+        }
         if UserDefaults.standard.object(forKey: "showFPSOverlay") == nil {
             UserDefaults.standard.set(false, forKey: "showFPSOverlay")
         }
@@ -2816,6 +2845,9 @@ final class AppStore: ObservableObject {
         let storedDuration = UserDefaults.standard.double(forKey: "animationDuration")
         self.animationDuration = storedDuration == 0 ? 0.3 : storedDuration
         self.enableWindowOpenAnimation = defaults.object(forKey: Self.windowOpenAnimationKey) as? Bool ?? true
+        self.windowAnimationDuration = Self.clampWindowAnimationDuration(
+            defaults.object(forKey: Self.windowAnimationDurationKey) as? Double ?? Self.defaultWindowAnimationDuration
+        )
         self.dockDragEnabled = defaults.object(forKey: Self.dockDragEnabledKey) as? Bool ?? true
         let storedDockDragSide = DockDragSide(rawValue: defaults.string(forKey: Self.dockDragSideKey) ?? "")
         self.dockDragSide = storedDockDragSide == .disabled ? .bottom : (storedDockDragSide ?? .bottom)
@@ -4718,6 +4750,7 @@ final class AppStore: ObservableObject {
             Self.iconLabelFontWeightKey,
             "animationDuration",
             Self.windowOpenAnimationKey,
+            Self.windowAnimationDurationKey,
             "useLocalizedThirdPartyTitles",
             "pageIndicatorOffset",
             Self.pageIndicatorTopPaddingKey,
