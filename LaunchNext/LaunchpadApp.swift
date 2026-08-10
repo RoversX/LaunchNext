@@ -36,7 +36,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     private let launchpadHotKeySignature = fourCharCode("LNXK")
     // private let aiOverlayHotKeySignature = fourCharCode("AIOV")
     
-    let appStore = AppStore()
+    let appStore: AppStore
     var modelContainer: ModelContainer?
     private var cliIPCServer: LaunchNextCLIIPCServer?
     private var didConfigureModelContext = false
@@ -59,6 +59,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     // If gesture support is removed later, delete this together with
     // bindGestureWakeRecovery()/scheduleGestureWakeRecovery().
     private var gestureWakeRecoveryWorkItems: [DispatchWorkItem] = []
+
+    override init() {
+        AppStore.migrateLegacyPreferencesIfNeeded()
+        appStore = AppStore()
+        super.init()
+    }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         if runHeadlessModeIfRequested() { return }

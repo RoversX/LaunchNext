@@ -61,7 +61,7 @@ The main app bundles the compiled SwiftUpdater at:
 LaunchNext.app/Contents/Resources/Updater/SwiftUpdater
 ```
 
-During build, the `Run Script (Updater)` phase copies the binary from `.build/.../SwiftUpdater`, applies an ad-hoc signature (`codesign --sign -`), and packages it with the app to satisfy macOS code-signing requirements.
+During build, the `Run Script (Updater)` phase copies the binary from `.build/.../SwiftUpdater`, signs it with Xcode's active signing identity and Hardened Runtime, and packages it with the app. Builds without an available signing identity fall back to an ad-hoc Hardened Runtime signature.
 
 The settings UI triggers the updater via Terminal using `/usr/bin/open -na Terminal --args ... SwiftUpdater` so that the user sees progress and can authenticate with sudo.
 

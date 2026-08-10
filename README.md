@@ -35,7 +35,13 @@ LaunchNext includes its own updater. The Homebrew cask is mainly for installatio
 ```bash
 sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
 ```
-**Why**: I can't afford Apple's developer certificate ($99/year), so macOS blocks unsigned apps. This command removes the quarantine flag to let it run. **Only use this command on apps you trust.**
+**Why**: ~~I can't afford Apple's developer certificate ($99/year), so macOS blocks unsigned apps.~~ This command removes the quarantine flag to let it run. **Only use this command on apps you trust.**
+
+### Code Signing Status
+
+After tremendous effort, starting with LaunchNext 2.4.2, releases are signed and notarized by Apple. I'm trying this out for now—the membership only lasts a year, and keeping it active isn't cheap, so I may not renew it. If that happens, future releases will go back to unsigned/ad-hoc builds, which may not be a bad idea.
+
+Building from source? See [Configure local code signing](#configure-local-code-signing).
 
 ### What LaunchNext Delivers
 - ✅ **One-click import from old system Launchpad** - directly reads your native Launchpad SQLite database (`/private$(getconf DARWIN_USER_DIR)com.apple.dock.launchpad/db/db`) to perfectly recreate your existing folders, app positions, and layout
@@ -93,10 +99,20 @@ Reads directly from the system Launchpad database:
    open LaunchNext.xcodeproj
    ```
 
-3. **Build and run**
-   - Select your target device
-   - Press `⌘+R` to build and run
-   - Or `⌘+B` to build only
+3. <a name="configure-local-code-signing"></a>**Configure local code signing**
+   - A paid Apple Developer membership is not required to build or contribute to LaunchNext.
+   - Select the **LaunchNext target**, open **Signing & Capabilities**, set **Team** to `None`, and select `Sign to Run Locally` as the signing certificate.
+   - Keep Hardened Runtime enabled.
+   - Xcode may mark the project file as modified after changing these local settings. Do not include signing-only changes in a pull request.
+
+   | **Xcode local signing settings for LaunchNext** | **Signed and notarized LaunchNext release** |
+   | :---: | :---: |
+   | <img src="./public/local-code-signing.png" alt="Xcode local signing settings for LaunchNext" width="620"> | <img src="./public/notarized-release-status.png" alt="Signed and notarized LaunchNext release status" width="300"> |
+
+4. **Build and run**
+   - To launch the app with `⌘+R`, select `My Mac` as the run destination—not `Any Mac`.
+   - `Any Mac (arm64, x86_64)` is intended for generic builds and archives; it cannot launch the app for debugging.
+   - Press `⌘+B` if you only want to build.
 
 ### Command Line Build
 

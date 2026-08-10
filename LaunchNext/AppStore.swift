@@ -363,6 +363,8 @@ final class AppStore: ObservableObject {
 
     static let customTitlesKey = "customAppTitles"
     static let hiddenAppsKey = "hiddenAppBundlePaths"
+    static let legacyPreferencesDomain = "LaunchNext"
+    private static let legacyPreferencesMigrationKey = "didMigratePreferencesFromLaunchNextBundleID"
     static let gridColumnsKey = "gridColumnsPerPage"
     static let gridRowsKey = "gridRowsPerPage"
     static let columnSpacingKey = "gridColumnSpacing"
@@ -428,6 +430,28 @@ final class AppStore: ObservableObject {
     private static let gameControllerEnabledKey = "gameControllerEnabled"
     static let gameControllerMenuToggleKey = "gameControllerMenuToggleLaunchpad"
     private static let soundEffectsEnabledKey = "soundEffectsEnabled"
+
+    static func migrateLegacyPreferencesIfNeeded(
+        defaults: UserDefaults = .standard,
+        currentDomain: String? = Bundle.main.bundleIdentifier
+    ) {
+        guard let currentDomain,
+              !currentDomain.isEmpty,
+              currentDomain != legacyPreferencesDomain else { return }
+
+        var currentPreferences = defaults.persistentDomain(forName: currentDomain) ?? [:]
+        guard currentPreferences[legacyPreferencesMigrationKey] as? Bool != true else { return }
+
+        if let legacyPreferences = defaults.persistentDomain(forName: legacyPreferencesDomain) {
+            for (key, value) in legacyPreferences where currentPreferences[key] == nil {
+                currentPreferences[key] = value
+            }
+        }
+
+        currentPreferences[legacyPreferencesMigrationKey] = true
+        defaults.setPersistentDomain(currentPreferences, forName: currentDomain)
+    }
+
     private static let soundLaunchpadOpenKey = "soundLaunchpadOpenSound"
     private static let soundLaunchpadCloseKey = "soundLaunchpadCloseSound"
     private static let soundNavigationKey = "soundNavigationSound"

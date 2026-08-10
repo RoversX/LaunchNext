@@ -5883,8 +5883,10 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private func importPreferences(from folder: URL, allowedKeys: Set<String>? = nil) {
         let domain = currentPrefsDomain
-        let url = folder.appendingPathComponent("\(domain).plist")
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let candidateNames = [domain, AppStore.legacyPreferencesDomain]
+        guard let url = candidateNames
+            .map({ folder.appendingPathComponent("\($0).plist") })
+            .first(where: { FileManager.default.fileExists(atPath: $0.path) }) else { return }
         do {
             let data = try Data(contentsOf: url)
             guard var incoming = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else { return }
@@ -6025,7 +6027,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         let fm = FileManager.default
         let requiredFiles = [
             folder.appendingPathComponent("Data.store"),
-            folder.appendingPathComponent("LaunchNext.plist")
+            folder.appendingPathComponent("\(currentPrefsDomain).plist")
         ]
         return requiredFiles.allSatisfy { fm.fileExists(atPath: $0.path) }
     }
