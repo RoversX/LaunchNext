@@ -55,6 +55,7 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         view.externalAppDragTriggerDistance = CGFloat(appStore.dockDragTriggerDistance)
         view.showInFinderMenuTitle = appStore.localized(.contextMenuShowInFinder)
         view.copyAppPathMenuTitle = appStore.localized(.contextMenuCopyAppPath)
+        view.removeQuarantineMenuTitle = appStore.localized(.contextMenuRemoveQuarantineInTerminal)
         view.hideAppMenuTitle = appStore.localized(.hiddenAppsAddButton)
         view.renameFolderMenuTitle = appStore.localized(.contextMenuRenameFolder)
         view.dissolveFolderMenuTitle = appStore.localized(.contextMenuDissolveFolder)
@@ -62,6 +63,7 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         view.batchSelectAppsMenuTitle = appStore.localized(.contextMenuBatchSelectApps)
         view.finishBatchSelectionMenuTitle = appStore.localized(.contextMenuFinishBatchSelection)
         view.canUseConfiguredUninstallTool = appStore.uninstallToolAppURL != nil
+        view.showQuarantineRemovalAction = appStore.showQuarantineRemovalAction
         view.folderQuickLaunchEnabled = appStore.folderQuickLaunchEnabled
         view.folderQuickLaunchAppsSorter = { folder in
             appStore.orderedFolderQuickLaunchApps(in: folder)
@@ -136,6 +138,11 @@ struct CAGridViewRepresentable: NSViewRepresentable {
                 if !appStore.copyAppPath(app) {
                     NSSound.beep()
                 }
+            }
+        }
+        view.onRemoveQuarantineInTerminal = { app in
+            DispatchQueue.main.async {
+                appStore.requestQuarantineRemovalInTerminal(for: app)
             }
         }
         view.onHideApp = { app in
@@ -287,6 +294,7 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         nsView.isScrollEnabled = appStore.openFolder == nil && !appStore.isSetting
         nsView.showInFinderMenuTitle = appStore.localized(.contextMenuShowInFinder)
         nsView.copyAppPathMenuTitle = appStore.localized(.contextMenuCopyAppPath)
+        nsView.removeQuarantineMenuTitle = appStore.localized(.contextMenuRemoveQuarantineInTerminal)
         nsView.hideAppMenuTitle = appStore.localized(.hiddenAppsAddButton)
         nsView.renameFolderMenuTitle = appStore.localized(.contextMenuRenameFolder)
         nsView.dissolveFolderMenuTitle = appStore.localized(.contextMenuDissolveFolder)
@@ -294,6 +302,7 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         nsView.batchSelectAppsMenuTitle = appStore.localized(.contextMenuBatchSelectApps)
         nsView.finishBatchSelectionMenuTitle = appStore.localized(.contextMenuFinishBatchSelection)
         nsView.canUseConfiguredUninstallTool = appStore.uninstallToolAppURL != nil
+        nsView.showQuarantineRemovalAction = appStore.showQuarantineRemovalAction
         nsView.folderQuickLaunchEnabled = appStore.folderQuickLaunchEnabled
         nsView.folderQuickLaunchAppsSorter = { folder in
             appStore.orderedFolderQuickLaunchApps(in: folder)

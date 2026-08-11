@@ -80,6 +80,7 @@ struct SettingsView: View {
     @State private var showCLIInfoPopover = false
     @State private var showCLIRemoveInfoPopover = false
     @State private var showCLIFullPathCommand = false
+    @State private var showQuarantineRemovalInfoPopover = false
     @State private var showHideMenuBarInfoPopover = false
     @State private var showFolderQuickLaunchInfoPopover = false
     @State private var backgroundImageSourceSelection: AppStore.BackgroundImageSource
@@ -1253,6 +1254,39 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             Text(appStore.localized(.developmentPlaceholderSubtitle))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                Text(appStore.localized(.developmentQuarantineRemovalTitle))
+                    .font(.subheadline.weight(.semibold))
+                Button {
+                    showQuarantineRemovalInfoPopover.toggle()
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.subheadline.weight(.regular))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showQuarantineRemovalInfoPopover, arrowEdge: .top) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(appStore.localized(.developmentQuarantineRemovalInfoTitle))
+                            .font(.headline)
+                        Text(appStore.localized(.developmentQuarantineRemovalInfoBody))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                    .padding(12)
+                    .frame(width: 390, alignment: .leading)
+                }
+                Spacer()
+                Toggle("", isOn: $appStore.showQuarantineRemovalAction)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Divider()
 
             updateControlButton(
                 title: appStore.localized(.developmentForceOnboardingButton),
@@ -5871,7 +5905,9 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         }
 
         let domain = currentPrefsDomain
-        guard let dict = UserDefaults.standard.persistentDomain(forName: domain), !dict.isEmpty else { return }
+        guard var dict = UserDefaults.standard.persistentDomain(forName: domain), !dict.isEmpty else { return }
+        dict.removeValue(forKey: AppStore.showQuarantineRemovalActionKey)
+        guard !dict.isEmpty else { return }
         let url = folder.appendingPathComponent("\(domain).plist")
         do {
             let data = try PropertyListSerialization.data(fromPropertyList: dict, format: .xml, options: 0)
@@ -5890,6 +5926,9 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         do {
             let data = try Data(contentsOf: url)
             guard var incoming = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else { return }
+
+            // Developer quarantine tooling is intentionally local to this Mac.
+            incoming.removeValue(forKey: AppStore.showQuarantineRemovalActionKey)
 
             if let allowedKeys, !allowedKeys.isEmpty {
                 incoming = incoming.filter { allowedKeys.contains($0.key) }

@@ -50,11 +50,13 @@ struct CAFolderGridViewRepresentable: NSViewRepresentable {
         view.verticalHeaderHeight = verticalHeaderHeight
         view.showInFinderMenuTitle = appStore.localized(.contextMenuShowInFinder)
         view.copyAppPathMenuTitle = appStore.localized(.contextMenuCopyAppPath)
+        view.removeQuarantineMenuTitle = appStore.localized(.contextMenuRemoveQuarantineInTerminal)
         view.hideAppMenuTitle = appStore.localized(.hiddenAppsAddButton)
         view.uninstallWithToolMenuTitle = appStore.localized(.contextMenuUninstallWithConfiguredTool)
         view.pinToFolderQuickLaunchTopMenuTitle = appStore.localized(.contextMenuPinToFolderQuickLaunchTop)
         view.unpinFromFolderQuickLaunchTopMenuTitle = appStore.localized(.contextMenuUnpinFromFolderQuickLaunchTop)
         view.canUseConfiguredUninstallTool = appStore.uninstallToolAppURL != nil
+        view.showQuarantineRemovalAction = appStore.showQuarantineRemovalAction
         view.folderQuickLaunchPinningEnabled = appStore.useCAGridRenderer && appStore.folderQuickLaunchEnabled
     }
 
@@ -112,6 +114,11 @@ struct CAFolderGridViewRepresentable: NSViewRepresentable {
         view.onCopyAppPath = { app in
             DispatchQueue.main.async {
                 if !appStore.copyAppPath(app) { NSSound.beep() }
+            }
+        }
+        view.onRemoveQuarantineInTerminal = { app in
+            DispatchQueue.main.async {
+                appStore.requestQuarantineRemovalInTerminal(for: app)
             }
         }
         view.onHideApp = { app in

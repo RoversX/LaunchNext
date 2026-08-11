@@ -49,6 +49,14 @@ extension View {
                     Label(appStore.localized(.contextMenuCopyAppPath), systemImage: "doc.on.doc")
                 }
 
+                if appStore.showQuarantineRemovalAction {
+                    Button {
+                        appStore.requestQuarantineRemovalInTerminal(for: app)
+                    } label: {
+                        Label(appStore.localized(.contextMenuRemoveQuarantineInTerminal), systemImage: "terminal")
+                    }
+                }
+
                 Divider()
 
                 Button {
@@ -145,6 +153,17 @@ extension CAGridView {
             copyPathItem.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
             copyPathItem.target = self
             menu.addItem(copyPathItem)
+
+            if showQuarantineRemovalAction {
+                let quarantineItem = NSMenuItem(
+                    title: removeQuarantineMenuTitle,
+                    action: #selector(handleRemoveQuarantineFromContextMenu(_:)),
+                    keyEquivalent: ""
+                )
+                quarantineItem.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)
+                quarantineItem.target = self
+                menu.addItem(quarantineItem)
+            }
 
             menu.addItem(NSMenuItem.separator())
 
@@ -271,6 +290,13 @@ extension CAGridView {
         contextMenuTargetFolder = nil
     }
 
+    @objc private func handleRemoveQuarantineFromContextMenu(_ sender: NSMenuItem) {
+        guard let app = contextMenuTargetApp else { return }
+        onRemoveQuarantineInTerminal?(app)
+        contextMenuTargetApp = nil
+        contextMenuTargetFolder = nil
+    }
+
     @objc private func handleHideAppFromContextMenu(_ sender: NSMenuItem) {
         guard let app = contextMenuTargetApp else { return }
         onHideApp?(app)
@@ -363,6 +389,17 @@ extension CAFolderGridView {
         copyPathItem.target = self
         menu.addItem(copyPathItem)
 
+        if showQuarantineRemovalAction {
+            let quarantineItem = NSMenuItem(
+                title: removeQuarantineMenuTitle,
+                action: #selector(handleFolderRemoveQuarantineFromContextMenu(_:)),
+                keyEquivalent: ""
+            )
+            quarantineItem.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)
+            quarantineItem.target = self
+            menu.addItem(quarantineItem)
+        }
+
         if folderQuickLaunchPinningEnabled {
             menu.addItem(NSMenuItem.separator())
             let isPinned = isFolderQuickLaunchAppPinned?(app) ?? false
@@ -417,6 +454,12 @@ extension CAFolderGridView {
     @objc private func handleFolderCopyAppPathFromContextMenu(_ sender: NSMenuItem) {
         guard let app = contextMenuTargetApp else { return }
         onCopyAppPath?(app)
+        contextMenuTargetApp = nil
+    }
+
+    @objc private func handleFolderRemoveQuarantineFromContextMenu(_ sender: NSMenuItem) {
+        guard let app = contextMenuTargetApp else { return }
+        onRemoveQuarantineInTerminal?(app)
         contextMenuTargetApp = nil
     }
 

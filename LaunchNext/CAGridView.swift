@@ -105,6 +105,7 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     var onEmptyAreaClicked: (() -> Void)?
     var onShowAppInFinder: ((AppInfo) -> Void)?
     var onCopyAppPath: ((AppInfo) -> Void)?
+    var onRemoveQuarantineInTerminal: ((AppInfo) -> Void)?
     var onHideApp: ((AppInfo) -> Void)?
     var onFolderQuickLaunchApp: ((AppInfo) -> Void)?
     var folderQuickLaunchAppsSorter: ((FolderInfo) -> [AppInfo])?
@@ -119,6 +120,7 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     var onRequestNewPage: (() -> Void)?                     // 请求创建新页面
     var showInFinderMenuTitle: String = "Show in Finder"
     var copyAppPathMenuTitle: String = "Copy App Path"
+    var removeQuarantineMenuTitle: String = "Remove Quarantine in Terminal…"
     var hideAppMenuTitle: String = "Hide application"
     var renameFolderMenuTitle: String = "Rename Folder"
     var dissolveFolderMenuTitle: String = "Dissolve folder"
@@ -126,6 +128,7 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     var batchSelectAppsMenuTitle: String = "Batch Select Apps"
     var finishBatchSelectionMenuTitle: String = "Finish Batch Selection"
     var canUseConfiguredUninstallTool: Bool = false
+    var showQuarantineRemovalAction: Bool = false
     var folderQuickLaunchEnabled: Bool = false
     var isContextMenuTracking: Bool = false
     var contextMenuTargetApp: AppInfo?

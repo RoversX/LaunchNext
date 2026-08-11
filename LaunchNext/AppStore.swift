@@ -389,6 +389,7 @@ final class AppStore: ObservableObject {
     static let windowOpenAnimationKey = "windowOpenAnimationEnabled"
     static let windowAnimationDurationKey = "windowAnimationDuration"
     static let developmentEnableCLICodeKey = "developmentEnableCLICode"
+    static let showQuarantineRemovalActionKey = "showQuarantineRemovalAction"
     static let fuzzySearchEnabledKey = "fuzzySearchEnabled"
     static let searchDebounceMillisecondsKey = "searchDebounceMilliseconds"
     static let dockDragEnabledKey = "dockDragEnabled"
@@ -764,6 +765,15 @@ final class AppStore: ObservableObject {
         }
     }
 
+    @Published var showQuarantineRemovalAction: Bool = {
+        UserDefaults.standard.object(forKey: AppStore.showQuarantineRemovalActionKey) as? Bool ?? false
+    }() {
+        didSet {
+            guard showQuarantineRemovalAction != oldValue else { return }
+            UserDefaults.standard.set(showQuarantineRemovalAction, forKey: Self.showQuarantineRemovalActionKey)
+        }
+    }
+
     @Published var backgroundMaskEnabled: Bool = AppStore.loadBackgroundMaskEnabled() {
         didSet {
             UserDefaults.standard.set(backgroundMaskEnabled, forKey: Self.backgroundMaskEnabledKey)
@@ -945,6 +955,7 @@ final class AppStore: ObservableObject {
         reloadAppearancePreferencesFromDefaults()
 
         developmentEnableCLICode = UserDefaults.standard.object(forKey: Self.developmentEnableCLICodeKey) as? Bool ?? false
+        showQuarantineRemovalAction = UserDefaults.standard.object(forKey: Self.showQuarantineRemovalActionKey) as? Bool ?? false
         fuzzySearchEnabled = UserDefaults.standard.object(forKey: Self.fuzzySearchEnabledKey) as? Bool ?? true
         searchDebounceMilliseconds = Self.clampedSearchDebounceMilliseconds(
             UserDefaults.standard.object(forKey: Self.searchDebounceMillisecondsKey) as? Double ?? 300
@@ -2818,6 +2829,9 @@ final class AppStore: ObservableObject {
         if defaults.object(forKey: Self.developmentEnableCLICodeKey) == nil {
             defaults.set(false, forKey: Self.developmentEnableCLICodeKey)
         }
+        if defaults.object(forKey: Self.showQuarantineRemovalActionKey) == nil {
+            defaults.set(false, forKey: Self.showQuarantineRemovalActionKey)
+        }
         if defaults.object(forKey: Self.fuzzySearchEnabledKey) == nil {
             defaults.set(true, forKey: Self.fuzzySearchEnabledKey)
         }
@@ -4604,6 +4618,95 @@ final class AppStore: ObservableObject {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         return pasteboard.setString(app.url.path, forType: .string)
+    }
+
+    @MainActor
+    func requestQuarantineRemovalInTerminal(for app: AppInfo) {
+        let targetURL: URL
+        do {
+            targetURL = try QuarantineRemovalTerminalLauncher.validatedAppURL(for: app.url)
+        } catch {
+            presentQuarantineRemovalError(.invalidTarget)
+            return
+        }
+
+        let command = QuarantineRemovalTerminalLauncher.command(for: targetURL)
+        let alert = NSAlert()
+        alert.messageText = localized(.quarantineRemovalConfirmationTitle)
+        alert.informativeText = [
+            app.name,
+            targetURL.path,
+            command,
+            localized(.quarantineRemovalConfirmationWarning)
+        ].joined(separator: "\n\n")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: localized(.quarantineRemovalOpenTerminalButton))
+        alert.addButton(withTitle: localized(.cancel))
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let confirmedTargetURL: URL
+        do {
+            confirmedTargetURL = try QuarantineRemovalTerminalLauncher.validatedAppURL(for: app.url)
+            guard confirmedTargetURL == targetURL else {
+                presentQuarantineRemovalError(.invalidTarget)
+                return
+            }
+        } catch {
+            presentQuarantineRemovalError(.invalidTarget)
+            return
+        }
+
+        let messages = QuarantineRemovalTerminalLauncher.Messages(
+            targetLabel: localized(.quarantineTerminalTargetLabel),
+            commandLabel: localized(.quarantineTerminalCommandLabel),
+            success: localized(.quarantineTerminalSuccess),
+            failure: localized(.quarantineTerminalFailure),
+            exitStatusLabel: localized(.quarantineTerminalExitStatusLabel),
+            pressReturn: localized(.quarantineTerminalPressReturn)
+        )
+
+        let launch: QuarantineRemovalTerminalLauncher.PreparedLaunch
+        do {
+            launch = try QuarantineRemovalTerminalLauncher.prepareLaunch(
+                for: confirmedTargetURL,
+                messages: messages
+            )
+        } catch let error as QuarantineRemovalTerminalLauncher.LaunchError {
+            presentQuarantineRemovalError(error)
+            return
+        } catch {
+            presentQuarantineRemovalError(.scriptCreationFailed)
+            return
+        }
+
+        AppDelegate.shared?.hideWindow()
+        QuarantineRemovalTerminalLauncher.open(launch) { [weak self] result in
+            guard case .failure(let error) = result else { return }
+            AppDelegate.shared?.showWindow()
+            self?.presentQuarantineRemovalError(error)
+        }
+    }
+
+    @MainActor
+    private func presentQuarantineRemovalError(_ error: QuarantineRemovalTerminalLauncher.LaunchError) {
+        let body: String
+        switch error {
+        case .invalidTarget:
+            body = localized(.quarantineRemovalInvalidTargetError)
+        case .scriptCreationFailed:
+            body = localized(.quarantineRemovalScriptCreationError)
+        case .terminalUnavailable, .terminalLaunchFailed:
+            body = localized(.quarantineRemovalTerminalLaunchError)
+        }
+
+        NSSound.beep()
+        let alert = NSAlert()
+        alert.messageText = localized(.quarantineRemovalErrorTitle)
+        alert.informativeText = body
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: localized(.okButton))
+        alert.runModal()
     }
 
     func requestRenameFolder(_ folder: FolderInfo) {

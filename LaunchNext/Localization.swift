@@ -333,6 +333,9 @@ enum LocalizationKey: String {
     case developmentPlaceholderSubtitle
     case developmentEnableCLICodeTitle
     case developmentEnableCLICodeHint
+    case developmentQuarantineRemovalTitle
+    case developmentQuarantineRemovalInfoTitle
+    case developmentQuarantineRemovalInfoBody
     case commandLineInterfaceHelpTitle
     case commandLineInterfaceHelpBody
     case commandLineInterfaceShowFullPathCommand
@@ -388,6 +391,7 @@ enum LocalizationKey: String {
     case notHiddenAppsSearchPlaceholder
     case contextMenuShowInFinder
     case contextMenuCopyAppPath
+    case contextMenuRemoveQuarantineInTerminal
     case contextMenuPinToFolderQuickLaunchTop
     case contextMenuUnpinFromFolderQuickLaunchTop
     case contextMenuRenameFolder
@@ -395,6 +399,19 @@ enum LocalizationKey: String {
     case contextMenuUninstallWithConfiguredTool
     case contextMenuBatchSelectApps
     case contextMenuFinishBatchSelection
+    case quarantineRemovalConfirmationTitle
+    case quarantineRemovalConfirmationWarning
+    case quarantineRemovalOpenTerminalButton
+    case quarantineRemovalErrorTitle
+    case quarantineRemovalInvalidTargetError
+    case quarantineRemovalScriptCreationError
+    case quarantineRemovalTerminalLaunchError
+    case quarantineTerminalTargetLabel
+    case quarantineTerminalCommandLabel
+    case quarantineTerminalSuccess
+    case quarantineTerminalFailure
+    case quarantineTerminalExitStatusLabel
+    case quarantineTerminalPressReturn
     case uninstallSectionDescription
     case uninstallToolPathLabel
     case uninstallToolNotConfigured
@@ -6931,6 +6948,279 @@ final class LocalizationManager {
         ]) { _, new in new }
 
         builder[.hindi] = hindiDictionary
+
+        let quarantineTranslations: [AppLanguage: [LocalizationKey: String]] = [
+            .english: [
+                .developmentQuarantineRemovalTitle: "Show App Unblock Action",
+                .developmentQuarantineRemovalInfoTitle: "Open restricted apps",
+                .developmentQuarantineRemovalInfoBody: "Adds “Unblock App in Terminal…” to app context menus. Terminal runs `sudo /usr/bin/xattr -r -d com.apple.quarantine <app>`, and macOS may request an administrator password. This removes the download protection marker and bypasses Gatekeeper; use only with apps you trust.",
+                .contextMenuRemoveQuarantineInTerminal: "Unblock App in Terminal…",
+                .quarantineRemovalConfirmationTitle: "Remove this app’s macOS restriction?",
+                .quarantineRemovalConfirmationWarning: "This removes macOS’s download protection marker and skips the normal security check. Continue only if you trust this app.",
+                .quarantineRemovalOpenTerminalButton: "Open Terminal",
+                .quarantineRemovalErrorTitle: "Could Not Open App Unblock Tool",
+                .quarantineRemovalInvalidTargetError: "The selected item is missing or is not a valid application bundle.",
+                .quarantineRemovalScriptCreationError: "LaunchNext could not create the one-time Terminal command.",
+                .quarantineRemovalTerminalLaunchError: "LaunchNext could not open the command in the system Terminal.",
+                .quarantineTerminalTargetLabel: "Target:",
+                .quarantineTerminalCommandLabel: "Command:",
+                .quarantineTerminalSuccess: "The macOS download protection marker was removed.",
+                .quarantineTerminalFailure: "Could not remove the macOS download protection marker.",
+                .quarantineTerminalExitStatusLabel: "Exit status:",
+                .quarantineTerminalPressReturn: "Press Return to close this window."
+            ],
+            .simplifiedChinese: [
+                .developmentQuarantineRemovalTitle: "显示解除 App 限制操作",
+                .developmentQuarantineRemovalInfoTitle: "打开受限制的 App",
+                .developmentQuarantineRemovalInfoBody: "在 App 右键菜单中添加“在终端中解除 App 限制…”。终端会执行 `sudo /usr/bin/xattr -r -d com.apple.quarantine <App>`，macOS 可能要求输入管理员密码。此操作会移除下载保护标记并绕过 Gatekeeper，请仅用于你信任的 App。",
+                .contextMenuRemoveQuarantineInTerminal: "在终端中解除 App 限制…",
+                .quarantineRemovalConfirmationTitle: "解除此 App 的 macOS 限制？",
+                .quarantineRemovalConfirmationWarning: "这会移除 macOS 的下载保护标记，并跳过正常的安全检查。请仅继续处理你信任的 App。",
+                .quarantineRemovalOpenTerminalButton: "打开终端",
+                .quarantineRemovalErrorTitle: "无法打开 App 限制解除工具",
+                .quarantineRemovalInvalidTargetError: "所选项目不存在或不是有效的应用程序包。",
+                .quarantineRemovalScriptCreationError: "LaunchNext 无法创建一次性终端命令。",
+                .quarantineRemovalTerminalLaunchError: "LaunchNext 无法在系统终端中打开该命令。",
+                .quarantineTerminalTargetLabel: "目标：",
+                .quarantineTerminalCommandLabel: "命令：",
+                .quarantineTerminalSuccess: "已移除 macOS 下载保护标记。",
+                .quarantineTerminalFailure: "无法移除 macOS 下载保护标记。",
+                .quarantineTerminalExitStatusLabel: "退出状态：",
+                .quarantineTerminalPressReturn: "按 Return 键关闭此窗口。"
+            ],
+            .traditionalChinese: [
+                .developmentQuarantineRemovalTitle: "顯示解除 App 限制操作",
+                .developmentQuarantineRemovalInfoTitle: "開啟受限制的 App",
+                .developmentQuarantineRemovalInfoBody: "在 App 右鍵選單中加入「在終端機中解除 App 限制⋯」。終端機會執行 `sudo /usr/bin/xattr -r -d com.apple.quarantine <App>`，macOS 可能會要求輸入管理員密碼。此操作會移除下載保護標記並略過 Gatekeeper，請僅用於你信任的 App。",
+                .contextMenuRemoveQuarantineInTerminal: "在終端機中解除 App 限制⋯",
+                .quarantineRemovalConfirmationTitle: "解除此 App 的 macOS 限制？",
+                .quarantineRemovalConfirmationWarning: "這會移除 macOS 的下載保護標記，並略過一般的安全檢查。請僅繼續處理你信任的 App。",
+                .quarantineRemovalOpenTerminalButton: "開啟終端機",
+                .quarantineRemovalErrorTitle: "無法開啟 App 限制解除工具",
+                .quarantineRemovalInvalidTargetError: "所選項目不存在或不是有效的 App 套件。",
+                .quarantineRemovalScriptCreationError: "LaunchNext 無法建立一次性終端機命令。",
+                .quarantineRemovalTerminalLaunchError: "LaunchNext 無法在系統終端機中開啟此命令。",
+                .quarantineTerminalTargetLabel: "目標：",
+                .quarantineTerminalCommandLabel: "命令：",
+                .quarantineTerminalSuccess: "已移除 macOS 下載保護標記。",
+                .quarantineTerminalFailure: "無法移除 macOS 下載保護標記。",
+                .quarantineTerminalExitStatusLabel: "結束狀態：",
+                .quarantineTerminalPressReturn: "按 Return 鍵關閉此視窗。"
+            ],
+            .japanese: [
+                .developmentQuarantineRemovalTitle: "App の制限解除操作を表示",
+                .developmentQuarantineRemovalInfoTitle: "制限された App を開く",
+                .developmentQuarantineRemovalInfoBody: "App のコンテキストメニューに「ターミナルで App の制限を解除…」を追加します。ターミナルで `sudo /usr/bin/xattr -r -d com.apple.quarantine <app>` を実行し、macOS が管理者パスワードを求める場合があります。ダウンロード保護マーカーを削除して Gatekeeper を回避するため、信頼できる App にのみ使用してください。",
+                .contextMenuRemoveQuarantineInTerminal: "ターミナルで App の制限を解除…",
+                .quarantineRemovalConfirmationTitle: "この App の macOS 制限を解除しますか？",
+                .quarantineRemovalConfirmationWarning: "macOS のダウンロード保護マーカーが削除され、通常のセキュリティチェックが省略されます。この App を信頼できる場合のみ続行してください。",
+                .quarantineRemovalOpenTerminalButton: "ターミナルを開く",
+                .quarantineRemovalErrorTitle: "App の制限解除ツールを開けませんでした",
+                .quarantineRemovalInvalidTargetError: "選択した項目が見つからないか、有効なアプリバンドルではありません。",
+                .quarantineRemovalScriptCreationError: "LaunchNext は一時的なターミナルコマンドを作成できませんでした。",
+                .quarantineRemovalTerminalLaunchError: "LaunchNext はシステムのターミナルでコマンドを開けませんでした。",
+                .quarantineTerminalTargetLabel: "対象：",
+                .quarantineTerminalCommandLabel: "コマンド：",
+                .quarantineTerminalSuccess: "macOS のダウンロード保護マーカーを削除しました。",
+                .quarantineTerminalFailure: "macOS のダウンロード保護マーカーを削除できませんでした。",
+                .quarantineTerminalExitStatusLabel: "終了ステータス：",
+                .quarantineTerminalPressReturn: "Return キーを押してこのウインドウを閉じます。"
+            ],
+            .korean: [
+                .developmentQuarantineRemovalTitle: "앱 제한 해제 동작 표시",
+                .developmentQuarantineRemovalInfoTitle: "제한된 앱 열기",
+                .developmentQuarantineRemovalInfoBody: "앱 컨텍스트 메뉴에 ‘터미널에서 앱 제한 해제…’를 추가합니다. 터미널에서 `sudo /usr/bin/xattr -r -d com.apple.quarantine <app>`을 실행하며 macOS가 관리자 암호를 요청할 수 있습니다. 다운로드 보호 표시를 제거하고 Gatekeeper를 우회하므로 신뢰하는 앱에만 사용하세요.",
+                .contextMenuRemoveQuarantineInTerminal: "터미널에서 앱 제한 해제…",
+                .quarantineRemovalConfirmationTitle: "이 앱의 macOS 제한을 해제할까요?",
+                .quarantineRemovalConfirmationWarning: "macOS의 다운로드 보호 표시가 제거되고 일반 보안 검사가 생략됩니다. 이 앱을 신뢰하는 경우에만 계속하세요.",
+                .quarantineRemovalOpenTerminalButton: "터미널 열기",
+                .quarantineRemovalErrorTitle: "앱 제한 해제 도구를 열 수 없음",
+                .quarantineRemovalInvalidTargetError: "선택한 항목이 없거나 올바른 앱 번들이 아닙니다.",
+                .quarantineRemovalScriptCreationError: "LaunchNext가 일회용 터미널 명령을 만들지 못했습니다.",
+                .quarantineRemovalTerminalLaunchError: "LaunchNext가 시스템 터미널에서 명령을 열지 못했습니다.",
+                .quarantineTerminalTargetLabel: "대상:",
+                .quarantineTerminalCommandLabel: "명령:",
+                .quarantineTerminalSuccess: "macOS 다운로드 보호 표시를 제거했습니다.",
+                .quarantineTerminalFailure: "macOS 다운로드 보호 표시를 제거하지 못했습니다.",
+                .quarantineTerminalExitStatusLabel: "종료 상태:",
+                .quarantineTerminalPressReturn: "Return 키를 눌러 이 윈도우를 닫으세요."
+            ],
+            .french: [
+                .developmentQuarantineRemovalTitle: "Afficher l’action de déblocage des apps",
+                .developmentQuarantineRemovalInfoTitle: "Ouvrir les apps restreintes",
+                .developmentQuarantineRemovalInfoBody: "Ajoute « Débloquer l’app dans Terminal… » aux menus contextuels des apps. Terminal exécute `sudo /usr/bin/xattr -r -d com.apple.quarantine <app>` et macOS peut demander un mot de passe administrateur. Cette action supprime le marqueur de protection des téléchargements et contourne Gatekeeper ; utilisez-la uniquement avec des apps fiables.",
+                .contextMenuRemoveQuarantineInTerminal: "Débloquer l’app dans Terminal…",
+                .quarantineRemovalConfirmationTitle: "Supprimer la restriction macOS de cette app ?",
+                .quarantineRemovalConfirmationWarning: "Cette action supprime le marqueur de protection des téléchargements de macOS et ignore le contrôle de sécurité habituel. Continuez uniquement si vous faites confiance à cette app.",
+                .quarantineRemovalOpenTerminalButton: "Ouvrir Terminal",
+                .quarantineRemovalErrorTitle: "Impossible d’ouvrir l’outil de déblocage",
+                .quarantineRemovalInvalidTargetError: "L’élément sélectionné est introuvable ou n’est pas un paquet d’app valide.",
+                .quarantineRemovalScriptCreationError: "LaunchNext n’a pas pu créer la commande Terminal temporaire.",
+                .quarantineRemovalTerminalLaunchError: "LaunchNext n’a pas pu ouvrir la commande dans le Terminal système.",
+                .quarantineTerminalTargetLabel: "Cible :",
+                .quarantineTerminalCommandLabel: "Commande :",
+                .quarantineTerminalSuccess: "Le marqueur de protection des téléchargements macOS a été supprimé.",
+                .quarantineTerminalFailure: "Impossible de supprimer le marqueur de protection des téléchargements macOS.",
+                .quarantineTerminalExitStatusLabel: "État de sortie :",
+                .quarantineTerminalPressReturn: "Appuyez sur Retour pour fermer cette fenêtre."
+            ],
+            .spanish: [
+                .developmentQuarantineRemovalTitle: "Mostrar acción para desbloquear apps",
+                .developmentQuarantineRemovalInfoTitle: "Abrir apps restringidas",
+                .developmentQuarantineRemovalInfoBody: "Añade «Desbloquear app en Terminal…» a los menús contextuales de las apps. Terminal ejecuta `sudo /usr/bin/xattr -r -d com.apple.quarantine <app>` y macOS puede solicitar una contraseña de administrador. Esto elimina el marcador de protección de descargas y omite Gatekeeper; úsalo solo con apps de confianza.",
+                .contextMenuRemoveQuarantineInTerminal: "Desbloquear app en Terminal…",
+                .quarantineRemovalConfirmationTitle: "¿Quitar la restricción de macOS de esta app?",
+                .quarantineRemovalConfirmationWarning: "Esto elimina el marcador de protección de descargas de macOS y omite la comprobación de seguridad habitual. Continúa solo si confías en esta app.",
+                .quarantineRemovalOpenTerminalButton: "Abrir Terminal",
+                .quarantineRemovalErrorTitle: "No se pudo abrir la herramienta de desbloqueo",
+                .quarantineRemovalInvalidTargetError: "El elemento seleccionado no existe o no es un paquete de app válido.",
+                .quarantineRemovalScriptCreationError: "LaunchNext no pudo crear el comando temporal de Terminal.",
+                .quarantineRemovalTerminalLaunchError: "LaunchNext no pudo abrir el comando en el Terminal del sistema.",
+                .quarantineTerminalTargetLabel: "Destino:",
+                .quarantineTerminalCommandLabel: "Comando:",
+                .quarantineTerminalSuccess: "Se eliminó el marcador de protección de descargas de macOS.",
+                .quarantineTerminalFailure: "No se pudo eliminar el marcador de protección de descargas de macOS.",
+                .quarantineTerminalExitStatusLabel: "Estado de salida:",
+                .quarantineTerminalPressReturn: "Pulsa Retorno para cerrar esta ventana."
+            ],
+            .italian: [
+                .developmentQuarantineRemovalTitle: "Mostra azione per sbloccare le app",
+                .developmentQuarantineRemovalInfoTitle: "Apri le app con restrizioni",
+                .developmentQuarantineRemovalInfoBody: "Aggiunge “Sblocca app nel Terminale…” ai menu contestuali delle app. Il Terminale esegue `sudo /usr/bin/xattr -r -d com.apple.quarantine <app>` e macOS potrebbe richiedere una password amministratore. Questa operazione rimuove l’indicatore di protezione dei download e aggira Gatekeeper; usala solo con app attendibili.",
+                .contextMenuRemoveQuarantineInTerminal: "Sblocca app nel Terminale…",
+                .quarantineRemovalConfirmationTitle: "Rimuovere la restrizione macOS di questa app?",
+                .quarantineRemovalConfirmationWarning: "Questa operazione rimuove l’indicatore di protezione dei download di macOS e salta il normale controllo di sicurezza. Continua solo se consideri attendibile questa app.",
+                .quarantineRemovalOpenTerminalButton: "Apri Terminale",
+                .quarantineRemovalErrorTitle: "Impossibile aprire lo strumento di sblocco",
+                .quarantineRemovalInvalidTargetError: "L’elemento selezionato non esiste o non è un bundle app valido.",
+                .quarantineRemovalScriptCreationError: "LaunchNext non ha potuto creare il comando temporaneo per il Terminale.",
+                .quarantineRemovalTerminalLaunchError: "LaunchNext non ha potuto aprire il comando nel Terminale di sistema.",
+                .quarantineTerminalTargetLabel: "Destinazione:",
+                .quarantineTerminalCommandLabel: "Comando:",
+                .quarantineTerminalSuccess: "L’indicatore di protezione dei download di macOS è stato rimosso.",
+                .quarantineTerminalFailure: "Impossibile rimuovere l’indicatore di protezione dei download di macOS.",
+                .quarantineTerminalExitStatusLabel: "Stato di uscita:",
+                .quarantineTerminalPressReturn: "Premi Invio per chiudere questa finestra."
+            ],
+            .czech: [
+                .developmentQuarantineRemovalTitle: "Zobrazit akci pro odblokování aplikací",
+                .developmentQuarantineRemovalInfoTitle: "Otevřít omezené aplikace",
+                .developmentQuarantineRemovalInfoBody: "Přidá do místních nabídek aplikací položku „Odblokovat aplikaci v Terminálu…“. Terminál spustí `sudo /usr/bin/xattr -r -d com.apple.quarantine <app>` a macOS může vyžádat heslo správce. Tím se odstraní značka ochrany stahování a obejde Gatekeeper; používejte jen u důvěryhodných aplikací.",
+                .contextMenuRemoveQuarantineInTerminal: "Odblokovat aplikaci v Terminálu…",
+                .quarantineRemovalConfirmationTitle: "Odebrat omezení macOS této aplikace?",
+                .quarantineRemovalConfirmationWarning: "Tím se odstraní značka ochrany stahování macOS a přeskočí běžná bezpečnostní kontrola. Pokračujte pouze tehdy, pokud aplikaci důvěřujete.",
+                .quarantineRemovalOpenTerminalButton: "Otevřít Terminál",
+                .quarantineRemovalErrorTitle: "Nástroj pro odblokování nelze otevřít",
+                .quarantineRemovalInvalidTargetError: "Vybraná položka neexistuje nebo není platným balíčkem aplikace.",
+                .quarantineRemovalScriptCreationError: "LaunchNext nemohl vytvořit jednorázový příkaz pro Terminál.",
+                .quarantineRemovalTerminalLaunchError: "LaunchNext nemohl otevřít příkaz v systémovém Terminálu.",
+                .quarantineTerminalTargetLabel: "Cíl:",
+                .quarantineTerminalCommandLabel: "Příkaz:",
+                .quarantineTerminalSuccess: "Značka ochrany stahování macOS byla odstraněna.",
+                .quarantineTerminalFailure: "Značku ochrany stahování macOS se nepodařilo odstranit.",
+                .quarantineTerminalExitStatusLabel: "Návratový stav:",
+                .quarantineTerminalPressReturn: "Stisknutím Return zavřete toto okno."
+            ],
+            .german: [
+                .developmentQuarantineRemovalTitle: "Aktion zum Entsperren von Apps anzeigen",
+                .developmentQuarantineRemovalInfoTitle: "Eingeschränkte Apps öffnen",
+                .developmentQuarantineRemovalInfoBody: "Fügt „App im Terminal entsperren…“ zu den Kontextmenüs von Apps hinzu. Terminal führt `sudo /usr/bin/xattr -r -d com.apple.quarantine <app>` aus; macOS kann nach einem Administratorpasswort fragen. Dadurch wird die Download-Schutzmarkierung entfernt und Gatekeeper umgangen. Nur für vertrauenswürdige Apps verwenden.",
+                .contextMenuRemoveQuarantineInTerminal: "App im Terminal entsperren…",
+                .quarantineRemovalConfirmationTitle: "macOS-Beschränkung dieser App entfernen?",
+                .quarantineRemovalConfirmationWarning: "Dadurch wird die Download-Schutzmarkierung von macOS entfernt und die normale Sicherheitsprüfung übersprungen. Nur fortfahren, wenn du dieser App vertraust.",
+                .quarantineRemovalOpenTerminalButton: "Terminal öffnen",
+                .quarantineRemovalErrorTitle: "Werkzeug zum Entsperren konnte nicht geöffnet werden",
+                .quarantineRemovalInvalidTargetError: "Das ausgewählte Objekt fehlt oder ist kein gültiges App-Bundle.",
+                .quarantineRemovalScriptCreationError: "LaunchNext konnte den einmaligen Terminal-Befehl nicht erstellen.",
+                .quarantineRemovalTerminalLaunchError: "LaunchNext konnte den Befehl nicht im System-Terminal öffnen.",
+                .quarantineTerminalTargetLabel: "Ziel:",
+                .quarantineTerminalCommandLabel: "Befehl:",
+                .quarantineTerminalSuccess: "Die macOS-Download-Schutzmarkierung wurde entfernt.",
+                .quarantineTerminalFailure: "Die macOS-Download-Schutzmarkierung konnte nicht entfernt werden.",
+                .quarantineTerminalExitStatusLabel: "Exit-Status:",
+                .quarantineTerminalPressReturn: "Drücke Return, um dieses Fenster zu schließen."
+            ],
+            .russian: [
+                .developmentQuarantineRemovalTitle: "Показывать действие разблокировки приложений",
+                .developmentQuarantineRemovalInfoTitle: "Открывать приложения с ограничениями",
+                .developmentQuarantineRemovalInfoBody: "Добавляет пункт «Разблокировать приложение в Терминале…» в контекстные меню приложений. Терминал выполняет `sudo /usr/bin/xattr -r -d com.apple.quarantine <app>`, и macOS может запросить пароль администратора. Это удаляет метку защиты загрузки и обходит Gatekeeper; используйте только для приложений, которым доверяете.",
+                .contextMenuRemoveQuarantineInTerminal: "Разблокировать приложение в Терминале…",
+                .quarantineRemovalConfirmationTitle: "Снять ограничение macOS для этого приложения?",
+                .quarantineRemovalConfirmationWarning: "Это удалит метку защиты загрузки macOS и пропустит обычную проверку безопасности. Продолжайте, только если доверяете приложению.",
+                .quarantineRemovalOpenTerminalButton: "Открыть Терминал",
+                .quarantineRemovalErrorTitle: "Не удалось открыть инструмент разблокировки",
+                .quarantineRemovalInvalidTargetError: "Выбранный объект отсутствует или не является корректным пакетом приложения.",
+                .quarantineRemovalScriptCreationError: "LaunchNext не удалось создать одноразовую команду Терминала.",
+                .quarantineRemovalTerminalLaunchError: "LaunchNext не удалось открыть команду в системном Терминале.",
+                .quarantineTerminalTargetLabel: "Цель:",
+                .quarantineTerminalCommandLabel: "Команда:",
+                .quarantineTerminalSuccess: "Метка защиты загрузки macOS удалена.",
+                .quarantineTerminalFailure: "Не удалось удалить метку защиты загрузки macOS.",
+                .quarantineTerminalExitStatusLabel: "Код завершения:",
+                .quarantineTerminalPressReturn: "Нажмите Return, чтобы закрыть это окно."
+            ],
+            .hindi: [
+                .developmentQuarantineRemovalTitle: "ऐप अनब्लॉक करने की कार्रवाई दिखाएँ",
+                .developmentQuarantineRemovalInfoTitle: "प्रतिबंधित ऐप खोलें",
+                .developmentQuarantineRemovalInfoBody: "ऐप के संदर्भ मेनू में ‘Terminal में ऐप अनब्लॉक करें…’ जोड़ता है। Terminal `sudo /usr/bin/xattr -r -d com.apple.quarantine <app>` चलाता है और macOS व्यवस्थापक पासवर्ड माँग सकता है। यह डाउनलोड सुरक्षा चिह्न हटाकर Gatekeeper को बायपास करता है; केवल विश्वसनीय ऐप पर उपयोग करें।",
+                .contextMenuRemoveQuarantineInTerminal: "Terminal में ऐप अनब्लॉक करें…",
+                .quarantineRemovalConfirmationTitle: "इस ऐप का macOS प्रतिबंध हटाएँ?",
+                .quarantineRemovalConfirmationWarning: "यह macOS का डाउनलोड सुरक्षा चिह्न हटाकर सामान्य सुरक्षा जाँच को छोड़ देगा। केवल इस ऐप पर भरोसा होने पर जारी रखें।",
+                .quarantineRemovalOpenTerminalButton: "Terminal खोलें",
+                .quarantineRemovalErrorTitle: "ऐप अनब्लॉक टूल नहीं खुल सका",
+                .quarantineRemovalInvalidTargetError: "चुना गया आइटम मौजूद नहीं है या मान्य ऐप बंडल नहीं है।",
+                .quarantineRemovalScriptCreationError: "LaunchNext एक बार उपयोग होने वाला Terminal कमांड नहीं बना सका।",
+                .quarantineRemovalTerminalLaunchError: "LaunchNext सिस्टम Terminal में कमांड नहीं खोल सका।",
+                .quarantineTerminalTargetLabel: "लक्ष्य:",
+                .quarantineTerminalCommandLabel: "कमांड:",
+                .quarantineTerminalSuccess: "macOS डाउनलोड सुरक्षा चिह्न हटा दिया गया।",
+                .quarantineTerminalFailure: "macOS डाउनलोड सुरक्षा चिह्न नहीं हटाया जा सका।",
+                .quarantineTerminalExitStatusLabel: "एग्ज़िट स्थिति:",
+                .quarantineTerminalPressReturn: "यह विंडो बंद करने के लिए Return दबाएँ।"
+            ],
+            .vietnamese: [
+                .developmentQuarantineRemovalTitle: "Hiện thao tác mở khóa ứng dụng",
+                .developmentQuarantineRemovalInfoTitle: "Mở ứng dụng bị hạn chế",
+                .developmentQuarantineRemovalInfoBody: "Thêm “Mở khóa ứng dụng trong Terminal…” vào menu ngữ cảnh của ứng dụng. Terminal chạy `sudo /usr/bin/xattr -r -d com.apple.quarantine <app>` và macOS có thể yêu cầu mật khẩu quản trị viên. Thao tác này xóa dấu bảo vệ tải xuống và bỏ qua Gatekeeper; chỉ dùng với ứng dụng bạn tin cậy.",
+                .contextMenuRemoveQuarantineInTerminal: "Mở khóa ứng dụng trong Terminal…",
+                .quarantineRemovalConfirmationTitle: "Gỡ hạn chế macOS của ứng dụng này?",
+                .quarantineRemovalConfirmationWarning: "Thao tác này xóa dấu bảo vệ tải xuống của macOS và bỏ qua kiểm tra bảo mật thông thường. Chỉ tiếp tục nếu bạn tin cậy ứng dụng này.",
+                .quarantineRemovalOpenTerminalButton: "Mở Terminal",
+                .quarantineRemovalErrorTitle: "Không thể mở công cụ mở khóa ứng dụng",
+                .quarantineRemovalInvalidTargetError: "Mục đã chọn không tồn tại hoặc không phải là gói ứng dụng hợp lệ.",
+                .quarantineRemovalScriptCreationError: "LaunchNext không thể tạo lệnh Terminal dùng một lần.",
+                .quarantineRemovalTerminalLaunchError: "LaunchNext không thể mở lệnh trong Terminal hệ thống.",
+                .quarantineTerminalTargetLabel: "Mục tiêu:",
+                .quarantineTerminalCommandLabel: "Lệnh:",
+                .quarantineTerminalSuccess: "Đã xóa dấu bảo vệ tải xuống của macOS.",
+                .quarantineTerminalFailure: "Không thể xóa dấu bảo vệ tải xuống của macOS.",
+                .quarantineTerminalExitStatusLabel: "Trạng thái thoát:",
+                .quarantineTerminalPressReturn: "Nhấn Return để đóng cửa sổ này."
+            ],
+            .portugueseBrazil: [
+                .developmentQuarantineRemovalTitle: "Mostrar ação para desbloquear apps",
+                .developmentQuarantineRemovalInfoTitle: "Abrir apps com restrições",
+                .developmentQuarantineRemovalInfoBody: "Adiciona “Desbloquear app no Terminal…” aos menus de contexto dos apps. O Terminal executa `sudo /usr/bin/xattr -r -d com.apple.quarantine <app>` e o macOS pode solicitar uma senha de administrador. Isso remove o marcador de proteção de downloads e ignora o Gatekeeper; use apenas com apps confiáveis.",
+                .contextMenuRemoveQuarantineInTerminal: "Desbloquear app no Terminal…",
+                .quarantineRemovalConfirmationTitle: "Remover a restrição do macOS deste app?",
+                .quarantineRemovalConfirmationWarning: "Isso remove o marcador de proteção de downloads do macOS e ignora a verificação de segurança normal. Continue apenas se você confiar neste app.",
+                .quarantineRemovalOpenTerminalButton: "Abrir Terminal",
+                .quarantineRemovalErrorTitle: "Não foi possível abrir a ferramenta de desbloqueio",
+                .quarantineRemovalInvalidTargetError: "O item selecionado não existe ou não é um pacote de app válido.",
+                .quarantineRemovalScriptCreationError: "O LaunchNext não conseguiu criar o comando temporário do Terminal.",
+                .quarantineRemovalTerminalLaunchError: "O LaunchNext não conseguiu abrir o comando no Terminal do sistema.",
+                .quarantineTerminalTargetLabel: "Destino:",
+                .quarantineTerminalCommandLabel: "Comando:",
+                .quarantineTerminalSuccess: "O marcador de proteção de downloads do macOS foi removido.",
+                .quarantineTerminalFailure: "Não foi possível remover o marcador de proteção de downloads do macOS.",
+                .quarantineTerminalExitStatusLabel: "Status de saída:",
+                .quarantineTerminalPressReturn: "Pressione Return para fechar esta janela."
+            ]
+        ]
+
+        for (language, strings) in quarantineTranslations {
+            builder[language, default: [:]].merge(strings) { _, new in new }
+        }
 
         translations = builder
     }
