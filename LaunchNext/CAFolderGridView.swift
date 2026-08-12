@@ -1,5 +1,6 @@
 import AppKit
 import QuartzCore
+import LaunchNextContextMenuCore
 
 final class CAFolderGridView: NSView {
     var apps: [AppInfo] = [] {
@@ -66,29 +67,14 @@ final class CAFolderGridView: NSView {
         }
     }
 
-    var showInFinderMenuTitle: String = "Show in Finder"
-    var copyAppPathMenuTitle: String = "Copy App Path"
-    var removeQuarantineMenuTitle: String = "Remove Quarantine in Terminal…"
-    var hideAppMenuTitle: String = "Hide application"
-    var uninstallWithToolMenuTitle: String = "Uninstall with configured tool"
-    var pinToFolderQuickLaunchTopMenuTitle: String = "Pin to Quick Launch Top"
-    var unpinFromFolderQuickLaunchTopMenuTitle: String = "Unpin from Quick Launch Top"
-    var canUseConfiguredUninstallTool: Bool = false
-    var showQuarantineRemovalAction: Bool = false
-    var folderQuickLaunchPinningEnabled: Bool = false
-    var contextMenuTargetApp: AppInfo?
+    var contextMenuConfiguration = AppContextMenuConfiguration()
+    var contextMenuFolderID = ""
     var isContextMenuTracking: Bool = false
 
     var onOpenApp: ((AppInfo) -> Void)?
     var onReorderApps: ((Int, Int) -> Void)?
     var onDragAppOut: ((AppInfo) -> Void)?
-    var onShowAppInFinder: ((AppInfo) -> Void)?
-    var onCopyAppPath: ((AppInfo) -> Void)?
-    var onRemoveQuarantineInTerminal: ((AppInfo) -> Void)?
-    var onHideApp: ((AppInfo) -> Void)?
-    var isFolderQuickLaunchAppPinned: ((AppInfo) -> Bool)?
-    var onSetFolderQuickLaunchAppPinned: ((AppInfo, Bool) -> Void)?
-    var onUninstallWithTool: ((AppInfo) -> Void)?
+    var onContextMenuAction: ((AppContextMenuRoute) -> Void)?
     var onClose: (() -> Void)?
     var onPageStateChanged: ((Int, Int) -> Void)?
     var onVerticalScrollOffsetChanged: ((CGFloat) -> Void)?

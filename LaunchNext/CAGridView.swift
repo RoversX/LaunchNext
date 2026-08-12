@@ -1,5 +1,6 @@
 import AppKit
 import QuartzCore
+import LaunchNextContextMenuCore
 import Combine
 import SwiftUI
 
@@ -103,36 +104,14 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     var onPageChanged: ((Int) -> Void)?
     var onFPSUpdate: ((Double) -> Void)?
     var onEmptyAreaClicked: (() -> Void)?
-    var onShowAppInFinder: ((AppInfo) -> Void)?
-    var onCopyAppPath: ((AppInfo) -> Void)?
-    var onRemoveQuarantineInTerminal: ((AppInfo) -> Void)?
-    var onHideApp: ((AppInfo) -> Void)?
-    var onFolderQuickLaunchApp: ((AppInfo) -> Void)?
-    var folderQuickLaunchAppsSorter: ((FolderInfo) -> [AppInfo])?
-    var isFolderQuickLaunchAppPinned: ((FolderInfo, AppInfo) -> Bool)?
-    var onRenameFolder: ((FolderInfo) -> Void)?
-    var onDissolveFolder: ((FolderInfo) -> Void)?
-    var onUninstallWithTool: ((AppInfo) -> Void)?
+    var onContextMenuAction: ((AppContextMenuRoute) -> Void)?
     var onCreateFolder: ((AppInfo, AppInfo, Int) -> Void)?  // (拖拽的app, 目标app, 位置)
     var onMoveToFolder: ((AppInfo, FolderInfo) -> Void)?    // 移动到已有文件夹
     var onReorderItems: ((Int, Int) -> Void)?               // 重新排序 (fromIndex, toIndex)
     var onReorderAppBatch: (([String], Int) -> Void)?       // 批量重排（按路径顺序）
     var onRequestNewPage: (() -> Void)?                     // 请求创建新页面
-    var showInFinderMenuTitle: String = "Show in Finder"
-    var copyAppPathMenuTitle: String = "Copy App Path"
-    var removeQuarantineMenuTitle: String = "Remove Quarantine in Terminal…"
-    var hideAppMenuTitle: String = "Hide application"
-    var renameFolderMenuTitle: String = "Rename Folder"
-    var dissolveFolderMenuTitle: String = "Dissolve folder"
-    var uninstallWithToolMenuTitle: String = "Uninstall with configured tool"
-    var batchSelectAppsMenuTitle: String = "Batch Select Apps"
-    var finishBatchSelectionMenuTitle: String = "Finish Batch Selection"
-    var canUseConfiguredUninstallTool: Bool = false
-    var showQuarantineRemovalAction: Bool = false
-    var folderQuickLaunchEnabled: Bool = false
+    var contextMenuConfiguration = AppContextMenuConfiguration()
     var isContextMenuTracking: Bool = false
-    var contextMenuTargetApp: AppInfo?
-    var contextMenuTargetFolder: FolderInfo?
     var allowsBatchSelectionMode: Bool = true {
         didSet {
             if !allowsBatchSelectionMode {

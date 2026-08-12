@@ -8,7 +8,26 @@
 
 /* Begin PBXBuildFile section */
 		A1E2B5C02F4A8A1B00F12345 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = A1E2B5CB2F4A8A1B00F12345 /* Localizable.strings */; };
+		C200000D2F70000100ABCDEF /* libLaunchNextContextMenuCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */; };
+		C200000E2F70000100ABCDEF /* libLaunchNextContextMenuCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		C20000092F70000100ABCDEF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0D1B0B382E4CDE460083EEF9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C20000052F70000100ABCDEF;
+			remoteInfo = LaunchNextContextMenuCore;
+		};
+		C200000B2F70000100ABCDEF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0D1B0B382E4CDE460083EEF9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C20000052F70000100ABCDEF;
+			remoteInfo = LaunchNextContextMenuCore;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		0D1B0B402E4CDE460083EEF9 /* LaunchNext.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LaunchNext.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -27,6 +46,8 @@
 		A1E2B5CA2F4A8A1B00F12345 /* vi */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = vi; path = vi.lproj/Localizable.strings; sourceTree = "<group>"; };
 		A1E2B5CC2F4A8A1B00F12345 /* pt-BR */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "pt-BR"; path = "pt-BR.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		A1E2B5CD2F4A8A1B00F12345 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		B10000012F70000100ABCDEF /* LaunchNextTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LaunchNextTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libLaunchNextContextMenuCore.a; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -35,10 +56,36 @@
 			path = LaunchNext;
 			sourceTree = "<group>";
 		};
+		B10000022F70000100ABCDEF /* LaunchNextTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LaunchNextTests;
+			sourceTree = "<group>";
+		};
+		C20000022F70000100ABCDEF /* LaunchNextContextMenuCore */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LaunchNextContextMenuCore;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		0D1B0B3D2E4CDE460083EEF9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C200000D2F70000100ABCDEF /* libLaunchNextContextMenuCore.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B10000032F70000100ABCDEF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C200000E2F70000100ABCDEF /* libLaunchNextContextMenuCore.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C20000032F70000100ABCDEF /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -54,6 +101,8 @@
 				A1E2B5CB2F4A8A1B00F12345 /* Localizable.strings */,
 				0F7A6B1D3E2D4F5A6B7C8D9E /* Config */,
 				0D1B0B422E4CDE460083EEF9 /* LaunchNext */,
+				C20000022F70000100ABCDEF /* LaunchNextContextMenuCore */,
+				B10000022F70000100ABCDEF /* LaunchNextTests */,
 				0D1B0B412E4CDE460083EEF9 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -62,6 +111,8 @@
 			isa = PBXGroup;
 			children = (
 				0D1B0B402E4CDE460083EEF9 /* LaunchNext.app */,
+				C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */,
+				B10000012F70000100ABCDEF /* LaunchNextTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -89,6 +140,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				C200000A2F70000100ABCDEF /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				0D1B0B422E4CDE460083EEF9 /* LaunchNext */,
@@ -99,6 +151,50 @@
 			productName = LaunchNext;
 			productReference = 0D1B0B402E4CDE460083EEF9 /* LaunchNext.app */;
 			productType = "com.apple.product-type.application";
+		};
+		B10000082F70000100ABCDEF /* LaunchNextTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B100000B2F70000100ABCDEF /* Build configuration list for PBXNativeTarget "LaunchNextTests" */;
+			buildPhases = (
+				B10000042F70000100ABCDEF /* Sources */,
+				B10000032F70000100ABCDEF /* Frameworks */,
+				B10000052F70000100ABCDEF /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C200000C2F70000100ABCDEF /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B10000022F70000100ABCDEF /* LaunchNextTests */,
+			);
+			name = LaunchNextTests;
+			packageProductDependencies = (
+			);
+			productName = LaunchNextTests;
+			productReference = B10000012F70000100ABCDEF /* LaunchNextTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		C20000052F70000100ABCDEF /* LaunchNextContextMenuCore */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C20000082F70000100ABCDEF /* Build configuration list for PBXNativeTarget "LaunchNextContextMenuCore" */;
+			buildPhases = (
+				C20000042F70000100ABCDEF /* Sources */,
+				C20000032F70000100ABCDEF /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				C20000022F70000100ABCDEF /* LaunchNextContextMenuCore */,
+			);
+			name = LaunchNextContextMenuCore;
+			packageProductDependencies = (
+			);
+			productName = LaunchNextContextMenuCore;
+			productReference = C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */;
+			productType = "com.apple.product-type.library.static";
 		};
 /* End PBXNativeTarget section */
 
@@ -113,6 +209,12 @@
 					0D1B0B3F2E4CDE460083EEF9 = {
 						CreatedOnToolsVersion = 26.0;
 						LastSwiftMigration = 2600;
+					};
+					B10000082F70000100ABCDEF = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					C20000052F70000100ABCDEF = {
+						CreatedOnToolsVersion = 26.0;
 					};
 				};
 			};
@@ -144,6 +246,8 @@
 			projectRoot = "";
 			targets = (
 				0D1B0B3F2E4CDE460083EEF9 /* LaunchNext */,
+				C20000052F70000100ABCDEF /* LaunchNextContextMenuCore */,
+				B10000082F70000100ABCDEF /* LaunchNextTests */,
 			);
 		};
 /* End PBXProject section */
@@ -154,6 +258,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1E2B5C02F4A8A1B00F12345 /* Localizable.strings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B10000052F70000100ABCDEF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -199,7 +310,34 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B10000042F70000100ABCDEF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C20000042F70000100ABCDEF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		C200000A2F70000100ABCDEF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C20000052F70000100ABCDEF /* LaunchNextContextMenuCore */;
+			targetProxy = C20000092F70000100ABCDEF /* PBXContainerItemProxy */;
+		};
+		C200000C2F70000100ABCDEF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C20000052F70000100ABCDEF /* LaunchNextContextMenuCore */;
+			targetProxy = C200000B2F70000100ABCDEF /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
 		A1E2B5CB2F4A8A1B00F12345 /* Localizable.strings */ = {
@@ -360,12 +498,12 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_IDENTITY = "Apple Development";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 20260809;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = D4KD8XCCL6;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -402,12 +540,12 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_IDENTITY = "Apple Development";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 20260809;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = D4KD8XCCL6;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -435,6 +573,78 @@
 			};
 			name = Release;
 		};
+		B10000092F70000100ABCDEF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.roversx.launchnext.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		B100000A2F70000100ABCDEF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.roversx.launchnext.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		C20000062F70000100ABCDEF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				DEFINES_MODULE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		C20000072F70000100ABCDEF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				DEFINES_MODULE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -452,6 +662,24 @@
 			buildConfigurations = (
 				0D1B0B4C2E4CDE480083EEF9 /* Debug */,
 				0D1B0B4D2E4CDE480083EEF9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B100000B2F70000100ABCDEF /* Build configuration list for PBXNativeTarget "LaunchNextTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B10000092F70000100ABCDEF /* Debug */,
+				B100000A2F70000100ABCDEF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C20000082F70000100ABCDEF /* Build configuration list for PBXNativeTarget "LaunchNextContextMenuCore" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C20000062F70000100ABCDEF /* Debug */,
+				C20000072F70000100ABCDEF /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

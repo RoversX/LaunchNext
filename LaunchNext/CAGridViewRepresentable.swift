@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import LaunchNextContextMenuCore
 
 // MARK: - SwiftUI Wrapper
 
@@ -53,25 +54,9 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         view.dockDragEnabled = appStore.dockDragEnabled
         view.dockDragSide = appStore.dockDragSide
         view.externalAppDragTriggerDistance = CGFloat(appStore.dockDragTriggerDistance)
-        view.showInFinderMenuTitle = appStore.localized(.contextMenuShowInFinder)
-        view.copyAppPathMenuTitle = appStore.localized(.contextMenuCopyAppPath)
-        view.removeQuarantineMenuTitle = appStore.localized(.contextMenuRemoveQuarantineInTerminal)
-        view.hideAppMenuTitle = appStore.localized(.hiddenAppsAddButton)
-        view.renameFolderMenuTitle = appStore.localized(.contextMenuRenameFolder)
-        view.dissolveFolderMenuTitle = appStore.localized(.contextMenuDissolveFolder)
-        view.uninstallWithToolMenuTitle = appStore.localized(.contextMenuUninstallWithConfiguredTool)
-        view.batchSelectAppsMenuTitle = appStore.localized(.contextMenuBatchSelectApps)
-        view.finishBatchSelectionMenuTitle = appStore.localized(.contextMenuFinishBatchSelection)
-        view.canUseConfiguredUninstallTool = appStore.uninstallToolAppURL != nil
-        view.showQuarantineRemovalAction = appStore.showQuarantineRemovalAction
-        view.folderQuickLaunchEnabled = appStore.folderQuickLaunchEnabled
-        view.folderQuickLaunchAppsSorter = { folder in
-            appStore.orderedFolderQuickLaunchApps(in: folder)
-        }
-        view.isFolderQuickLaunchAppPinned = { folder, app in
-            appStore.isFolderQuickLaunchAppPinned(app, inFolderID: folder.id)
-        }
-        view.allowsBatchSelectionMode = appStore.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let allowsBatchSelection = appStore.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        view.contextMenuConfiguration = makeContextMenuConfiguration(allowsBatchSelection: allowsBatchSelection)
+        view.allowsBatchSelectionMode = allowsBatchSelection
         
         // Set current page BEFORE items to ensure correct initial position
         view.setInitialPage(appStore.currentPage)
@@ -103,8 +88,6 @@ struct CAGridViewRepresentable: NSViewRepresentable {
                 break
             }
         }
-        view.onFolderQuickLaunchApp = launchApp
-
         view.onItemDoubleClicked = { item, index in
             // 双击也处理（兼容）
         }
@@ -126,45 +109,13 @@ struct CAGridViewRepresentable: NSViewRepresentable {
             AppDelegate.shared?.hideWindow()
         }
 
-        view.onShowAppInFinder = { app in
+        view.onContextMenuAction = { route in
             DispatchQueue.main.async {
-                if !appStore.showAppInFinder(app) {
-                    NSSound.beep()
-                }
-            }
-        }
-        view.onCopyAppPath = { app in
-            DispatchQueue.main.async {
-                if !appStore.copyAppPath(app) {
-                    NSSound.beep()
-                }
-            }
-        }
-        view.onRemoveQuarantineInTerminal = { app in
-            DispatchQueue.main.async {
-                appStore.requestQuarantineRemovalInTerminal(for: app)
-            }
-        }
-        view.onHideApp = { app in
-            DispatchQueue.main.async {
-                _ = appStore.hideApp(app)
-            }
-        }
-        view.onRenameFolder = { folder in
-            DispatchQueue.main.async {
-                appStore.requestRenameFolder(folder)
-            }
-        }
-        view.onDissolveFolder = { folder in
-            DispatchQueue.main.async {
-                _ = appStore.dissolveFolder(folder)
-            }
-        }
-        view.onUninstallWithTool = { app in
-            DispatchQueue.main.async {
-                if !appStore.openConfiguredUninstallTool(for: app) {
-                    NSSound.beep()
-                }
+                performAppContextMenuRoute(
+                    route,
+                    appStore: appStore,
+                    launchApp: launchApp
+                )
             }
         }
 
@@ -292,25 +243,9 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         nsView.animationsEnabled = appStore.enableAnimations
         nsView.animationDuration = appStore.animationDuration
         nsView.isScrollEnabled = appStore.openFolder == nil && !appStore.isSetting
-        nsView.showInFinderMenuTitle = appStore.localized(.contextMenuShowInFinder)
-        nsView.copyAppPathMenuTitle = appStore.localized(.contextMenuCopyAppPath)
-        nsView.removeQuarantineMenuTitle = appStore.localized(.contextMenuRemoveQuarantineInTerminal)
-        nsView.hideAppMenuTitle = appStore.localized(.hiddenAppsAddButton)
-        nsView.renameFolderMenuTitle = appStore.localized(.contextMenuRenameFolder)
-        nsView.dissolveFolderMenuTitle = appStore.localized(.contextMenuDissolveFolder)
-        nsView.uninstallWithToolMenuTitle = appStore.localized(.contextMenuUninstallWithConfiguredTool)
-        nsView.batchSelectAppsMenuTitle = appStore.localized(.contextMenuBatchSelectApps)
-        nsView.finishBatchSelectionMenuTitle = appStore.localized(.contextMenuFinishBatchSelection)
-        nsView.canUseConfiguredUninstallTool = appStore.uninstallToolAppURL != nil
-        nsView.showQuarantineRemovalAction = appStore.showQuarantineRemovalAction
-        nsView.folderQuickLaunchEnabled = appStore.folderQuickLaunchEnabled
-        nsView.folderQuickLaunchAppsSorter = { folder in
-            appStore.orderedFolderQuickLaunchApps(in: folder)
-        }
-        nsView.isFolderQuickLaunchAppPinned = { folder, app in
-            appStore.isFolderQuickLaunchAppPinned(app, inFolderID: folder.id)
-        }
-        nsView.allowsBatchSelectionMode = appStore.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let allowsBatchSelection = appStore.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        nsView.contextMenuConfiguration = makeContextMenuConfiguration(allowsBatchSelection: allowsBatchSelection)
+        nsView.allowsBatchSelectionMode = allowsBatchSelection
 
         // 检查刷新触发器是否变化（文件夹创建/修改会触发）
         let triggerChanged = context.coordinator.lastGridRefreshTrigger != gridRefreshTrigger ||
@@ -373,6 +308,23 @@ struct CAGridViewRepresentable: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
+    }
+
+    private func makeContextMenuConfiguration(allowsBatchSelection: Bool) -> AppContextMenuConfiguration {
+        let store = appStore
+        return AppContextMenuConfiguration(
+            localize: { [weak store] key in store?.localized(key.localizationKey) ?? key.localizationKey.rawValue },
+            showQuarantineRemovalAction: appStore.showQuarantineRemovalAction,
+            canUseConfiguredUninstallTool: appStore.uninstallToolAppURL != nil,
+            allowsBatchSelection: allowsBatchSelection,
+            folderQuickLaunchEnabled: appStore.folderQuickLaunchEnabled,
+            orderedFolderQuickLaunchApps: { [weak store] folder in
+                store?.orderedFolderQuickLaunchApps(in: folder) ?? folder.apps
+            },
+            isFolderQuickLaunchAppPinned: { [weak store] folder, app in
+                store?.isFolderQuickLaunchAppPinned(app, inFolderID: folder.id) ?? false
+            }
+        )
     }
 
     private func nsFontWeight(for option: AppStore.IconLabelFontWeightOption) -> NSFont.Weight {

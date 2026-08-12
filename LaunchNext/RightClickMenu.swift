@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
-
-// Shared right-click menu helpers for both SwiftUI and Core Animation renderers.
+import LaunchNextContextMenuCore
 
 private func redMenuSymbolImage(named symbolName: String) -> NSImage? {
     guard let base = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) else { return nil }
@@ -10,97 +9,121 @@ private func redMenuSymbolImage(named symbolName: String) -> NSImage? {
     return configured
 }
 
-// Maps LaunchpadItem to AppInfo when a context menu action is app-specific.
 extension LaunchpadItem {
     var contextMenuApp: AppInfo? {
-        if case .app(let app) = self {
-            return app
-        }
+        if case .app(let app) = self { return app }
         return nil
     }
 
     var contextMenuFolder: FolderInfo? {
-        if case .folder(let folder) = self {
-            return folder
-        }
+        if case .folder(let folder) = self { return folder }
         return nil
     }
 }
 
-extension View {
-    // Adds app-level context menu actions when the current tile is an app.
-    @ViewBuilder
-    func launchNextHideAppContextMenu(app: AppInfo?, folder: FolderInfo? = nil, appStore: AppStore) -> some View {
-        if let app {
-            contextMenu {
-                Button {
-                    if !appStore.showAppInFinder(app) {
-                        NSSound.beep()
-                    }
-                } label: {
-                    Label(appStore.localized(.contextMenuShowInFinder), systemImage: "folder")
-                }
+private struct SwiftUIContextMenuContent: View {
+    let entries: [AppContextMenuEntry]
+    let configuration: AppContextMenuConfiguration
+    let runtimeTarget: AppContextMenuRuntimeTarget
+    let appStore: AppStore
 
-                Button {
-                    if !appStore.copyAppPath(app) {
-                        NSSound.beep()
-                    }
-                } label: {
-                    Label(appStore.localized(.contextMenuCopyAppPath), systemImage: "doc.on.doc")
-                }
-
-                if appStore.showQuarantineRemovalAction {
-                    Button {
-                        appStore.requestQuarantineRemovalInTerminal(for: app)
-                    } label: {
-                        Label(appStore.localized(.contextMenuRemoveQuarantineInTerminal), systemImage: "terminal")
-                    }
-                }
-
+    var body: some View {
+        ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+            switch entry {
+            case .separator:
                 Divider()
+            case .action(let item), .quickLaunch(let item):
+                menuButton(for: item)
+            }
+        }
+    }
 
-                Button {
-                    _ = appStore.hideApp(app)
-                } label: {
-                    Label(appStore.localized(.hiddenAppsAddButton), systemImage: "eye.slash")
-                }
-
-                if appStore.uninstallToolAppURL != nil {
-                    Divider()
-                    Button(role: .destructive) {
-                        if !appStore.openConfiguredUninstallTool(for: app) {
-                            NSSound.beep()
-                        }
-                    } label: {
-                        HStack(spacing: 6) {
-                            if let redTrash = redMenuSymbolImage(named: "trash") {
-                                Image(nsImage: redTrash)
-                                    .renderingMode(.original)
-                            } else {
-                                Image(systemName: "trash")
-                                    .foregroundStyle(.red)
-                            }
-                            Text(appStore.localized(.contextMenuUninstallWithConfiguredTool))
-                                .foregroundStyle(.red)
-                        }
-                    }
+    @ViewBuilder
+    private func menuButton(for item: AppContextMenuItem) -> some View {
+        if item.role == .destructive {
+            Button(role: .destructive) {
+                perform(item.action)
+            } label: {
+                destructiveLabel(for: item)
+            }
+        } else {
+            Button {
+                perform(item.action)
+            } label: {
+                if let symbolName = item.symbolName {
+                    Label(configuration.title(for: item.title), systemImage: symbolName)
+                } else {
+                    Text(configuration.title(for: item.title))
                 }
             }
-        } else if let folder {
+        }
+    }
+
+    @ViewBuilder
+    private func destructiveLabel(for item: AppContextMenuItem) -> some View {
+        if item.action == .uninstallWithConfiguredTool,
+           let symbolName = item.symbolName,
+           let redSymbol = redMenuSymbolImage(named: symbolName) {
+            HStack(spacing: 6) {
+                Image(nsImage: redSymbol)
+                    .renderingMode(.original)
+                Text(configuration.title(for: item.title))
+                    .foregroundStyle(.red)
+            }
+        } else if let symbolName = item.symbolName {
+            Label(configuration.title(for: item.title), systemImage: symbolName)
+        } else {
+            Text(configuration.title(for: item.title))
+        }
+    }
+
+    private func perform(_ action: AppContextMenuAction) {
+        guard let route = AppContextMenuRouter.route(action: action, target: runtimeTarget) else {
+            assertionFailure("Unsupported context menu action for target")
+            return
+        }
+        performAppContextMenuRoute(route, appStore: appStore)
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func launchNextHideAppContextMenu(app: AppInfo?, folder: FolderInfo? = nil, appStore: AppStore) -> some View {
+        let configuration = AppContextMenuConfiguration(
+            localize: { appStore.localized($0.localizationKey) },
+            showQuarantineRemovalAction: appStore.showQuarantineRemovalAction,
+            canUseConfiguredUninstallTool: appStore.uninstallToolAppURL != nil
+        )
+
+        if let app {
+            let target = AppContextMenuTarget.app(container: .mainGrid)
+            let entries = AppContextMenuBuilder.entries(
+                for: target,
+                surface: .swiftUIMainGrid,
+                capabilities: configuration.capabilities(for: target)
+            )
             contextMenu {
-                Button {
-                    appStore.requestRenameFolder(folder)
-                } label: {
-                    Label(appStore.localized(.contextMenuRenameFolder), systemImage: "pencil")
-                }
-
-                Divider()
-
-                Button(role: .destructive) {
-                    _ = appStore.dissolveFolder(folder)
-                } label: {
-                    Label(appStore.localized(.contextMenuDissolveFolder), systemImage: "folder.badge.minus")
-                }
+                SwiftUIContextMenuContent(
+                    entries: entries,
+                    configuration: configuration,
+                    runtimeTarget: .app(app, folderID: nil),
+                    appStore: appStore
+                )
+            }
+        } else if let folder {
+            let target = AppContextMenuTarget.folder
+            let entries = AppContextMenuBuilder.entries(
+                for: target,
+                surface: .swiftUIMainGrid,
+                capabilities: configuration.capabilities(for: target, folder: folder)
+            )
+            contextMenu {
+                SwiftUIContextMenuContent(
+                    entries: entries,
+                    configuration: configuration,
+                    runtimeTarget: .folder(folder),
+                    appStore: appStore
+                )
             }
         } else {
             self
@@ -108,8 +131,52 @@ extension View {
     }
 }
 
+private final class AppContextMenuInvocationBox: NSObject {
+    let invocation: AppContextMenuInvocation
+
+    init(action: AppContextMenuAction, target: AppContextMenuRuntimeTarget) {
+        invocation = AppContextMenuInvocation(action: action, target: target)
+    }
+}
+
+private func makeAppKitContextMenu(
+    entries: [AppContextMenuEntry],
+    configuration: AppContextMenuConfiguration,
+    runtimeTarget: AppContextMenuRuntimeTarget,
+    handlerTarget: AnyObject,
+    action: Selector
+) -> NSMenu {
+    let menu = NSMenu(title: "")
+    for entry in entries {
+        switch entry {
+        case .separator:
+            menu.addItem(.separator())
+        case .action(let descriptor), .quickLaunch(let descriptor):
+            let title = configuration.title(for: descriptor.title)
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = handlerTarget
+            item.representedObject = AppContextMenuInvocationBox(
+                action: descriptor.action,
+                target: runtimeTarget
+            )
+            if let symbolName = descriptor.symbolName {
+                item.image = descriptor.role == .destructive
+                    ? redMenuSymbolImage(named: symbolName)
+                    : NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
+            }
+            if descriptor.role == .destructive {
+                item.attributedTitle = NSAttributedString(
+                    string: title,
+                    attributes: [.foregroundColor: NSColor.systemRed]
+                )
+            }
+            menu.addItem(item)
+        }
+    }
+    return menu
+}
+
 extension CAGridView {
-    // AppKit path: build context menu manually for CA-rendered tiles.
     override func rightMouseDown(with event: NSEvent) {
         guard let menu = contextMenu(for: event) else {
             super.rightMouseDown(with: event)
@@ -125,225 +192,59 @@ extension CAGridView {
     }
 
     private func contextMenu(for event: NSEvent) -> NSMenu? {
-        // Skip menu while dragging to avoid gesture conflicts.
         guard !isDraggingItem, !isPageDragging else { return nil }
         let location = convert(event.locationInWindow, from: nil)
         guard let (item, _) = itemAt(location) else { return nil }
 
+        let target: AppContextMenuTarget
+        let runtimeTarget: AppContextMenuRuntimeTarget
+        let folder: FolderInfo?
         switch item {
         case .app(let app):
-            // Keep the target app so action handler can execute hide.
-            contextMenuTargetApp = app
-            contextMenuTargetFolder = nil
-            let menu = NSMenu(title: "")
-            let showInFinderItem = NSMenuItem(
-                title: showInFinderMenuTitle,
-                action: #selector(handleShowAppInFinderFromContextMenu(_:)),
-                keyEquivalent: ""
-            )
-            showInFinderItem.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
-            showInFinderItem.target = self
-            menu.addItem(showInFinderItem)
-
-            let copyPathItem = NSMenuItem(
-                title: copyAppPathMenuTitle,
-                action: #selector(handleCopyAppPathFromContextMenu(_:)),
-                keyEquivalent: ""
-            )
-            copyPathItem.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
-            copyPathItem.target = self
-            menu.addItem(copyPathItem)
-
-            if showQuarantineRemovalAction {
-                let quarantineItem = NSMenuItem(
-                    title: removeQuarantineMenuTitle,
-                    action: #selector(handleRemoveQuarantineFromContextMenu(_:)),
-                    keyEquivalent: ""
-                )
-                quarantineItem.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)
-                quarantineItem.target = self
-                menu.addItem(quarantineItem)
-            }
-
-            menu.addItem(NSMenuItem.separator())
-
-            let hideItem = NSMenuItem(
-                title: hideAppMenuTitle,
-                action: #selector(handleHideAppFromContextMenu(_:)),
-                keyEquivalent: ""
-            )
-            hideItem.image = NSImage(systemSymbolName: "eye.slash", accessibilityDescription: nil)
-            hideItem.target = self
-            menu.addItem(hideItem)
-
-            if allowsBatchSelectionMode {
-                menu.addItem(NSMenuItem.separator())
-                let batchMenuTitle = isBatchSelectionMode ? finishBatchSelectionMenuTitle : batchSelectAppsMenuTitle
-                let batchMenuAction = isBatchSelectionMode ? #selector(handleFinishBatchSelectionFromContextMenu(_:)) : #selector(handleStartBatchSelectionFromContextMenu(_:))
-                let batchItem = NSMenuItem(
-                    title: batchMenuTitle,
-                    action: batchMenuAction,
-                    keyEquivalent: ""
-                )
-                batchItem.image = NSImage(systemSymbolName: isBatchSelectionMode ? "checkmark.circle" : "checklist", accessibilityDescription: nil)
-                batchItem.target = self
-                menu.addItem(batchItem)
-            }
-
-            if canUseConfiguredUninstallTool {
-                menu.addItem(NSMenuItem.separator())
-                let uninstallItem = NSMenuItem(
-                    title: uninstallWithToolMenuTitle,
-                    action: #selector(handleUninstallWithToolFromContextMenu(_:)),
-                    keyEquivalent: ""
-                )
-                uninstallItem.attributedTitle = NSAttributedString(
-                    string: uninstallWithToolMenuTitle,
-                    attributes: [.foregroundColor: NSColor.systemRed]
-                )
-                uninstallItem.image = redMenuSymbolImage(named: "trash")
-                uninstallItem.target = self
-                menu.addItem(uninstallItem)
-            }
-            return menu
-        case .folder(let folder):
-            contextMenuTargetApp = nil
-            contextMenuTargetFolder = folder
-            let menu = NSMenu(title: "")
-
-            if folderQuickLaunchEnabled, !folder.apps.isEmpty {
-                let quickLaunchApps = folderQuickLaunchAppsSorter?(folder) ?? folder.apps
-                let pinnedApps = quickLaunchApps.filter {
-                    isFolderQuickLaunchAppPinned?(folder, $0) ?? false
-                }
-                let unpinnedApps = quickLaunchApps.filter {
-                    !(isFolderQuickLaunchAppPinned?(folder, $0) ?? false)
-                }
-
-                func addQuickLaunchItem(for app: AppInfo, pinned: Bool) {
-                    let appItem = NSMenuItem(
-                        title: app.name,
-                        action: #selector(handleFolderQuickLaunchFromContextMenu(_:)),
-                        keyEquivalent: ""
-                    )
-                    appItem.representedObject = app
-                    if pinned {
-                        appItem.image = NSImage(
-                            systemSymbolName: "pin.fill",
-                            accessibilityDescription: app.name
-                        )
-                    }
-                    appItem.target = self
-                    menu.addItem(appItem)
-                }
-
-                pinnedApps.forEach { addQuickLaunchItem(for: $0, pinned: true) }
-                if !pinnedApps.isEmpty, !unpinnedApps.isEmpty {
-                    menu.addItem(NSMenuItem.separator())
-                }
-                unpinnedApps.forEach { addQuickLaunchItem(for: $0, pinned: false) }
-                menu.addItem(NSMenuItem.separator())
-            }
-
-            let renameItem = NSMenuItem(
-                title: renameFolderMenuTitle,
-                action: #selector(handleRenameFolderFromContextMenu(_:)),
-                keyEquivalent: ""
-            )
-            renameItem.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)
-            renameItem.target = self
-            menu.addItem(renameItem)
-
-            menu.addItem(NSMenuItem.separator())
-
-            let dissolveItem = NSMenuItem(
-                title: dissolveFolderMenuTitle,
-                action: #selector(handleDissolveFolderFromContextMenu(_:)),
-                keyEquivalent: ""
-            )
-            dissolveItem.attributedTitle = NSAttributedString(
-                string: dissolveFolderMenuTitle,
-                attributes: [.foregroundColor: NSColor.systemRed]
-            )
-            dissolveItem.image = redMenuSymbolImage(named: "folder.badge.minus")
-            dissolveItem.target = self
-            menu.addItem(dissolveItem)
-            return menu
+            target = .app(container: .mainGrid)
+            runtimeTarget = .app(app, folderID: nil)
+            folder = nil
+        case .folder(let selectedFolder):
+            target = .folder
+            runtimeTarget = .folder(selectedFolder)
+            folder = selectedFolder
         default:
-            contextMenuTargetApp = nil
-            contextMenuTargetFolder = nil
             return nil
         }
+
+        let capabilities = contextMenuConfiguration.capabilities(
+            for: target,
+            folder: folder,
+            isBatchSelectionActive: isBatchSelectionMode
+        )
+        let entries = AppContextMenuBuilder.entries(
+            for: target,
+            surface: .coreAnimationMainGrid,
+            capabilities: capabilities
+        )
+        return makeAppKitContextMenu(
+            entries: entries,
+            configuration: contextMenuConfiguration,
+            runtimeTarget: runtimeTarget,
+            handlerTarget: self,
+            action: #selector(handleContextMenuAction(_:))
+        )
     }
 
-    @objc private func handleShowAppInFinderFromContextMenu(_ sender: NSMenuItem) {
-        guard let app = contextMenuTargetApp else { return }
-        onShowAppInFinder?(app)
-        contextMenuTargetApp = nil
-        contextMenuTargetFolder = nil
+    @objc private func handleContextMenuAction(_ sender: NSMenuItem) {
+        guard let invocation = sender.representedObject as? AppContextMenuInvocationBox,
+              let route = invocation.invocation.route else { return }
+        switch route {
+        case .startBatchSelection:
+            enableBatchSelectionMode()
+        case .finishBatchSelection:
+            disableBatchSelectionMode()
+        default:
+            if let onContextMenuAction {
+                onContextMenuAction(route)
+            }
+        }
     }
-
-    @objc private func handleCopyAppPathFromContextMenu(_ sender: NSMenuItem) {
-        guard let app = contextMenuTargetApp else { return }
-        onCopyAppPath?(app)
-        contextMenuTargetApp = nil
-        contextMenuTargetFolder = nil
-    }
-
-    @objc private func handleRemoveQuarantineFromContextMenu(_ sender: NSMenuItem) {
-        guard let app = contextMenuTargetApp else { return }
-        onRemoveQuarantineInTerminal?(app)
-        contextMenuTargetApp = nil
-        contextMenuTargetFolder = nil
-    }
-
-    @objc private func handleHideAppFromContextMenu(_ sender: NSMenuItem) {
-        guard let app = contextMenuTargetApp else { return }
-        onHideApp?(app)
-        contextMenuTargetApp = nil
-        contextMenuTargetFolder = nil
-    }
-
-    @objc private func handleFolderQuickLaunchFromContextMenu(_ sender: NSMenuItem) {
-        guard let app = sender.representedObject as? AppInfo else { return }
-        onFolderQuickLaunchApp?(app)
-        contextMenuTargetApp = nil
-        contextMenuTargetFolder = nil
-    }
-
-    @objc private func handleRenameFolderFromContextMenu(_ sender: NSMenuItem) {
-        guard let folder = contextMenuTargetFolder else { return }
-        onRenameFolder?(folder)
-        contextMenuTargetApp = nil
-        contextMenuTargetFolder = nil
-    }
-
-    @objc private func handleDissolveFolderFromContextMenu(_ sender: NSMenuItem) {
-        guard let folder = contextMenuTargetFolder else { return }
-        onDissolveFolder?(folder)
-        contextMenuTargetApp = nil
-        contextMenuTargetFolder = nil
-    }
-
-    @objc private func handleUninstallWithToolFromContextMenu(_ sender: NSMenuItem) {
-        guard let app = contextMenuTargetApp else { return }
-        onUninstallWithTool?(app)
-        contextMenuTargetApp = nil
-        contextMenuTargetFolder = nil
-    }
-
-    @objc private func handleStartBatchSelectionFromContextMenu(_ sender: NSMenuItem) {
-        enableBatchSelectionMode()
-        contextMenuTargetApp = nil
-        contextMenuTargetFolder = nil
-    }
-
-    @objc private func handleFinishBatchSelectionFromContextMenu(_ sender: NSMenuItem) {
-        disableBatchSelectionMode()
-        contextMenuTargetApp = nil
-        contextMenuTargetFolder = nil
-    }
-
 }
 
 extension CAFolderGridView {
@@ -363,122 +264,32 @@ extension CAFolderGridView {
 
     private func folderContextMenu(for event: NSEvent) -> NSMenu? {
         let location = convert(event.locationInWindow, from: nil)
-        guard let index = contextMenuItemIndex(at: location), apps.indices.contains(index) else {
-            contextMenuTargetApp = nil
-            return nil
-        }
+        guard let index = contextMenuItemIndex(at: location), apps.indices.contains(index) else { return nil }
+
         let app = apps[index]
-        contextMenuTargetApp = app
-
-        let menu = NSMenu(title: "")
-        let showInFinderItem = NSMenuItem(
-            title: showInFinderMenuTitle,
-            action: #selector(handleFolderShowAppInFinderFromContextMenu(_:)),
-            keyEquivalent: ""
+        let isPinned = contextMenuConfiguration.isOpenFolderAppPinned(app)
+        let target = AppContextMenuTarget.app(
+            container: .folder(id: contextMenuFolderID, isPinned: isPinned)
         )
-        showInFinderItem.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
-        showInFinderItem.target = self
-        menu.addItem(showInFinderItem)
-
-        let copyPathItem = NSMenuItem(
-            title: copyAppPathMenuTitle,
-            action: #selector(handleFolderCopyAppPathFromContextMenu(_:)),
-            keyEquivalent: ""
+        let entries = AppContextMenuBuilder.entries(
+            for: target,
+            surface: .coreAnimationFolderGrid,
+            capabilities: contextMenuConfiguration.capabilities(for: target)
         )
-        copyPathItem.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
-        copyPathItem.target = self
-        menu.addItem(copyPathItem)
-
-        if showQuarantineRemovalAction {
-            let quarantineItem = NSMenuItem(
-                title: removeQuarantineMenuTitle,
-                action: #selector(handleFolderRemoveQuarantineFromContextMenu(_:)),
-                keyEquivalent: ""
-            )
-            quarantineItem.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)
-            quarantineItem.target = self
-            menu.addItem(quarantineItem)
-        }
-
-        if folderQuickLaunchPinningEnabled {
-            menu.addItem(NSMenuItem.separator())
-            let isPinned = isFolderQuickLaunchAppPinned?(app) ?? false
-            let pinItem = NSMenuItem(
-                title: isPinned ? unpinFromFolderQuickLaunchTopMenuTitle : pinToFolderQuickLaunchTopMenuTitle,
-                action: #selector(handleFolderQuickLaunchPinFromContextMenu(_:)),
-                keyEquivalent: ""
-            )
-            pinItem.image = NSImage(
-                systemSymbolName: isPinned ? "pin.slash" : "pin",
-                accessibilityDescription: nil
-            )
-            pinItem.target = self
-            menu.addItem(pinItem)
-        }
-
-        menu.addItem(NSMenuItem.separator())
-
-        let hideItem = NSMenuItem(
-            title: hideAppMenuTitle,
-            action: #selector(handleFolderHideAppFromContextMenu(_:)),
-            keyEquivalent: ""
+        return makeAppKitContextMenu(
+            entries: entries,
+            configuration: contextMenuConfiguration,
+            runtimeTarget: .app(app, folderID: contextMenuFolderID),
+            handlerTarget: self,
+            action: #selector(handleContextMenuAction(_:))
         )
-        hideItem.image = NSImage(systemSymbolName: "eye.slash", accessibilityDescription: nil)
-        hideItem.target = self
-        menu.addItem(hideItem)
+    }
 
-        if canUseConfiguredUninstallTool {
-            menu.addItem(NSMenuItem.separator())
-            let uninstallItem = NSMenuItem(
-                title: uninstallWithToolMenuTitle,
-                action: #selector(handleFolderUninstallWithToolFromContextMenu(_:)),
-                keyEquivalent: ""
-            )
-            uninstallItem.attributedTitle = NSAttributedString(
-                string: uninstallWithToolMenuTitle,
-                attributes: [.foregroundColor: NSColor.systemRed]
-            )
-            uninstallItem.image = redMenuSymbolImage(named: "trash")
-            uninstallItem.target = self
-            menu.addItem(uninstallItem)
+    @objc private func handleContextMenuAction(_ sender: NSMenuItem) {
+        guard let invocation = sender.representedObject as? AppContextMenuInvocationBox,
+              let route = invocation.invocation.route else { return }
+        if let onContextMenuAction {
+            onContextMenuAction(route)
         }
-        return menu
-    }
-
-    @objc private func handleFolderShowAppInFinderFromContextMenu(_ sender: NSMenuItem) {
-        guard let app = contextMenuTargetApp else { return }
-        onShowAppInFinder?(app)
-        contextMenuTargetApp = nil
-    }
-
-    @objc private func handleFolderCopyAppPathFromContextMenu(_ sender: NSMenuItem) {
-        guard let app = contextMenuTargetApp else { return }
-        onCopyAppPath?(app)
-        contextMenuTargetApp = nil
-    }
-
-    @objc private func handleFolderRemoveQuarantineFromContextMenu(_ sender: NSMenuItem) {
-        guard let app = contextMenuTargetApp else { return }
-        onRemoveQuarantineInTerminal?(app)
-        contextMenuTargetApp = nil
-    }
-
-    @objc private func handleFolderHideAppFromContextMenu(_ sender: NSMenuItem) {
-        guard let app = contextMenuTargetApp else { return }
-        onHideApp?(app)
-        contextMenuTargetApp = nil
-    }
-
-    @objc private func handleFolderQuickLaunchPinFromContextMenu(_ sender: NSMenuItem) {
-        guard let app = contextMenuTargetApp else { return }
-        let isPinned = isFolderQuickLaunchAppPinned?(app) ?? false
-        onSetFolderQuickLaunchAppPinned?(app, !isPinned)
-        contextMenuTargetApp = nil
-    }
-
-    @objc private func handleFolderUninstallWithToolFromContextMenu(_ sender: NSMenuItem) {
-        guard let app = contextMenuTargetApp else { return }
-        onUninstallWithTool?(app)
-        contextMenuTargetApp = nil
     }
 }

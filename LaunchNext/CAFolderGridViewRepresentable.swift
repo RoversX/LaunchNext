@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import LaunchNextContextMenuCore
 
 struct CAFolderGridViewRepresentable: NSViewRepresentable {
     @ObservedObject var appStore: AppStore
@@ -48,16 +49,18 @@ struct CAFolderGridViewRepresentable: NSViewRepresentable {
         view.reverseWheelVerticalDirection = appStore.reverseWheelVerticalDirection
         view.trackpadVerticalDirection = appStore.trackpadVerticalDirection
         view.verticalHeaderHeight = verticalHeaderHeight
-        view.showInFinderMenuTitle = appStore.localized(.contextMenuShowInFinder)
-        view.copyAppPathMenuTitle = appStore.localized(.contextMenuCopyAppPath)
-        view.removeQuarantineMenuTitle = appStore.localized(.contextMenuRemoveQuarantineInTerminal)
-        view.hideAppMenuTitle = appStore.localized(.hiddenAppsAddButton)
-        view.uninstallWithToolMenuTitle = appStore.localized(.contextMenuUninstallWithConfiguredTool)
-        view.pinToFolderQuickLaunchTopMenuTitle = appStore.localized(.contextMenuPinToFolderQuickLaunchTop)
-        view.unpinFromFolderQuickLaunchTopMenuTitle = appStore.localized(.contextMenuUnpinFromFolderQuickLaunchTop)
-        view.canUseConfiguredUninstallTool = appStore.uninstallToolAppURL != nil
-        view.showQuarantineRemovalAction = appStore.showQuarantineRemovalAction
-        view.folderQuickLaunchPinningEnabled = appStore.useCAGridRenderer && appStore.folderQuickLaunchEnabled
+        view.contextMenuFolderID = folder.id
+        let store = appStore
+        let folderID = folder.id
+        view.contextMenuConfiguration = AppContextMenuConfiguration(
+            localize: { [weak store] key in store?.localized(key.localizationKey) ?? key.localizationKey.rawValue },
+            showQuarantineRemovalAction: appStore.showQuarantineRemovalAction,
+            canUseConfiguredUninstallTool: appStore.uninstallToolAppURL != nil,
+            folderQuickLaunchPinningEnabled: appStore.useCAGridRenderer && appStore.folderQuickLaunchEnabled,
+            isOpenFolderAppPinned: { [weak store] app in
+                store?.isFolderQuickLaunchAppPinned(app, inFolderID: folderID) ?? false
+            }
+        )
     }
 
     private func wireCallbacks(_ view: CAFolderGridView) {
@@ -106,37 +109,9 @@ struct CAFolderGridViewRepresentable: NSViewRepresentable {
                 }
             }
         }
-        view.onShowAppInFinder = { app in
+        view.onContextMenuAction = { route in
             DispatchQueue.main.async {
-                if !appStore.showAppInFinder(app) { NSSound.beep() }
-            }
-        }
-        view.onCopyAppPath = { app in
-            DispatchQueue.main.async {
-                if !appStore.copyAppPath(app) { NSSound.beep() }
-            }
-        }
-        view.onRemoveQuarantineInTerminal = { app in
-            DispatchQueue.main.async {
-                appStore.requestQuarantineRemovalInTerminal(for: app)
-            }
-        }
-        view.onHideApp = { app in
-            DispatchQueue.main.async {
-                _ = appStore.hideApp(app)
-            }
-        }
-        view.isFolderQuickLaunchAppPinned = { app in
-            appStore.isFolderQuickLaunchAppPinned(app, inFolderID: folder.id)
-        }
-        view.onSetFolderQuickLaunchAppPinned = { app, pinned in
-            DispatchQueue.main.async {
-                _ = appStore.setFolderQuickLaunchAppPinned(pinned, app: app, inFolderID: folder.id)
-            }
-        }
-        view.onUninstallWithTool = { app in
-            DispatchQueue.main.async {
-                if !appStore.openConfiguredUninstallTool(for: app) { NSSound.beep() }
+                performAppContextMenuRoute(route, appStore: appStore)
             }
         }
     }
