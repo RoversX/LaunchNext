@@ -231,7 +231,6 @@ struct CAGridViewRepresentable: NSViewRepresentable {
             let preferredScale = nsViewScale(for: nsView)
             nsView.folderPreviewScale = appStore.enableHighResFolderPreviews ? preferredScale : 1
         }
-        nsView.scrollSensitivity = appStore.scrollSensitivity
         nsView.enableIconPreload = false
         nsView.scrollSensitivity = appStore.scrollSensitivity
         nsView.reverseWheelPagingDirection = appStore.reverseWheelPagingDirection

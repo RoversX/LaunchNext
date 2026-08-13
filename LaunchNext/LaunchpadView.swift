@@ -276,7 +276,7 @@ struct LaunchpadView: View {
         .sheet(isPresented: $appStore.isSetting) {
             SettingsView(appStore: appStore)
         }
-        .onChange(of: appStore.followScrollPagingEnabled) { _ in
+        .onChange(of: appStore.followScrollPagingEnabled) { _, _ in
             if scrollState.followOffset != 0 || scrollState.accumulatedX != 0 || scrollState.isUserSwiping {
                 scrollState.followOffset = 0
                 scrollState.accumulatedX = 0
@@ -285,7 +285,7 @@ struct LaunchpadView: View {
                 scrollState.followLastOffset = 0
             }
         }
-        .onChange(of: colorScheme) { _ in
+        .onChange(of: colorScheme) { _, _ in
             appStore.scheduleSystemAppearanceRefresh()
         }
         .overlay(alignment: .bottomTrailing) {
@@ -404,7 +404,7 @@ struct LaunchpadView: View {
             guard !loading, pendingPostOnboardingReveal, !appStore.shouldShowOnboarding else { return }
             playPostOnboardingGridReveal()
         }
-        .onChange(of: appStore.showFPSOverlay) { enabled in
+        .onChange(of: appStore.showFPSOverlay) { _, enabled in
             if enabled {
                 startFPSMonitoring()
             } else {
@@ -594,7 +594,7 @@ struct LaunchpadView: View {
                             let total = (config.isFullscreen ? geo.size.height * config.topPadding : 0) + proxy.size.height + extra
                             DispatchQueue.main.async { headerTotalHeight = total }
                         }
-                        .onChange(of: proxy.size) { _ in
+                        .onChange(of: proxy.size) { _, _ in
                             let extra: CGFloat = 24
                             let total = (config.isFullscreen ? geo.size.height * config.topPadding : 0) + proxy.size.height + extra
                             DispatchQueue.main.async { headerTotalHeight = total }
@@ -843,22 +843,6 @@ struct LaunchpadView: View {
         let iconSize: CGFloat = min(columnWidth, appHeight) * CGFloat(min(max(appStore.iconScale, 0.6), 1.15))
         let effectivePageWidth = geo.size.width + config.pageSpacing
 
-        // Helper: decide whether to close when tapping at a point in grid space
-        let maybeCloseAt: (CGPoint) -> Void = { p in
-            guard appStore.openFolder == nil, draggingItem == nil else { return }
-            if let idx = indexAt(point: p,
-                                 in: geo.size,
-                                 pageIndex: appStore.currentPage,
-                                 columnWidth: columnWidth,
-                                 appHeight: appHeight) {
-                if currentItems.indices.contains(idx), case .empty = currentItems[idx] {
-                    AppDelegate.shared?.hideWindow()
-                }
-            } else {
-                AppDelegate.shared?.hideWindow()
-            }
-        }
-
         if appStore.shouldShowOnboarding {
             let compactOnboardingLayout = geo.size.width < 960
             return AnyView(
@@ -960,7 +944,7 @@ struct LaunchpadView: View {
                         captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
                     }
                 }
-                .onChange(of: appStore.gridRefreshTrigger) { _ in
+                .onChange(of: appStore.gridRefreshTrigger) { _, _ in
                     DispatchQueue.main.async {
                         captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
                     }
@@ -1065,7 +1049,7 @@ struct LaunchpadView: View {
                     )
                 }
             }
-            .onChange(of: appStore.gridRefreshTrigger) { _ in
+            .onChange(of: appStore.gridRefreshTrigger) { _, _ in
                 DispatchQueue.main.async {
                     captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
                 }
@@ -3395,7 +3379,7 @@ extension LaunchpadView {
             }
         } else {
             // 兜底逻辑：如果没有有效的目标索引，将应用放置到当前页的末尾
-            if let draggingIndex = filteredItems.firstIndex(of: dragging) {
+            if filteredItems.contains(dragging) {
                 let currentPageStart = appStore.currentPage * config.itemsPerPage
                 let currentPageEnd = min(currentPageStart + config.itemsPerPage, appStore.items.count)
                 let targetIndex = currentPageEnd

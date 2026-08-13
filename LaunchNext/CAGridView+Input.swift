@@ -258,8 +258,7 @@ extension CAGridView {
             // print("🖱️ [CAGrid] Hit item: \(item.name) at index \(index)")
             if event.clickCount == 1 {
                 // 添加点击效果动画
-                pressedIndex = index
-                animatePress(at: index, pressed: true)
+                setPressedIndex(index)
                 dragStartPoint = location
 
                 // 启动长按计时器（用于开始拖拽）
@@ -380,8 +379,7 @@ extension CAGridView {
             endDragging(at: location)
         } else if let idx = pressedIndex {
             // 恢复点击效果
-            pressedIndex = nil
-            animatePress(at: idx, pressed: false)
+            setPressedIndex(nil)
 
             // 检查是否在同一个 item 上释放
             if let (item, index) = itemAt(location), index == idx {
@@ -400,14 +398,17 @@ extension CAGridView {
     }
 
 
-    func animatePress(at index: Int, pressed: Bool) {
-        _ = pressed
-        let pageIndex = index / itemsPerPage
-        let localIndex = index % itemsPerPage
+    func setPressedIndex(_ newIndex: Int?, animated: Bool = true) {
+        let oldIndex = pressedIndex
+        guard oldIndex != newIndex else { return }
 
-        guard pageIndex < iconLayers.count, localIndex < iconLayers[pageIndex].count else { return }
-
-        applyScaleForIndex(index, animated: true)
+        pressedIndex = newIndex
+        if let oldIndex {
+            applyScaleForIndex(oldIndex, animated: animated)
+        }
+        if let newIndex {
+            applyScaleForIndex(newIndex, animated: animated)
+        }
     }
 
     // MARK: - Drag and Drop
@@ -441,9 +442,8 @@ extension CAGridView {
         dragCurrentPoint = point
 
         // 恢复按压效果
-        if let idx = pressedIndex {
-            pressedIndex = nil
-            animatePress(at: idx, pressed: false)
+        if pressedIndex != nil {
+            setPressedIndex(nil)
         }
 
         // 隐藏原图标

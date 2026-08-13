@@ -206,12 +206,12 @@ private struct LaunchpadItemButtonContent: View {
                 }
             }
         }
-        .onChange(of: shouldAllowHover) { allow in
+        .onChange(of: shouldAllowHover) { _, allow in
             if !allow {
                 isHovered = false
             }
         }
-        .onChange(of: hoverMagnificationEnabled) { enabled in
+        .onChange(of: hoverMagnificationEnabled) { _, enabled in
             if !enabled {
                 isHovered = false
             }

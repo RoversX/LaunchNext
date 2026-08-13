@@ -94,7 +94,7 @@ enum LaunchNextCLIIPCClient {
         withUnsafeMutableBytes(of: &address.sun_path) { rawBuffer in
             rawBuffer.initializeMemory(as: CChar.self, repeating: 0)
             pathBytes.withUnsafeBytes { bytes in
-                memcpy(rawBuffer.baseAddress, bytes.baseAddress, min(pathSize, bytes.count))
+                _ = memcpy(rawBuffer.baseAddress, bytes.baseAddress, min(pathSize, bytes.count))
             }
         }
 
@@ -238,7 +238,7 @@ final class LaunchNextCLIIPCServer {
         withUnsafeMutableBytes(of: &address.sun_path) { rawBuffer in
             rawBuffer.initializeMemory(as: CChar.self, repeating: 0)
             pathBytes.withUnsafeBytes { bytes in
-                memcpy(rawBuffer.baseAddress, bytes.baseAddress, min(pathSize, bytes.count))
+                _ = memcpy(rawBuffer.baseAddress, bytes.baseAddress, min(pathSize, bytes.count))
             }
         }
 
