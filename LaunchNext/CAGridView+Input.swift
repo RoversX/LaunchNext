@@ -442,8 +442,8 @@ extension CAGridView {
 
         // 恢复按压效果
         if let idx = pressedIndex {
-            animatePress(at: idx, pressed: false)
             pressedIndex = nil
+            animatePress(at: idx, pressed: false)
         }
 
         // 隐藏原图标
