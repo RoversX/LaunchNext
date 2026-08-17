@@ -22,11 +22,19 @@ macOS Tahoe 移除了 Launchpad，新的界面很难用，也不能充分利用�
 
 *LaunchNow 选择了 GPL 3 许可证，LaunchNext 遵循相同的许可条款。*
 
-⚠️ **如果 macOS 阻止应用运行，请在终端执行：**
+⚠️ **如果 macOS 阻止应用运行：**
+
+LaunchNext 发布包带有本地 ad-hoc 签名，可直接用于开发测试和小范围分发，但没有使用 Apple Developer ID 公证。首次打开时，macOS 可能会提示无法验证开发者。
+
+请打开 **系统设置 > 隐私与安全性**，找到 LaunchNext 的拦截提示，然后点击 **仍要打开**。这是未公证社区构建的首选安装方式。
+
+如果 macOS 提示应用“已损坏”，或点击仍要打开后依然无法启动，再使用下面的兜底命令：
+
 ```bash
 sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
 ```
-**原因**：我买不起苹果的开发者证书（$99/年），所以 macOS 会阻止未签名应用。这个命令移除隔离标记让应用正常运行。**仅对信任的应用使用此命令。**
+
+只对你信任的构建使用这个兜底命令。
 
 ## LaunchNext 提供什么
 

@@ -31,11 +31,19 @@ brew install --cask launchnext
 
 LaunchNext includes its own updater. The Homebrew cask is mainly for installation and manual upgrades.
 
-⚠️ **If macOS blocks the app, run this in Terminal:**
+⚠️ **If macOS blocks the app:**
+
+LaunchNext release builds are ad-hoc signed for local use, but they are not notarized with an Apple Developer ID. On first launch, macOS may block the app because it cannot verify the developer.
+
+Open **System Settings > Privacy & Security**, find the LaunchNext warning, and click **Open Anyway**. This is the preferred install path for unsigned community builds.
+
+If macOS reports that the app is damaged or still cannot open after approval, use this fallback command:
+
 ```bash
 sudo xattr -r -d com.apple.quarantine /Applications/LaunchNext.app
 ```
-**Why**: I can't afford Apple's developer certificate ($99/year), so macOS blocks unsigned apps. This command removes the quarantine flag to let it run. **Only use this command on apps you trust.**
+
+Only use the fallback command for builds you trust.
 
 ### What LaunchNext Delivers
 - ✅ **One-click import from old system Launchpad** - directly reads your native Launchpad SQLite database (`/private$(getconf DARWIN_USER_DIR)com.apple.dock.launchpad/db/db`) to perfectly recreate your existing folders, app positions, and layout
