@@ -3,18 +3,8 @@ import Combine
 import AppKit
 import CoreVideo
 import CoreImage
-import Darwin
 
 private struct WallpaperBackgroundView: NSViewRepresentable {
-    private typealias CGWindowListCreateImageFn = @convention(c) (CGRect, CGWindowListOption, CGWindowID, CGWindowImageOption) -> Unmanaged<CGImage>?
-    private static let windowImageFunction: CGWindowListCreateImageFn? = {
-        guard let handle = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_NOW),
-              let symbol = dlsym(handle, "CGWindowListCreateImage") else {
-            return nil
-        }
-        return unsafeBitCast(symbol, to: CGWindowListCreateImageFn.self)
-    }()
-
     let screen: NSScreen?
     let blurRadius: CGFloat
     let saturation: CGFloat
@@ -23,7 +13,7 @@ private struct WallpaperBackgroundView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSImageView {
         let view = NSImageView()
-        view.imageScaling = .scaleAxesIndependently
+        view.imageScaling = .scaleProportionallyUpOrDown
         view.imageAlignment = .alignCenter
         updateImage(for: view)
         return view
@@ -49,7 +39,7 @@ private struct WallpaperBackgroundView: NSViewRepresentable {
             return
         }
         view.identifier = NSUserInterfaceItemIdentifier(signature)
-        view.image = captureDesktopWallpaper(for: screen).flatMap { image in
+        view.image = WallpaperImageProvider.image(for: screen).flatMap { image in
             processedImage(from: image,
                            blurRadius: blurRadius,
                            saturation: saturation,
@@ -65,43 +55,6 @@ private struct WallpaperBackgroundView: NSViewRepresentable {
                                            brightness: CGFloat) -> String {
         let frame = screen.frame
         return "\(frame.origin.x),\(frame.origin.y),\(frame.size.width),\(frame.size.height),\(blurRadius),\(saturation),\(contrast),\(brightness)"
-    }
-
-    private func captureDesktopWallpaper(for screen: NSScreen) -> NSImage? {
-        let frame = screen.frame
-        let windowInfo = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-
-        let targetWindowID: CGWindowID? = windowInfo.first(where: { info in
-            let owner = info[kCGWindowOwnerName as String] as? String ?? ""
-            let name = info[kCGWindowName as String] as? String ?? ""
-            guard owner == "WindowManager", name == "Wallpaper" else { return false }
-            guard let bounds = info[kCGWindowBounds as String] as? [String: Any],
-                  let x = bounds["X"] as? CGFloat,
-                  let y = bounds["Y"] as? CGFloat,
-                  let width = bounds["Width"] as? CGFloat,
-                  let height = bounds["Height"] as? CGFloat else { return false }
-            let rect = CGRect(x: x, y: y, width: width, height: height)
-            return rect.intersects(frame)
-        }).flatMap { info in
-            info[kCGWindowNumber as String] as? CGWindowID
-        }
-
-        guard let targetWindowID,
-              let cgImage = dynamicCreateWindowImage(screenBounds: .null,
-                                                     listOption: .optionIncludingWindow,
-                                                     windowID: targetWindowID,
-                                                     imageOption: [.boundsIgnoreFraming, .bestResolution]) else {
-            return nil
-        }
-
-        return NSImage(cgImage: cgImage, size: frame.size)
-    }
-
-    private func dynamicCreateWindowImage(screenBounds: CGRect,
-                                          listOption: CGWindowListOption,
-                                          windowID: CGWindowID,
-                                          imageOption: CGWindowImageOption) -> CGImage? {
-        Self.windowImageFunction?(screenBounds, listOption, windowID, imageOption)?.takeRetainedValue()
     }
 
     private func processedImage(from image: NSImage,
