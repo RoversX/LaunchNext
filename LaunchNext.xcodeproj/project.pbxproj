@@ -10,6 +10,8 @@
 		A1E2B5C02F4A8A1B00F12345 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = A1E2B5CB2F4A8A1B00F12345 /* Localizable.strings */; };
 		C200000D2F70000100ABCDEF /* libLaunchNextContextMenuCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */; };
 		C200000E2F70000100ABCDEF /* libLaunchNextContextMenuCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */; };
+		D300000D2F70000100ABCDEF /* libLaunchNextWallpaperCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = D30000012F70000100ABCDEF /* libLaunchNextWallpaperCore.a */; };
+		D300000E2F70000100ABCDEF /* libLaunchNextWallpaperCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = D30000012F70000100ABCDEF /* libLaunchNextWallpaperCore.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -26,6 +28,20 @@
 			proxyType = 1;
 			remoteGlobalIDString = C20000052F70000100ABCDEF;
 			remoteInfo = LaunchNextContextMenuCore;
+		};
+		D30000092F70000100ABCDEF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0D1B0B382E4CDE460083EEF9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D30000052F70000100ABCDEF;
+			remoteInfo = LaunchNextWallpaperCore;
+		};
+		D300000B2F70000100ABCDEF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0D1B0B382E4CDE460083EEF9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D30000052F70000100ABCDEF;
+			remoteInfo = LaunchNextWallpaperCore;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -48,6 +64,7 @@
 		A1E2B5CD2F4A8A1B00F12345 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		B10000012F70000100ABCDEF /* LaunchNextTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LaunchNextTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libLaunchNextContextMenuCore.a; sourceTree = BUILT_PRODUCTS_DIR; };
+		D30000012F70000100ABCDEF /* libLaunchNextWallpaperCore.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libLaunchNextWallpaperCore.a; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -66,6 +83,11 @@
 			path = LaunchNextContextMenuCore;
 			sourceTree = "<group>";
 		};
+		D30000022F70000100ABCDEF /* LaunchNextWallpaperCore */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LaunchNextWallpaperCore;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -74,6 +96,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C200000D2F70000100ABCDEF /* libLaunchNextContextMenuCore.a in Frameworks */,
+				D300000D2F70000100ABCDEF /* libLaunchNextWallpaperCore.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -82,10 +105,18 @@
 			buildActionMask = 2147483647;
 			files = (
 				C200000E2F70000100ABCDEF /* libLaunchNextContextMenuCore.a in Frameworks */,
+				D300000E2F70000100ABCDEF /* libLaunchNextWallpaperCore.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		C20000032F70000100ABCDEF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D30000032F70000100ABCDEF /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -102,6 +133,7 @@
 				0F7A6B1D3E2D4F5A6B7C8D9E /* Config */,
 				0D1B0B422E4CDE460083EEF9 /* LaunchNext */,
 				C20000022F70000100ABCDEF /* LaunchNextContextMenuCore */,
+				D30000022F70000100ABCDEF /* LaunchNextWallpaperCore */,
 				B10000022F70000100ABCDEF /* LaunchNextTests */,
 				0D1B0B412E4CDE460083EEF9 /* Products */,
 			);
@@ -112,6 +144,7 @@
 			children = (
 				0D1B0B402E4CDE460083EEF9 /* LaunchNext.app */,
 				C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */,
+				D30000012F70000100ABCDEF /* libLaunchNextWallpaperCore.a */,
 				B10000012F70000100ABCDEF /* LaunchNextTests.xctest */,
 			);
 			name = Products;
@@ -141,6 +174,7 @@
 			);
 			dependencies = (
 				C200000A2F70000100ABCDEF /* PBXTargetDependency */,
+				D300000A2F70000100ABCDEF /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				0D1B0B422E4CDE460083EEF9 /* LaunchNext */,
@@ -164,6 +198,7 @@
 			);
 			dependencies = (
 				C200000C2F70000100ABCDEF /* PBXTargetDependency */,
+				D300000C2F70000100ABCDEF /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				B10000022F70000100ABCDEF /* LaunchNextTests */,
@@ -196,6 +231,27 @@
 			productReference = C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */;
 			productType = "com.apple.product-type.library.static";
 		};
+		D30000052F70000100ABCDEF /* LaunchNextWallpaperCore */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D30000082F70000100ABCDEF /* Build configuration list for PBXNativeTarget "LaunchNextWallpaperCore" */;
+			buildPhases = (
+				D30000042F70000100ABCDEF /* Sources */,
+				D30000032F70000100ABCDEF /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				D30000022F70000100ABCDEF /* LaunchNextWallpaperCore */,
+			);
+			name = LaunchNextWallpaperCore;
+			packageProductDependencies = (
+			);
+			productName = LaunchNextWallpaperCore;
+			productReference = D30000012F70000100ABCDEF /* libLaunchNextWallpaperCore.a */;
+			productType = "com.apple.product-type.library.static";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -214,6 +270,9 @@
 						CreatedOnToolsVersion = 26.0;
 					};
 					C20000052F70000100ABCDEF = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					D30000052F70000100ABCDEF = {
 						CreatedOnToolsVersion = 26.0;
 					};
 				};
@@ -247,6 +306,7 @@
 			targets = (
 				0D1B0B3F2E4CDE460083EEF9 /* LaunchNext */,
 				C20000052F70000100ABCDEF /* LaunchNextContextMenuCore */,
+				D30000052F70000100ABCDEF /* LaunchNextWallpaperCore */,
 				B10000082F70000100ABCDEF /* LaunchNextTests */,
 			);
 		};
@@ -324,6 +384,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D30000042F70000100ABCDEF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -336,6 +403,16 @@
 			isa = PBXTargetDependency;
 			target = C20000052F70000100ABCDEF /* LaunchNextContextMenuCore */;
 			targetProxy = C200000B2F70000100ABCDEF /* PBXContainerItemProxy */;
+		};
+		D300000A2F70000100ABCDEF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D30000052F70000100ABCDEF /* LaunchNextWallpaperCore */;
+			targetProxy = D30000092F70000100ABCDEF /* PBXContainerItemProxy */;
+		};
+		D300000C2F70000100ABCDEF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D30000052F70000100ABCDEF /* LaunchNextWallpaperCore */;
+			targetProxy = D300000B2F70000100ABCDEF /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -645,6 +722,35 @@
 			};
 			name = Release;
 		};
+		D30000062F70000100ABCDEF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				DEFINES_MODULE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		D30000072F70000100ABCDEF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				DEFINES_MODULE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -680,6 +786,15 @@
 			buildConfigurations = (
 				C20000062F70000100ABCDEF /* Debug */,
 				C20000072F70000100ABCDEF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D30000082F70000100ABCDEF /* Build configuration list for PBXNativeTarget "LaunchNextWallpaperCore" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D30000062F70000100ABCDEF /* Debug */,
+				D30000072F70000100ABCDEF /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

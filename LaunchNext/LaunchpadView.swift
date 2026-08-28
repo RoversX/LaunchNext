@@ -164,7 +164,7 @@ struct LaunchpadView: View {
     @State private var fpsMonitor: FPSMonitor?
     @State private var fpsValue: Double = 0
     @State private var frameTimeMilliseconds: Double = 0
-    @State private var isWindowVisible: Bool = true
+    @State private var isWindowVisible: Bool = false
     @State private var postOnboardingGridOpacity: Double = 1
     @State private var postOnboardingGridScale: CGFloat = 1
     @State private var pendingPostOnboardingReveal: Bool = false
@@ -316,23 +316,21 @@ struct LaunchpadView: View {
              handleControllerCommand(command)
          }
          .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.activeSpaceDidChangeNotification)) { _ in
-             guard isWindowVisible else { return }
-             refreshBackgroundImage(forceDesktopRefresh: true)
+             refreshBackgroundImage(reason: .contextChanged)
          }
          .onReceive(NotificationCenter.default.publisher(for: NSWindow.didChangeScreenNotification)) { notification in
-             guard isWindowVisible,
-                   let changedWindow = notification.object as? NSWindow,
+             guard let changedWindow = notification.object as? NSWindow,
                    changedWindow == NSApp.keyWindow else { return }
-             refreshBackgroundImage(forceDesktopRefresh: true)
+             refreshBackgroundImage(reason: .contextChanged)
          }
          .onChange(of: appStore.backgroundImageEnabled) { _, _ in
-             refreshBackgroundImage()
+             refreshBackgroundImage(reason: .settingsChanged)
          }
          .onChange(of: appStore.backgroundImageSource) { _, _ in
-             refreshBackgroundImage()
+             refreshBackgroundImage(reason: .settingsChanged)
          }
          .onChange(of: appStore.customBackgroundImagePath) { _, _ in
-             refreshBackgroundImage()
+             refreshBackgroundImage(reason: .settingsChanged)
          }
 
            .onAppear {
@@ -344,8 +342,15 @@ struct LaunchpadView: View {
               setupInitialSelection()
               setupWindowShownObserver()
               setupWindowHiddenObserver()
-              refreshBackgroundImage()
-              isWindowVisible = true
+              let windowIsAlreadyVisible = NSApp.keyWindow?.isVisible == true
+              isWindowVisible = windowIsAlreadyVisible
+              if windowIsAlreadyVisible {
+                  refreshBackgroundImage(reason: .windowShown)
+              } else {
+                  // Deliver the initial preference even for a login launch that
+                  // starts hidden, so disabled snapshot caches are cleaned up.
+                  refreshBackgroundImage(reason: .settingsChanged)
+              }
               // 监听全局鼠标抬起，确保拖拽状态被正确清理（窗口外释放时）
                if let existing = globalMouseUpMonitor { NSEvent.removeMonitor(existing) }
                globalMouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { _ in
@@ -2055,13 +2060,13 @@ extension LaunchpadView {
 
 // MARK: - Keyboard Navigation
 extension LaunchpadView {
-    private func refreshBackgroundImage(forceDesktopRefresh: Bool = false) {
+    private func refreshBackgroundImage(reason: BackgroundImageController.RefreshReason) {
         backgroundImageController.refresh(
             for: NSApp.keyWindow?.screen ?? NSScreen.main,
             enabled: appStore.backgroundImageEnabled,
             source: appStore.backgroundImageSource,
             customImagePath: appStore.customBackgroundImagePath,
-            forceDesktopRefresh: forceDesktopRefresh
+            reason: reason
         )
     }
 
@@ -2071,8 +2076,8 @@ extension LaunchpadView {
             windowObserver = nil
         }
         windowObserver = NotificationCenter.default.addObserver(forName: .launchpadWindowShown, object: nil, queue: .main) { _ in
-            refreshBackgroundImage()
             isWindowVisible = true
+            refreshBackgroundImage(reason: .windowShown)
             isKeyboardNavigationActive = false
             selectedIndex = 0
             isSearchFieldFocused = true
@@ -2089,6 +2094,9 @@ extension LaunchpadView {
         }
         windowHiddenObserver = NotificationCenter.default.addObserver(forName: .launchpadWindowHidden, object: nil, queue: .main) { _ in
             isWindowVisible = false
+            MainActor.assumeIsolated {
+                backgroundImageController.windowDidHide()
+            }
             selectedIndex = 0
         }
     }

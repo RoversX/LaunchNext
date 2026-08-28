@@ -29,6 +29,7 @@ parallel_version/
 
 # Local AI notes
 LaunchNext/AI/TODO.md
+.claude/
 
 # Local docs draft
 /docs/
