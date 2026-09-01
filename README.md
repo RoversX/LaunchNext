@@ -25,8 +25,7 @@ MacOS Tahoe removed launchpad,and it's so hard to use, it's doesn't use your Bio
 ### Install with Homebrew 🍺
 
 ```bash
-brew tap RoversX/homebrew-tap
-brew install --cask launchnext
+brew install --cask RoversX/homebrew-tap/launchnext
 ```
 
 LaunchNext includes its own updater. The Homebrew cask is mainly for installation and manual upgrades.
