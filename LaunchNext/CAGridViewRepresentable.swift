@@ -41,6 +41,7 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         view.folderDropZoneScale = CGFloat(appStore.folderDropZoneScale)
         let preferredScale = nsViewScale(for: view)
         view.folderPreviewScale = appStore.enableHighResFolderPreviews ? preferredScale : 1
+        view.usesLiquidGlassFolders = appStore.folderLiquidGlassEnabled
         view.enableIconPreload = false
         view.scrollSensitivity = appStore.scrollSensitivity
         view.reverseWheelPagingDirection = appStore.reverseWheelPagingDirection
@@ -136,38 +137,7 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         // Drag reorder
         view.onReorderItems = { fromIndex, toIndex in
             DispatchQueue.main.async {
-                guard fromIndex < appStore.items.count else { return }
-                let itemsPerPage = appStore.gridColumnsPerPage * appStore.gridRowsPerPage
-                let sourcePage = fromIndex / itemsPerPage
-                let targetPage = toIndex / itemsPerPage
-                
-                if sourcePage == targetPage {
-                    // Same page: use simple swap logic
-                    let pageStart = sourcePage * itemsPerPage
-                    let pageEnd = min(pageStart + itemsPerPage, appStore.items.count)
-                    var newItems = appStore.items
-                    var pageSlice = Array(newItems[pageStart..<pageEnd])
-                    let localFrom = fromIndex - pageStart
-                    let localTo = min(toIndex - pageStart, pageSlice.count - 1)
-                    
-                    if localFrom != localTo && localFrom < pageSlice.count && localTo < pageSlice.count {
-                        let moving = pageSlice.remove(at: localFrom)
-                        pageSlice.insert(moving, at: localTo)
-                        newItems.replaceSubrange(pageStart..<pageEnd, with: pageSlice)
-                        appStore.items = newItems
-                    }
-                    appStore.triggerGridRefresh()
-                    appStore.saveAllOrder()
-                    
-                    // Compact after same-page drag
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        appStore.compactItemsWithinPages()
-                    }
-                } else {
-                    // Cross-page: use cascade insert logic
-                let item = appStore.items[fromIndex]
-                appStore.moveItemAcrossPagesWithCascade(item: item, to: toIndex)
-                }
+                appStore.reorderGridItem(from: fromIndex, to: toIndex)
             }
         }
 
@@ -231,6 +201,7 @@ struct CAGridViewRepresentable: NSViewRepresentable {
             let preferredScale = nsViewScale(for: nsView)
             nsView.folderPreviewScale = appStore.enableHighResFolderPreviews ? preferredScale : 1
         }
+        nsView.usesLiquidGlassFolders = appStore.folderLiquidGlassEnabled
         nsView.enableIconPreload = false
         nsView.scrollSensitivity = appStore.scrollSensitivity
         nsView.reverseWheelPagingDirection = appStore.reverseWheelPagingDirection

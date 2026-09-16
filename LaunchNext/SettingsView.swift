@@ -4894,6 +4894,18 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     .foregroundStyle(.secondary)
             }
 
+            HStack {
+                Text(appStore.localized(.folderLiquidGlassTitle))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                Toggle(appStore.localized(.folderLiquidGlassTitle), isOn: $appStore.folderLiquidGlassEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+            .help(appStore.localized(.folderLiquidGlassHint))
+            .disabled(!appStore.useCAGridRenderer)
+            .opacity(appStore.useCAGridRenderer ? 1 : 0.5)
+
             Group {
                 HStack {
                     Text(appStore.localized(.folderQuickLaunchTitle))

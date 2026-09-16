@@ -1,12 +1,53 @@
 import AppKit
 import QuartzCore
 
+extension LaunchpadItem {
+    // Equatable compares IDs only; reuse must also preserve rendered content.
+    func hasSameGridContent(as other: LaunchpadItem) -> Bool {
+        func sameApp(_ lhs: AppInfo, _ rhs: AppInfo) -> Bool {
+            lhs.url == rhs.url && lhs.name == rhs.name && lhs.icon === rhs.icon
+        }
+        switch (self, other) {
+        case (.app(let lhs), .app(let rhs)):
+            return sameApp(lhs, rhs)
+        case (.folder(let lhs), .folder(let rhs)):
+            return lhs.id == rhs.id && lhs.name == rhs.name
+                && lhs.pinnedAppPaths == rhs.pinnedAppPaths
+                && lhs.apps.count == rhs.apps.count
+                && zip(lhs.apps, rhs.apps).allSatisfy { sameApp($0.0, $0.1) }
+        case (.empty(let lhs), .empty(let rhs)):
+            return lhs == rhs
+        case (.missingApp(let lhs), .missingApp(let rhs)):
+            // The placeholder's icon is shared; its value also covers the
+            // displayed name, path and removable-source metadata.
+            return lhs == rhs
+        default:
+            return false
+        }
+    }
+}
+
 extension CAGridView {
     // MARK: - Layer Management
 
-    func rebuildLayers() {
+    func rebuildLayers(reusing previousItems: [LaunchpadItem]? = nil) {
+        if let previousItems, reuseLayersDuringLanding(previousItems: previousItems) { return }
+        // Keep the last rendered folder bitmap until its updated contents are
+        // ready. This temporary handoff adds no persistent image cache.
+        var previousFolderImages: [String: Any] = [:]
+        for (item, container) in zip(previousItems ?? items, iconLayers.flatMap({ $0 })) {
+            if case .folder = item,
+               let image = container.sublayers?.first(where: { $0.name == "icon" })?.contents {
+                previousFolderImages[item.id] = image
+            }
+        }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        if dragLanding != nil, let draggingLayer {
+            folderGlassOverlay?.resetPageGlass(keeping: draggingLayer)
+        } else {
+            resetFolderGlass()
+        }
 
         // 清除旧层
         for pageLayers in iconLayers {
@@ -34,6 +75,11 @@ extension CAGridView {
             for i in startIndex..<endIndex {
                 let localIndex = i - startIndex
                 let layer = createIconLayer(for: items[i], localIndex: localIndex, pageIndex: pageIndex)
+                if let icon = layer.sublayers?.first(where: { $0.name == "icon" }), icon.contents == nil,
+                   let previousImage = previousFolderImages[items[i].id] {
+                    icon.contents = previousImage
+                }
+                if items[i].id == dragLanding?.itemID { layer.opacity = 0 }
                 pageContainerLayer.addSublayer(layer)
                 pageLayers.append(layer)
             }
@@ -52,7 +98,7 @@ extension CAGridView {
         navigateToPage(currentPage, animated: false)
         logIfMismatch("rebuildLayers")
     }
-    
+
     // Track if layout needs refresh after bounds become valid
 
     func createIconLayer(for item: LaunchpadItem, localIndex: Int, pageIndex: Int) -> CALayer {
@@ -177,16 +223,26 @@ extension CAGridView {
                 }
             }
         case .folder(let folder):
-            // 异步加载文件夹图标
             let folderIconSize = iconSize
             let previewScale = folderPreviewScale
-            DispatchQueue.global(qos: .userInitiated).async { [weak layer] in
+            // Reordering usually changes only position. Reuse the existing
+            // preview synchronously so rebuilt layers never start blank.
+            if let cached = folder.cachedIcon(of: folderIconSize, scale: previewScale),
+               let cgImage = cached.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                layer.contents = cgImage
+                folderGlassOverlay?.updatePreviewContents(for: layer)
+                return
+            }
+            DispatchQueue.global(qos: .userInitiated).async { [weak self, weak layer] in
                 let icon = folder.icon(of: folderIconSize, scale: previewScale)
                 if let cgImage = icon.cgImage(forProposedRect: nil, context: nil, hints: nil) {
                     DispatchQueue.main.async {
+                        guard let self, let layer,
+                              layer.superlayer?.superlayer === self.pageContainerLayer else { return }
                         CATransaction.begin()
                         CATransaction.setDisableActions(true)
-                        layer?.contents = cgImage
+                        layer.contents = cgImage
+                        self.folderGlassOverlay?.updatePreviewContents(for: layer)
                         CATransaction.commit()
                     }
                 }
@@ -333,6 +389,7 @@ extension CAGridView {
         pageContainerLayer.transform = CATransform3DMakeTranslation(scrollOffset, 0, 0)
         refreshBatchSelectionUI()
 
+        syncFolderGlass()
         CATransaction.commit()
 
         logIfMismatch("updateLayout")
@@ -423,6 +480,7 @@ extension CAGridView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         pageContainerLayer.transform = CATransform3DMakeTranslation(scrollOffset, 0, 0)
+        syncFolderGlass()
         CATransaction.commit()
         logIfMismatch("layout")
     }

@@ -423,6 +423,8 @@ final class AppStore: ObservableObject {
     static let backgroundMaskEnabledKey = "launchpadBackgroundMaskEnabled"
     static let backgroundMaskLightKey = "launchpadBackgroundMaskLight"
     static let backgroundMaskDarkKey = "launchpadBackgroundMaskDark"
+    static let folderLiquidGlassKey = "folderLiquidGlassEnabled"
+    private static let folderLiquidGlassDefaultMigrationKey = "folderLiquidGlassDefaultEnabledV1"
     static let folderPreviewHighResKey = "folderPreviewHighRes"
     static let folderQuickLaunchEnabledKey = "folderQuickLaunchEnabled"
     static let sidebarIconPresetKey = "sidebarIconPreset"
@@ -433,6 +435,16 @@ final class AppStore: ObservableObject {
     private static let gameControllerEnabledKey = "gameControllerEnabled"
     static let gameControllerMenuToggleKey = "gameControllerMenuToggleLaunchpad"
     private static let soundEffectsEnabledKey = "soundEffectsEnabled"
+
+    static func loadFolderLiquidGlassEnabled(from defaults: UserDefaults = .standard) -> Bool {
+        // Enable once for both new and existing installations. Keep the marker
+        // across appearance resets so later manual opt-outs remain respected.
+        if !defaults.bool(forKey: folderLiquidGlassDefaultMigrationKey) {
+            defaults.set(true, forKey: folderLiquidGlassKey)
+            defaults.set(true, forKey: folderLiquidGlassDefaultMigrationKey)
+        }
+        return defaults.object(forKey: folderLiquidGlassKey) as? Bool ?? true
+    }
 
     static func migrateLegacyPreferencesIfNeeded(
         defaults: UserDefaults = .standard,
@@ -892,6 +904,7 @@ final class AppStore: ObservableObject {
 
         isFullscreenMode = defaults.object(forKey: "isFullscreenMode") as? Bool ?? true
         showLabels = defaults.object(forKey: "showLabels") as? Bool ?? true
+        folderLiquidGlassEnabled = Self.loadFolderLiquidGlassEnabled(from: defaults)
         enableHighResFolderPreviews = defaults.object(forKey: Self.folderPreviewHighResKey) as? Bool ?? true
         folderQuickLaunchEnabled = defaults.object(forKey: Self.folderQuickLaunchEnabledKey) as? Bool ?? false
         folderLayoutMode = Self.loadFolderLayoutMode(from: defaults, isExistingInstall: nil)
@@ -1386,6 +1399,13 @@ final class AppStore: ObservableObject {
         return UserDefaults.standard.bool(forKey: "showLabels")
     }() {
         didSet { UserDefaults.standard.set(showLabels, forKey: "showLabels") }
+    }
+
+    @Published var folderLiquidGlassEnabled = AppStore.loadFolderLiquidGlassEnabled() {
+        didSet {
+            guard folderLiquidGlassEnabled != oldValue else { return }
+            UserDefaults.standard.set(folderLiquidGlassEnabled, forKey: Self.folderLiquidGlassKey)
+        }
     }
 
     @Published var enableHighResFolderPreviews: Bool = {
@@ -4853,6 +4873,7 @@ final class AppStore: ObservableObject {
             Self.backgroundMaskDarkKey,
             "isFullscreenMode",
             "showLabels",
+            Self.folderLiquidGlassKey,
             Self.folderPreviewHighResKey,
             Self.folderQuickLaunchEnabledKey,
             Self.folderLayoutModeKey,
@@ -4995,38 +5016,33 @@ final class AppStore: ObservableObject {
         saveAllOrder()
     }
 
+    func reorderGridItem(from sourceIndex: Int, to targetIndex: Int) {
+        guard itemsPerPage > 0 else { return }
+        applyGridReorder(from: sourceIndex, to: targetIndex,
+                         cascading: sourceIndex / itemsPerPage != targetIndex / itemsPerPage)
+    }
+
     func moveItemAcrossPagesWithCascade(item: LaunchpadItem, to targetIndex: Int) {
-        guard items.indices.contains(targetIndex) || targetIndex == items.count else {
-            return
-        }
         guard let source = items.firstIndex(of: item) else { return }
-        var result = items
-        // 源位置置空，保持长度
-        result[source] = .empty(UUID().uuidString)
-        // 执行级联插入
-        result = cascadeInsert(into: result, item: item, at: targetIndex)
-        items = filteredItemsRemovingHidden(from: result)
-        
-        // 每次拖拽结束后都进行压缩，确保每页的empty项目移动到页面末尾
-        let targetPage = targetIndex / itemsPerPage
-        let currentPages = (items.count + itemsPerPage - 1) / itemsPerPage
-        
-        if targetPage == currentPages - 1 {
-            // 拖拽到新页面，延迟压缩以确保应用位置稳定
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                self.compactItemsWithinPages()
-                self.removeEmptyPages()
-                self.triggerGridRefresh()
-            }
-        } else {
-            // 拖拽到现有页面，立即压缩
-            compactItemsWithinPages()
-            removeEmptyPages()
+        applyGridReorder(from: source, to: targetIndex, cascading: true)
+    }
+
+    private func applyGridReorder(from source: Int, to target: Int, cascading: Bool) {
+        let snapshot = items
+        let occupied = snapshot.map { item in
+            if case .empty = item { return false }
+            return true
         }
-        
-        // 触发网格视图刷新，确保界面立即更新
+        guard let plan = GridReorderPlan.make(occupied: occupied, from: source, to: target,
+                                               itemsPerPage: itemsPerPage, cascading: cascading) else { return }
+        let reordered = plan.slots.map { slot in
+            slot.map { snapshot[$0] } ?? .empty(UUID().uuidString)
+        }
+        // Publish only the final arrangement. A delayed second compaction would
+        // move the landing target after its animation had already started.
+        items = filteredItemsRemovingHidden(from: reordered)
+        clampCurrentPageWithinBounds()
         triggerGridRefresh()
-        
         saveAllOrder()
     }
 

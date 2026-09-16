@@ -81,6 +81,7 @@ extension CAGridView {
     }
 
     func handleScrollWheel(with event: NSEvent) {
+        finishDragLanding()
         // Prefer horizontal movement; vertical precise input can be flipped separately.
         let deltaX = event.scrollingDeltaX
         let deltaY = event.scrollingDeltaY
@@ -120,6 +121,7 @@ extension CAGridView {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             pageContainerLayer.transform = CATransform3DMakeTranslation(scrollOffset, 0, 0)
+            syncFolderGlass(geometryChanged: false)
             CATransaction.commit()
 
             // 设置定时器，停止滚动后决定翻页或弹回
@@ -182,6 +184,7 @@ extension CAGridView {
             CATransaction.setDisableActions(true)
             CATransaction.setAnimationDuration(0)
             pageContainerLayer.transform = CATransform3DMakeTranslation(scrollOffset, 0, 0)
+            syncFolderGlass(geometryChanged: false)
             CATransaction.commit()
 
         case .ended, .cancelled:
@@ -248,6 +251,7 @@ extension CAGridView {
 
     override func mouseDown(with event: NSEvent) {
         guard !externalAppDragSessionActive else { return }
+        finishDragLanding()
         // 确保成为第一响应者，这样后续的滚轮事件才能被接收
         window?.makeFirstResponder(self)
 
@@ -307,6 +311,7 @@ extension CAGridView {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             pageContainerLayer.transform = CATransform3DMakeTranslation(scrollOffset, 0, 0)
+            syncFolderGlass(geometryChanged: false)
             CATransaction.commit()
             return
         }
@@ -436,6 +441,15 @@ extension CAGridView {
             batchHiddenCompanionIndices.removeAll()
         }
 
+        dragDropPreview = .none
+        pendingDropPreview = nil
+        hoverUpdateTimer?.invalidate()
+        hoverUpdateTimer = nil
+        pendingHoverIndex = nil
+        currentHoverIndex = nil
+        clearDropTargetHighlight()
+        clearHover()
+        updateSelection(nil, animated: false)
         isDraggingItem = true
         draggingIndex = index
         draggingItem = item
@@ -446,20 +460,31 @@ extension CAGridView {
             setPressedIndex(nil)
         }
 
+        // Hand off the source to the drag preview atomically. A default opacity
+        // animation would leave the old CA icon visible beneath the new glass.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         // 隐藏原图标
         let pageIndex = index / itemsPerPage
         let localIndex = index % itemsPerPage
         if pageIndex < iconLayers.count, localIndex < iconLayers[pageIndex].count {
+            iconLayers[pageIndex][localIndex].removeAnimation(forKey: "opacity")
             iconLayers[pageIndex][localIndex].opacity = 0
         }
         if !batchHiddenCompanionIndices.isEmpty {
             for companionIndex in batchHiddenCompanionIndices {
+                let companionPage = companionIndex / itemsPerPage
+                let companionLocal = companionIndex % itemsPerPage
+                if companionPage < iconLayers.count, companionLocal < iconLayers[companionPage].count {
+                    iconLayers[companionPage][companionLocal].removeAnimation(forKey: "opacity")
+                }
                 setOpacity(0, forGlobalIndex: companionIndex)
             }
         }
 
         // 创建拖拽图层
         createDraggingLayer(for: item, at: point)
+        CATransaction.commit()
 
         if isBatchDragging {
             pendingHoverIndex = gridPositionAt(point)
@@ -485,6 +510,7 @@ extension CAGridView {
             let glassSize = actualIconSize * 0.8
             let glassOffset = (actualIconSize - glassSize) / 2
             let glassLayer = CALayer()
+            glassLayer.name = "glass"
             glassLayer.frame = CGRect(x: glassOffset, y: glassOffset, width: glassSize, height: glassSize)
             glassLayer.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
             glassLayer.borderColor = NSColor.white.withAlphaComponent(0.2).cgColor
@@ -499,6 +525,7 @@ extension CAGridView {
 
         // Icon layer
         let iconLayer = CALayer()
+        iconLayer.name = "icon"
         iconLayer.frame = CGRect(x: 0, y: 0, width: actualIconSize, height: actualIconSize)
         iconLayer.contentsScale = scale
         iconLayer.contentsGravity = .resizeAspect
@@ -533,8 +560,10 @@ extension CAGridView {
             addBatchDragCountBadge(to: container, count: batchDraggingAppPathsOrdered.count)
         }
 
-        containerLayer.addSublayer(container)
+        // Keep dragged apps above the native folder backplates, too.
+        (usesLiquidGlassFolders ? layer : containerLayer)?.addSublayer(container)
         draggingLayer = container
+        syncFolderGlass()
     }
 
     func externalDockDragCandidate() -> AppInfo? {
@@ -648,21 +677,19 @@ extension CAGridView {
     }
 
     func updateDragging(at point: CGPoint) {
+        defer { syncFolderGlass(geometryChanged: false) }
         dragCurrentPoint = point
 
         // Update dragging layer position
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        let actualIconSize = iconSize
-        draggingLayer?.frame = CGRect(x: point.x - actualIconSize / 2, y: point.y - actualIconSize / 2,
-                                      width: actualIconSize, height: actualIconSize)
+        // Updating frame under the lift transform also changes bounds. Keep the
+        // bitmap size stable so the drop can smoothly shrink from the lift scale.
+        draggingLayer?.position = point
         CATransaction.commit()
 
         // Check edge drag for page flip
         checkEdgeDrag(at: point)
-
-        let dragPage = draggingIndex.map { $0 / itemsPerPage }
-        let isCrossPage = dragPage != nil && dragPage != currentPage
 
         if isBatchDragging {
             if let hoverIndex = gridPositionAt(point), hoverIndex != draggingIndex {
@@ -675,44 +702,28 @@ extension CAGridView {
             return
         }
 
+        guard let sourceIndex = draggingIndex else { return }
+        let preview: GridDropPreview
         if let hoverIndex = gridPositionAt(point), hoverIndex != draggingIndex {
-            if hoverIndex < items.count {
-                let targetItem = items[hoverIndex]
-                let inCenterArea = isPointInFolderDropZone(point, targetIndex: hoverIndex)
-
-                switch targetItem {
-                case .folder:
-                    if case .app = draggingItem, inCenterArea {
-                        // Hovering over folder center - highlight for move into folder
-                        highlightDropTarget(at: hoverIndex)
-                        updateIconPositionsForDrag(hoverIndex: isCrossPage ? hoverIndex : nil)
-                    } else {
-                        clearDropTargetHighlight()
-                        updateIconPositionsForDrag(hoverIndex: hoverIndex)
-                    }
-                case .app:
-                    if case .app = draggingItem, inCenterArea {
-                        // App over app center - create folder
-                        highlightDropTarget(at: hoverIndex)
-                        updateIconPositionsForDrag(hoverIndex: isCrossPage ? hoverIndex : nil)
-                    } else {
-                        clearDropTargetHighlight()
-                        updateIconPositionsForDrag(hoverIndex: hoverIndex)
-                    }
+            if items.indices.contains(hoverIndex), case .app = draggingItem,
+               isPointInFolderDropZone(point, targetIndex: hoverIndex) {
+                switch items[hoverIndex] {
+                case .app, .folder:
+                    preview = .merge(targetID: items[hoverIndex].id)
                 case .missingApp, .empty:
-                    clearDropTargetHighlight()
-                    updateIconPositionsForDrag(hoverIndex: hoverIndex)
+                    preview = .insertion(index: hoverIndex, sourceIndex: sourceIndex,
+                                         itemCount: items.count, itemsPerPage: itemsPerPage)
                 }
             } else {
-                clearDropTargetHighlight()
-                updateIconPositionsForDrag(hoverIndex: hoverIndex)
+                preview = .insertion(index: hoverIndex, sourceIndex: sourceIndex,
+                                     itemCount: items.count, itemsPerPage: itemsPerPage)
             }
         } else {
-            clearDropTargetHighlight()
-            updateIconPositionsForDrag(hoverIndex: nil)
+            preview = .none
         }
+        requestDropPreview(preview)
     }
-    
+
     func updateIconPositionsForDrag(hoverIndex: Int?) {
         guard draggingIndex != nil else { return }
         
@@ -732,6 +743,7 @@ extension CAGridView {
     }
     
     func applyIconPositionUpdate() {
+        defer { animateFolderGlass() }
         guard let dragIndex = draggingIndex else { return }
         
         let hoverIndex = pendingHoverIndex
@@ -755,8 +767,7 @@ extension CAGridView {
         
         // Calculate positions with item shifted - smooth spring-like animation
         CATransaction.begin()
-        CATransaction.setAnimationDuration(0.45)
-        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(controlPoints: 0.25, 1.0, 0.35, 1.0))
+        CATransaction.setDisableActions(true)
         
         for (localIndex, layer) in pageLayers.enumerated() {
             let globalIndex = pageStart + localIndex
@@ -805,7 +816,7 @@ extension CAGridView {
                 }
             }
             
-            layer.position = targetPos
+            GridLayerMotion.move(layer, to: targetPos, duringHover: true)
         }
         
         CATransaction.commit()
@@ -874,8 +885,8 @@ extension CAGridView {
         let cellOriginY = pageHeight - contentInsets.top - CGFloat(row + 1) * cellHeight - CGFloat(row) * rowSpacing
 
         let actualIconSize = iconSize
-        let labelHeight: CGFloat = labelFontSize + 8
-        let labelTopSpacing: CGFloat = 6
+        let labelHeight: CGFloat = showLabels ? labelFontSize + 8 : 0
+        let labelTopSpacing: CGFloat = showLabels ? 6 : 0
         let totalHeight = actualIconSize + labelTopSpacing + labelHeight
 
         let containerX = CGFloat(pageIndex) * pageStride + cellOriginX
@@ -884,6 +895,10 @@ extension CAGridView {
     }
     
     func resetIconPositions() {
+        defer {
+            hideDragLandingDestination()
+            animateFolderGlass()
+        }
         // Cancel pending update timer
         hoverUpdateTimer?.invalidate()
         hoverUpdateTimer = nil
@@ -1072,6 +1087,7 @@ extension CAGridView {
     }
 
     func applyScaleForIndex(_ index: Int, animated: Bool) {
+        guard index >= 0, itemsPerPage > 0 else { return }
         let pageIndex = index / itemsPerPage
         let localIndex = index % itemsPerPage
         guard pageIndex < iconLayers.count, localIndex < iconLayers[pageIndex].count else { return }
@@ -1090,16 +1106,32 @@ extension CAGridView {
             iconScale = hoverMagnificationScale
         }
 
+        let iconLayer = containerLayer.sublayers?.first(where: { $0.name == "icon" })
+        let glassLayer = containerLayer.sublayers?.first(where: { $0.name == "glass" })
+        let containerTransform = CATransform3DMakeScale(pressScale, pressScale, 1.0)
+        let iconTransform = CATransform3DMakeScale(iconScale, iconScale, 1.0)
+        let containerChanged = !CATransform3DEqualToTransform(containerLayer.transform, containerTransform)
+        let iconChanged = iconLayer.map { !CATransform3DEqualToTransform($0.transform, iconTransform) } ?? false
+        let glassChanged = glassLayer.map { !CATransform3DEqualToTransform($0.transform, iconTransform) } ?? false
+        guard containerChanged || iconChanged || glassChanged else { return }
+        // Ordinary app hover/press/selection cannot move native folder glass.
+        // Only an actual folder geometry change needs to extend its sampling.
+        defer {
+            if glassLayer != nil, usesLiquidGlassFolders {
+                if animated { animateFolderGlass() } else { syncFolderGlass() }
+            }
+        }
+
         CATransaction.begin()
         CATransaction.setAnimationDuration(animated ? 0.12 : 0)
         CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
-        containerLayer.transform = CATransform3DMakeScale(pressScale, pressScale, 1.0)
+        containerLayer.transform = containerTransform
 
-        if let iconLayer = containerLayer.sublayers?.first(where: { $0.name == "icon" }) {
-            iconLayer.transform = CATransform3DMakeScale(iconScale, iconScale, 1.0)
+        if let iconLayer {
+            iconLayer.transform = iconTransform
         }
-        if let glassLayer = containerLayer.sublayers?.first(where: { $0.name == "glass" }) {
-            glassLayer.transform = CATransform3DMakeScale(iconScale, iconScale, 1.0)
+        if let glassLayer {
+            glassLayer.transform = iconTransform
         }
         CATransaction.commit()
     }
@@ -1128,12 +1160,18 @@ extension CAGridView {
             if !externalDragActive || draggingIndex != sourceIndex {
                 externalDragActive = true
                 draggingIndex = sourceIndex
-
-                let pageIndex = sourceIndex / itemsPerPage
-                let localIndex = sourceIndex % itemsPerPage
-                if pageIndex < iconLayers.count, localIndex < iconLayers[pageIndex].count {
-                    iconLayers[pageIndex][localIndex].opacity = 0
-                }
+            }
+            // A model refresh can replace the source layer without changing
+            // its index. Reassert the handoff on every external-drag update.
+            let pageIndex = sourceIndex / itemsPerPage
+            let localIndex = sourceIndex % itemsPerPage
+            if pageIndex >= 0, localIndex >= 0,
+               pageIndex < iconLayers.count, localIndex < iconLayers[pageIndex].count {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                iconLayers[pageIndex][localIndex].removeAnimation(forKey: "opacity")
+                iconLayers[pageIndex][localIndex].opacity = 0
+                CATransaction.commit()
             }
             updateIconPositionsForDrag(hoverIndex: hoverIndex)
         } else if externalDragActive {
@@ -1222,6 +1260,7 @@ extension CAGridView {
         CATransaction.setDisableActions(true)
         CATransaction.setAnimationDuration(0)
         pageContainerLayer.transform = CATransform3DMakeTranslation(scrollOffset, 0, 0)
+        syncFolderGlass(geometryChanged: false)
         CATransaction.commit()
     }
 
@@ -1306,6 +1345,12 @@ extension CAGridView {
             cancelDragging()
             return
         }
+        let revisionBeforeDrop = itemsRevision
+        let displayedDrop = dragDropPreview
+        dragDropPreview = .none
+        pendingDropPreview = nil
+        hoverUpdateTimer?.invalidate()
+        hoverUpdateTimer = nil
 
         // Save current hover position before clearing
         let savedHoverIndex = currentHoverIndex
@@ -1319,6 +1364,9 @@ extension CAGridView {
 
         // Track if we're doing a reorder (so we don't reset positions unnecessarily)
         var didReorder = false
+        var didMerge = false
+        var landingIndex: Int?
+        var landingPageOffset: CGFloat?
 
         if isBatchDragging {
             if let insertIndex = savedHoverIndex ?? targetPosition {
@@ -1330,38 +1378,57 @@ extension CAGridView {
                 }
             }
         } else {
-            // 检查是否拖到另一个item上
-            if let (targetItem, targetIndex) = itemAt(point), targetIndex != dragIndex {
-                // print("🎯 [CAGrid] Dropped on item: \(targetItem.name) at index \(targetIndex)")
-                // 拖拽到另一个 item 上
-                if case .app(let dragApp) = dragItem {
-                    switch targetItem {
-                    case .app(let targetApp):
-                        // 两个应用 -> 创建文件夹
-                        // print("📁 [CAGrid] Creating folder: \(dragApp.name) + \(targetApp.name)")
-                        onCreateFolder?(dragApp, targetApp, targetIndex)
-                        cancelDragging()
-                        return
-                    case .folder(let folder):
-                        // 拖到文件夹 -> 移入文件夹
-                        // print("📂 [CAGrid] Moving to folder: \(dragApp.name) -> \(folder.name)")
-                        onMoveToFolder?(dragApp, folder)
-                        cancelDragging()
-                        return
-                    case .empty, .missingApp:
-                        // 空白格子或丢失的应用 -> 当作重排序处理
-                        // print("🔄 [CAGrid] Dropped on empty/missing, reordering: \(dragIndex) -> \(targetIndex)")
-                        onReorderItems?(dragIndex, targetIndex)
-                        didReorder = true
-                    }
+            if case .insert(let target) = displayedDrop {
+                let occupied = items.map { item in
+                    if case .empty = item { return false }
+                    return true
+                }
+                if let plan = GridReorderPlan.make(occupied: occupied, from: dragIndex, to: target,
+                                                  itemsPerPage: itemsPerPage,
+                                                  cascading: dragIndex / itemsPerPage != target / itemsPerPage) {
+                    landingIndex = plan.destinationIndex
+                    let finalPage = min(currentPage, max(0, (plan.slots.count - 1) / itemsPerPage))
+                    landingPageOffset = -CGFloat(finalPage) * (bounds.width + pageSpacing)
                 }
             }
-
-            // Reorder to empty area - use saved hover position or calculated position
-            if !didReorder, let insertIndex = savedHoverIndex ?? targetPosition, insertIndex != dragIndex {
-                onReorderItems?(dragIndex, insertIndex)
-                didReorder = true
+            if case .merge(let targetID) = displayedDrop {
+                didMerge = beginMergeLanding(itemID: dragItem.id, targetID: targetID)
             }
+            switch commitDropPreview(displayedDrop, draggedItem: dragItem) {
+            case .merge:
+                if !didMerge { cancelDragging(); return }
+            case .insert(let insertIndex):
+                landingIndex = landingIndex ?? insertIndex
+                didReorder = true
+            case .none:
+                if didMerge { finishDragLanding(); didMerge = false }
+                break
+            }
+        }
+
+        // A single icon retains its lifted representation until it reaches the
+        // actual post-reorder cell, or shrinks into a merge target. Batch drops
+        // keep their existing semantics.
+        if !isBatchDragging {
+            if !didMerge {
+                beginDragLanding(itemID: dragItem.id,
+                                 waitingForRevision: didReorder ? revisionBeforeDrop : nil,
+                                 predictedIndex: landingIndex,
+                                 predictedPageOffset: landingPageOffset)
+            }
+            if !didReorder && !didMerge { resetIconPositions() }
+            isDraggingItem = false
+            draggingIndex = nil
+            draggingItem = nil
+            dropTargetIndex = nil
+            hoverUpdateTimer?.invalidate()
+            hoverUpdateTimer = nil
+            pendingHoverIndex = nil
+            currentHoverIndex = nil
+            originalIconPositions.removeAll()
+            hardSnapToCurrentPage()
+            updateDragLanding(at: CACurrentMediaTime())
+            return
         }
 
         // If we did a reorder, data will update and rebuild layers
@@ -1371,8 +1438,7 @@ extension CAGridView {
             let savedDragIndex = draggingIndex
             
             // Remove dragging layer immediately
-            draggingLayer?.removeFromSuperlayer()
-            draggingLayer = nil
+            removeDraggingVisuals()
             
             // Clear dragging flags immediately
             isDraggingItem = false
@@ -1404,6 +1470,7 @@ extension CAGridView {
                     self.disableBatchSelectionMode()
                 }
                 self.forceSyncPageTransformIfNeeded()
+                self.animateFolderGlass()
             }
         } else {
             // No reorder happened, reset positions to original
@@ -1413,13 +1480,27 @@ extension CAGridView {
         logIfMismatch("endDragging")
     }
 
+    func removeDraggingVisuals() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if let draggingLayer {
+            folderGlassOverlay?.removeDraggingGlass(for: draggingLayer)
+            draggingLayer.removeFromSuperlayer()
+        }
+        draggingLayer = nil
+        CATransaction.commit()
+    }
+
     func cancelDragging() {
+        dragDropPreview = .none
+        pendingDropPreview = nil
+        clearDropTargetHighlight()
+        finishDragLanding()
+        defer { syncFolderGlass() }
+        // Remove both drag representations before restoring the source icon.
+        removeDraggingVisuals()
         // Reset icon positions to original
         resetIconPositions()
-
-        // Remove dragging layer
-        draggingLayer?.removeFromSuperlayer()
-        draggingLayer = nil
 
         isDraggingItem = false
         draggingIndex = nil

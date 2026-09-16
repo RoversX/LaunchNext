@@ -12,6 +12,7 @@
 		C200000E2F70000100ABCDEF /* libLaunchNextContextMenuCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */; };
 		D300000D2F70000100ABCDEF /* libLaunchNextWallpaperCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = D30000012F70000100ABCDEF /* libLaunchNextWallpaperCore.a */; };
 		D300000E2F70000100ABCDEF /* libLaunchNextWallpaperCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = D30000012F70000100ABCDEF /* libLaunchNextWallpaperCore.a */; };
+		B10000222F70000100ABCDEF /* GridReorderPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000212F70000100ABCDEF /* GridReorderPlan.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -65,6 +66,7 @@
 		B10000012F70000100ABCDEF /* LaunchNextTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LaunchNextTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libLaunchNextContextMenuCore.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		D30000012F70000100ABCDEF /* libLaunchNextWallpaperCore.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libLaunchNextWallpaperCore.a; sourceTree = BUILT_PRODUCTS_DIR; };
+		B10000212F70000100ABCDEF /* GridReorderPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GridReorderPlan.swift; path = LaunchNext/GridReorderPlan.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -374,6 +376,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B10000222F70000100ABCDEF /* GridReorderPlan.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

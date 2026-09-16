@@ -45,6 +45,13 @@ struct FolderInfo: Identifiable, Equatable {
         return icon
     }
 
+    /// A cache-only lookup lets rebuilt grid layers display an existing preview
+    /// immediately without scheduling another background/main-queue round trip.
+    func cachedIcon(of side: CGFloat, scale: CGFloat) -> NSImage? {
+        let key = folderPreviewCacheKey(for: max(16, side), scale: max(1, scale))
+        return FolderPreviewCache.shared.image(forKey: key)
+    }
+
     private func renderFolderIcon(side: CGFloat, scale: CGFloat) -> NSImage {
         let pointSize = NSSize(width: side, height: side)
         let pixelSide = max(16, Int((side * scale).rounded()))

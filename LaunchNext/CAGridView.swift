@@ -21,6 +21,11 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     var containerLayer: CALayer!
     var pageContainerLayer: CALayer!
     var iconLayers: [[CALayer]] = []  // [page][item]
+    var usesLiquidGlassFolders = false {
+        didSet { if oldValue != usesLiquidGlassFolders { syncFolderGlass() } }
+    }
+    var folderGlassOverlay: FolderGlassOverlay?
+    var folderGlassAnimationDeadline: CFTimeInterval = 0
 
     // 网格配置
     var columns: Int = 7 { didSet { rebuildLayers() } }
@@ -44,11 +49,13 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     var pageSpacing: CGFloat = 0 { didSet { updateLayout() } }
 
     // Data source
+    var itemsRevision = 0
     var items: [LaunchpadItem] = [] {
         didSet {
+            itemsRevision &+= 1
             needsLayoutRefresh = true
             syncBatchSelectionWithItems()
-            rebuildLayers()
+            rebuildLayers(reusing: oldValue)
             if enableIconPreload {
                 preloadIcons()
             }
@@ -130,9 +137,12 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     var draggingIndex: Int?
     var draggingItem: LaunchpadItem?
     var draggingLayer: CALayer?
+    var dragLanding: DragLanding?
     var dragStartPoint: CGPoint = .zero
     var dragCurrentPoint: CGPoint = .zero
     var dropTargetIndex: Int?
+    var dragDropPreview: GridDropPreview = .none
+    var pendingDropPreview: GridDropPreview?
     var longPressTimer: Timer?
     let longPressDuration: TimeInterval = 0.5
     var pressedIndex: Int?
@@ -277,6 +287,8 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
             NotificationCenter.default.addObserver(self, selector: #selector(windowOcclusionChanged(_:)), name: NSWindow.didChangeOcclusionStateNotification, object: window)
             // launchpad 窗口通知在 setup() 中注册，这里不需要重复注册
         } else {
+            finishDragLanding()
+            resetFolderGlass()
             // The display link retains its target, so invalidate it before deinit.
             displayLink?.invalidate()
             displayLink = nil
@@ -310,6 +322,8 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
         }
         // print("🚀 [CAGrid #\(instanceId)] Launchpad window shown, hasMonitor=\(scrollEventMonitor != nil)")
 
+        syncFolderGlass()
+
         // 立即安装滚轮事件监听器（如果没有）
         if scrollEventMonitor == nil {
             // print("🔄 [CAGrid #\(instanceId)] Reinstalling scroll monitor on window show")
@@ -341,6 +355,8 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
         // 不再移除监听器 - 让它保持活跃，这样窗口重新显示时就能立即使用
         // removeScrollEventMonitor()
         wasWindowVisible = false
+        finishDragLanding()
+        resetFolderGlass()
     }
 
     @objc func appDidBecomeActive(_ notification: Notification) {
@@ -430,6 +446,14 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     }
 
     @objc func displayLinkFired(_ link: CADisplayLink) {
+        updateDragLanding(at: CACurrentMediaTime())
+        let glassAnimating = usesLiquidGlassFolders && CACurrentMediaTime() < folderGlassAnimationDeadline
+        let updatesScroll = isScrollAnimating
+        defer {
+            if glassAnimating && !updatesScroll {
+                syncFolderGlass()
+            }
+        }
         // 只在动画时才更新
         guard isScrollAnimating || isDraggingItem else {
             // 空闲时重置帧计数
@@ -488,11 +512,13 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
             }
         }
 
-        // 更新页面容器位置 - 使用最小开销的方式
+        // Commit CA paging and the native glass subtree together. A separate
+        // commit can present the two parts of a folder at different offsets.
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         CATransaction.setAnimationDuration(0)
         pageContainerLayer.transform = CATransform3DMakeTranslation(scrollOffset, 0, 0)
+        syncFolderGlass(geometryChanged: false)
         CATransaction.commit()
     }
 
@@ -580,6 +606,11 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     func navigateToPage(_ page: Int, animated: Bool = true) {
         let newPage = max(0, min(pageCount - 1, page))
         let pageChanged = newPage != currentPage
+        if pageChanged, isDraggingItem, !isBatchDragging {
+            // The previous page's highlight must not survive into a drop on
+            // another page without a new, visible preview there.
+            showDropPreview(.none)
+        }
         currentPage = newPage
 
         // 如果 bounds 还没准备好，只更新 currentPage，实际滚动交给 layout() 处理
@@ -605,6 +636,7 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             pageContainerLayer.transform = CATransform3DMakeTranslation(scrollOffset, 0, 0)
+            syncFolderGlass(geometryChanged: false)
             CATransaction.commit()
         }
 
@@ -709,6 +741,8 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     }
 
     func clearIconCache() {
+        // An explicit content refresh must not reuse pre-refresh layers.
+        finishDragLanding()
         iconCacheLock.lock()
         iconCache.removeAll()
         iconCacheLock.unlock()
@@ -738,6 +772,7 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
         CATransaction.setDisableActions(true)
         CATransaction.setAnimationDuration(0)
         pageContainerLayer.transform = CATransform3DMakeTranslation(scrollOffset, 0, 0)
+        syncFolderGlass(geometryChanged: false)
         CATransaction.commit()
     }
 
@@ -755,6 +790,7 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
         CATransaction.setDisableActions(true)
         CATransaction.setAnimationDuration(0)
         pageContainerLayer.transform = CATransform3DMakeTranslation(scrollOffset, 0, 0)
+        syncFolderGlass(geometryChanged: false)
         CATransaction.commit()
     }
 
