@@ -214,6 +214,20 @@ We welcome contributions! Please:
 - Test on multiple macOS versions
 - Maintain backward compatibility
 
+### Documentation
+
+- [Folder Liquid Glass](Documentation/FolderLiquidGlass.md) — design constraints
+  behind the Core Animation grid's glass folder icons, what is verified, and what
+  still needs main-app acceptance.
+- [Grid diagnostics](scripts/diagnostics/README.md) — manual probes for the grid
+  and glass overlay, with their commands and coverage limits.
+
+Unit tests live in `LaunchNextTests` and run with:
+
+```sh
+xcodebuild test -scheme LaunchNext -destination 'platform=macOS'
+```
+
 ## The Future of App Management
 
 As Apple moves away from customizable interfaces, LaunchNext represents a push toward user control and personalization. I still hope Apple brings Launchpad back.
