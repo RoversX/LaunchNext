@@ -163,6 +163,9 @@ private func makeAppKitContextMenu(
                 item.image = descriptor.role == .destructive
                     ? redMenuSymbolImage(named: symbolName)
                     : NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
+                if #available(macOS 27.0, *) {
+                    item.preferredImageVisibility = .visible
+                }
             }
             if descriptor.role == .destructive {
                 item.attributedTitle = NSAttributedString(
