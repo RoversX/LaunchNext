@@ -55,6 +55,26 @@ public enum WallpaperIdentityResolver {
     private static let aerialProvider = "com.apple.wallpaper.choice.aerials"
     private static let dynamicProvider = "com.apple.wallpaper.choice.dynamic"
 
+    /// Includes LastUse/LastSet as well as the current choice. The identity alone
+    /// intentionally omits these and cannot invalidate a paused video frame.
+    public static func desktopContextVersion(displayUUID: String, store: [String: Any]) -> String? {
+        guard let entry = entry(for: displayUUID, displays: store["Displays"] as? [String: Any],
+                                defaultEntry: store["SystemDefault"]),
+              entry["Desktop"] != nil || entry["Linked"] != nil else { return nil }
+        var context = entry
+        context.removeValue(forKey: "Idle")
+        func canonical(_ value: Any) -> Any {
+            if let dictionary = value as? [String: Any] { return dictionary.mapValues { canonical($0) } }
+            if let array = value as? [Any] { return array.map { canonical($0) } }
+            if let data = value as? Data { return data.base64EncodedString() }
+            if let date = value as? Date { return date.timeIntervalSince1970 }
+            return value
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: canonical(context), options: .sortedKeys)
+        else { return nil }
+        return digest(components: [data])
+    }
+
     public static func resolve(
         displayUUID: String,
         store: [String: Any],
@@ -263,8 +283,9 @@ public enum WallpaperRefreshAction: Sendable, Equatable {
 public enum WallpaperRefreshPolicy {
     public static func windowShown(
         kind: WallpaperKind?,
-        hasMatchingContent: Bool
+        hasMatchingContent: Bool,
+        hasSettledCapture: Bool = false
     ) -> WallpaperRefreshAction {
-        (kind == .staticImage && hasMatchingContent) ? .reuse : .capture
+        (hasMatchingContent && (kind == .staticImage || (kind != nil && hasSettledCapture))) ? .reuse : .capture
     }
 }

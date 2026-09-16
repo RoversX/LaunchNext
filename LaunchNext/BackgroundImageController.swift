@@ -42,6 +42,7 @@ final class BackgroundImageController: ObservableObject {
     enum RefreshReason {
         case windowShown
         case contextChanged
+        case contextChecked
         case settingsChanged
     }
 
@@ -68,8 +69,10 @@ final class BackgroundImageController: ObservableObject {
     private struct ResolvedWallpaper: Sendable {
         let exactIdentity: WallpaperIdentity?
         let verifiedStaticURL: URL?
+        let contextVersion: String?
 
-        nonisolated init(resolution: WallpaperIdentityResolution, verifiedStaticURL: URL?) {
+        nonisolated init(resolution: WallpaperIdentityResolution, verifiedStaticURL: URL?, contextVersion: String? = nil) {
+            self.contextVersion = contextVersion
             guard let identity = resolution.exactIdentity else {
                 exactIdentity = nil
                 self.verifiedStaticURL = nil
@@ -163,6 +166,31 @@ final class BackgroundImageController: ObservableObject {
     // turned off or the view disappears.
     private var lastDesktopFrameByDisplay: [CGDirectDisplayID: Content] = [:]
 
+    private struct CaptureContext: Equatable {
+        let identity: WallpaperIdentity
+        let version: String
+        let windowID: CGWindowID
+        let frame: CGRect
+        let scale: CGFloat
+    }
+
+    private struct CachedCapture {
+        let context: CaptureContext
+        let image: CGImage
+        let sampledAt: ContinuousClock.Instant
+        var settling: WallpaperSettlingState
+    }
+
+    private var cachedCaptures: [CGDirectDisplayID: CachedCapture] = [:]
+    private var contextMonitor: WallpaperContextMonitor?
+
+    private func desktopContextChanged(force: Bool) {
+        guard case let .desktop(displayID) = requestIdentity else { return }
+        let screen = NSScreen.screens.first { Self.displayID(for: $0) == displayID }
+        refresh(for: screen, enabled: backgroundIsEnabled, source: .desktopWallpaper,
+                customImagePath: "", reason: force ? .contextChanged : .contextChecked)
+    }
+
     func refresh(
         for screen: NSScreen?,
         enabled: Bool,
@@ -176,8 +204,24 @@ final class BackgroundImageController: ObservableObject {
             isWindowVisible = true
         case .contextChanged:
             desktopContextIsDirty = true
+            cachedCaptures.removeAll()
+            loadTask?.cancel()
+            loadGeneration += 1
         case .settingsChanged:
+            cachedCaptures.removeAll()
+        case .contextChecked:
             break
+        }
+
+        if #available(macOS 27, *), enabled, source == .desktopWallpaper {
+            if contextMonitor == nil {
+                contextMonitor = WallpaperContextMonitor { [weak self] force in
+                    self?.desktopContextChanged(force: force)
+                }
+            }
+        } else {
+            contextMonitor = nil
+            cachedCaptures.removeAll()
         }
 
         guard enabled else {
@@ -201,6 +245,7 @@ final class BackgroundImageController: ObservableObject {
         if !lastDesktopFrameByDisplay.isEmpty {
             let connected = Set(NSScreen.screens.compactMap { Self.displayID(for: $0) })
             lastDesktopFrameByDisplay = lastDesktopFrameByDisplay.filter { connected.contains($0.key) }
+            cachedCaptures = cachedCaptures.filter { connected.contains($0.key) }
         }
 
         let targetMaxDimension = max(
@@ -229,7 +274,7 @@ final class BackgroundImageController: ObservableObject {
                 // synchronously; the capture below replaces it when ready.
                 content = warmFrame
             }
-            guard isWindowVisible else { return }
+            guard isWindowVisible, contextMonitor?.isSuspended != true else { return }
             let desktopImageURL = NSWorkspace.shared.desktopImageURL(for: screen)
             refreshDesktop(
                 displayID: displayID,
@@ -264,6 +309,8 @@ final class BackgroundImageController: ObservableObject {
     }
 
     func clear() {
+        contextMonitor = nil
+        cachedCaptures.removeAll()
         loadTask?.cancel()
         loadTask = nil
         loadGeneration += 1
@@ -303,6 +350,7 @@ final class BackgroundImageController: ObservableObject {
     }
 
     private func clearContentAndRequest() {
+        cachedCaptures.removeAll()
         loadTask?.cancel()
         loadTask = nil
         loadGeneration += 1
@@ -423,15 +471,25 @@ final class BackgroundImageController: ObservableObject {
                   self.isWindowVisible else { return }
 
             let identity = resolution.exactIdentity
+            if case let .image(url) = identity?.source { self.contextMonitor?.watchSource(url) }
+            else { self.contextMonitor?.watchSource(nil) }
+            let captureContext = self.captureContext(for: displayID, resolution: resolution)
+            let cached = self.cachedCaptures[displayID]
+            let matchingCapture = captureContext != nil && cached?.context == captureContext
+            if !matchingCapture { self.cachedCaptures.removeValue(forKey: displayID) }
+            // Preflight does not capture or prompt. A revoked grant must not
+            // leave a live-capture record eligible for indefinite reuse.
+            let hasSettledCapture = matchingCapture && cached?.settling.isSettled == true
             let hasMatchingContent = identity != nil
                 && self.activeWallpaperIdentity == identity
                 && self.content != nil
-            let shouldForce = reason != .windowShown || self.desktopContextIsDirty
+            let shouldForce = reason == .settingsChanged || reason == .contextChanged || self.desktopContextIsDirty
             let action = shouldForce
                 ? WallpaperRefreshAction.capture
                 : WallpaperRefreshPolicy.windowShown(
                     kind: identity?.kind,
-                    hasMatchingContent: hasMatchingContent
+                    hasMatchingContent: hasMatchingContent,
+                    hasSettledCapture: hasSettledCapture
                 )
             if action == .reuse {
                 return
@@ -453,6 +511,13 @@ final class BackgroundImageController: ObservableObject {
                     image, identity: identity, displayID: displayID, generation: generation,
                     requiresStableIdentity: true
                 ) { return }
+            }
+
+            if #available(macOS 27, *), matchingCapture, let cached {
+                // Resume a cancelled confirmation after a quick hide/show;
+                // keeping the candidate does not claim that it is settled.
+                await self.settleDesktopCapture(cached, displayID: displayID, generation: generation)
+                return
             }
 
             // Bounded retry loop: attempt the live snapshot; when it is not
@@ -487,6 +552,12 @@ final class BackgroundImageController: ObservableObject {
                 }
 
                 guard !Task.isCancelled, generation == self.loadGeneration, self.isWindowVisible else { return }
+                if #available(macOS 27, *), let image, let captureContext {
+                    let candidate = CachedCapture(context: captureContext, image: image,
+                        sampledAt: .now, settling: WallpaperSettlingState())
+                    await self.settleDesktopCapture(candidate, displayID: displayID, generation: generation)
+                    return
+                }
                 if let image, await self.publishDesktopImage(
                     image, identity: identity, displayID: displayID, generation: generation
                 ) { return }
@@ -545,7 +616,7 @@ final class BackgroundImageController: ObservableObject {
 
     private func publishDesktopImage(
         _ image: CGImage, identity: WallpaperIdentity?, displayID: CGDirectDisplayID,
-        generation: Int, requiresStableIdentity: Bool = false
+        generation: Int, requiresStableIdentity: Bool = false, persist: Bool = true
     ) async -> Bool {
         guard !Task.isCancelled, generation == loadGeneration, isWindowVisible,
               let screen = NSScreen.screens.first(where: { Self.displayID(for: $0) == displayID }) else { return false }
@@ -561,13 +632,81 @@ final class BackgroundImageController: ObservableObject {
         content = published
         lastDesktopFrameByDisplay[displayID] = published
         desktopContextIsDirty = false
-        if let stableIdentity {
+        if persist, let stableIdentity {
             let token = Self.snapshotLifecycle.currentToken()
             await Self.snapshotWriter.persist(using: token, lifecycle: Self.snapshotLifecycle) {
                 Self.persistSnapshot(image, for: stableIdentity)
             }
         }
         return true
+    }
+
+    private func captureContext(for displayID: CGDirectDisplayID, resolution: ResolvedWallpaper) -> CaptureContext? {
+        guard #available(macOS 27, *), CGPreflightScreenCaptureAccess(),
+              let identity = resolution.exactIdentity,
+              WallpaperFrameStability.supportsReuse(for: identity),
+              let version = resolution.contextVersion,
+              let screen = NSScreen.screens.first(where: { Self.displayID(for: $0) == displayID }),
+              let windowID = Self.findDesktopWallpaperWindow(for: displayID, requireExactMatch: true) else { return nil }
+        return CaptureContext(identity: identity, version: version, windowID: windowID,
+                              frame: screen.frame, scale: screen.backingScaleFactor)
+    }
+
+    private func captureContextStillMatches(_ context: CaptureContext, displayID: CGDirectDisplayID,
+                                           generation: Int) async -> Bool {
+        guard !Task.isCancelled, generation == loadGeneration, isWindowVisible,
+              contextMonitor?.isSuspended != true,
+              let screen = NSScreen.screens.first(where: { Self.displayID(for: $0) == displayID }) else { return false }
+        let url = NSWorkspace.shared.desktopImageURL(for: screen)
+        let resolution = await Task.detached(priority: .utility) {
+            Self.resolveWallpaperIdentity(displayID: displayID, desktopImageURL: url)
+        }.value
+        return !Task.isCancelled && generation == loadGeneration && isWindowVisible
+            && captureContext(for: displayID, resolution: resolution) == context
+    }
+
+    @available(macOS 27, *)
+    private func settleDesktopCapture(_ initial: CachedCapture, displayID: CGDirectDisplayID,
+                                      generation: Int) async {
+        var candidate = initial
+        guard await captureContextStillMatches(candidate.context, displayID: displayID, generation: generation),
+              await publishDesktopImage(candidate.image, identity: candidate.context.identity,
+                displayID: displayID, generation: generation, requiresStableIdentity: true, persist: false) else { return }
+        rememberCapture(candidate, displayID: displayID, generation: generation)
+        if candidate.settling.isSettled { return }
+        for _ in 0..<WallpaperFrameStability.maximumConfirmations {
+            let deadline = candidate.sampledAt.advanced(by: .seconds(WallpaperFrameStability.confirmationInterval))
+            do { try await ContinuousClock().sleep(until: deadline) } catch { return }
+            guard await captureContextStillMatches(candidate.context, displayID: displayID, generation: generation) else { return }
+            let image: CGImage
+            do { image = try await WallpaperScreenCapture.capture(displayID: displayID) }
+            catch { return } // Keep the displayed frame unconfirmed; retry only on a later open/event.
+            let sampledAt = ContinuousClock.now
+            let previous = candidate.image
+            let matches = await Task.detached(priority: .utility) {
+                autoreleasepool { WallpaperFrameStability.matches(previous, image) }
+            }.value
+            guard await captureContextStillMatches(candidate.context, displayID: displayID, generation: generation) else { return }
+            var settling = candidate.settling
+            settling.observe(matchesPrevious: matches)
+            candidate = CachedCapture(context: candidate.context, image: image, sampledAt: sampledAt, settling: settling)
+            guard await publishDesktopImage(image, identity: candidate.context.identity, displayID: displayID,
+                generation: generation, requiresStableIdentity: true, persist: settling.isSettled) else { return }
+            rememberCapture(candidate, displayID: displayID, generation: generation)
+            if settling.isSettled { return }
+        }
+    }
+
+    private func rememberCapture(_ capture: CachedCapture, displayID: CGDirectDisplayID, generation: Int) {
+        // Publishing can await disk persistence. A hide, disable or context
+        // change during that await must not resurrect an invalidated record.
+        guard !Task.isCancelled, generation == loadGeneration, isWindowVisible, backgroundIsEnabled else { return }
+        if cachedCaptures[displayID] == nil, cachedCaptures.count >= 8, let oldest = cachedCaptures.min(by: {
+            $0.value.sampledAt < $1.value.sampledAt
+        })?.key {
+            cachedCaptures.removeValue(forKey: oldest)
+        }
+        cachedCaptures[displayID] = capture
     }
 
     static func canReadStaticWallpaper(for screen: NSScreen) async -> Bool {
@@ -641,7 +780,7 @@ final class BackgroundImageController: ObservableObject {
     }
 
     nonisolated private static func findDesktopWallpaperWindow(
-        for displayID: CGDirectDisplayID
+        for displayID: CGDirectDisplayID, requireExactMatch: Bool = false
     ) -> CGWindowID? {
         let displayBounds = CGDisplayBounds(displayID)
         guard displayBounds.width > 0, displayBounds.height > 0 else { return nil }
@@ -649,7 +788,7 @@ final class BackgroundImageController: ObservableObject {
         let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
             as? [[String: Any]] ?? []
 
-        return windows.compactMap { info -> (windowID: CGWindowID, score: CGFloat)? in
+        let candidates = windows.compactMap { info -> (windowID: CGWindowID, score: CGFloat)? in
             let owner = info[kCGWindowOwnerName as String] as? String ?? ""
             let name = info[kCGWindowName as String] as? String ?? ""
             let normalizedName = name.lowercased()
@@ -665,12 +804,17 @@ final class BackgroundImageController: ObservableObject {
             guard !intersection.isNull, intersection.width > 0, intersection.height > 0 else { return nil }
             let displayArea = displayBounds.width * displayBounds.height
             let score = (intersection.width * intersection.height) / displayArea
-            guard score >= 0.5 else { return nil }
+            if requireExactMatch {
+                guard score >= 0.95, bounds.width > 0, bounds.height > 0,
+                      intersection.width * intersection.height / (bounds.width * bounds.height) >= 0.95 else { return nil }
+            } else {
+                guard score >= 0.5 else { return nil }
+            }
 
             return (CGWindowID(windowIDNumber.uint32Value), score)
         }
-        .max(by: { $0.score < $1.score })?
-        .windowID
+        if requireExactMatch { return candidates.count == 1 ? candidates.first?.windowID : nil }
+        return candidates.max(by: { $0.score < $1.score })?.windowID
     }
 
     nonisolated private static func windowBounds(from value: Any?) -> CGRect? {
@@ -778,13 +922,14 @@ final class BackgroundImageController: ObservableObject {
             currentDesktopImageURL: desktopImageURL,
             allowUnverifiedDesktopImageURL: false
         )
+        let contextVersion = WallpaperIdentityResolver.desktopContextVersion(displayUUID: displayUUID, store: store)
         let staticURL: URL?
         if let identity = verified.exactIdentity, identity.kind == .staticImage,
            case let .image(url) = identity.source, url == desktopImageURL?.standardizedFileURL {
             staticURL = url
         } else { staticURL = nil }
         if #available(macOS 27, *) {
-            return ResolvedWallpaper(resolution: verified, verifiedStaticURL: staticURL)
+            return ResolvedWallpaper(resolution: verified, verifiedStaticURL: staticURL, contextVersion: contextVersion)
         }
         return ResolvedWallpaper(resolution: WallpaperIdentityResolver.resolve(
             displayUUID: displayUUID, store: store, currentDesktopImageURL: desktopImageURL
