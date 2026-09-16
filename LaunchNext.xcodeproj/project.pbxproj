@@ -8,11 +8,11 @@
 
 /* Begin PBXBuildFile section */
 		A1E2B5C02F4A8A1B00F12345 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = A1E2B5CB2F4A8A1B00F12345 /* Localizable.strings */; };
+		B10000222F70000100ABCDEF /* GridReorderPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000212F70000100ABCDEF /* GridReorderPlan.swift */; };
 		C200000D2F70000100ABCDEF /* libLaunchNextContextMenuCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */; };
 		C200000E2F70000100ABCDEF /* libLaunchNextContextMenuCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */; };
 		D300000D2F70000100ABCDEF /* libLaunchNextWallpaperCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = D30000012F70000100ABCDEF /* libLaunchNextWallpaperCore.a */; };
 		D300000E2F70000100ABCDEF /* libLaunchNextWallpaperCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = D30000012F70000100ABCDEF /* libLaunchNextWallpaperCore.a */; };
-		B10000222F70000100ABCDEF /* GridReorderPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000212F70000100ABCDEF /* GridReorderPlan.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -64,9 +64,9 @@
 		A1E2B5CC2F4A8A1B00F12345 /* pt-BR */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "pt-BR"; path = "pt-BR.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		A1E2B5CD2F4A8A1B00F12345 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		B10000012F70000100ABCDEF /* LaunchNextTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LaunchNextTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B10000212F70000100ABCDEF /* GridReorderPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GridReorderPlan.swift; path = LaunchNext/GridReorderPlan.swift; sourceTree = SOURCE_ROOT; };
 		C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libLaunchNextContextMenuCore.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		D30000012F70000100ABCDEF /* libLaunchNextWallpaperCore.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libLaunchNextWallpaperCore.a; sourceTree = BUILT_PRODUCTS_DIR; };
-		B10000212F70000100ABCDEF /* GridReorderPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GridReorderPlan.swift; path = LaunchNext/GridReorderPlan.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -138,6 +138,7 @@
 				D30000022F70000100ABCDEF /* LaunchNextWallpaperCore */,
 				B10000022F70000100ABCDEF /* LaunchNextTests */,
 				0D1B0B412E4CDE460083EEF9 /* Products */,
+				769FD005305ADEB4008E5EDE /* Recovered References */,
 			);
 			sourceTree = "<group>";
 		};
@@ -158,6 +159,14 @@
 				0F7A6B1C3E2D4F5A6B7C8D9E /* OpenMultitouchSupport.xcconfig */,
 			);
 			path = Config;
+			sourceTree = "<group>";
+		};
+		769FD005305ADEB4008E5EDE /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				B10000212F70000100ABCDEF /* GridReorderPlan.swift */,
+			);
+			name = "Recovered References";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -262,7 +271,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2600;
-				LastUpgradeCheck = 2620;
+				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					0D1B0B3F2E4CDE460083EEF9 = {
 						CreatedOnToolsVersion = 26.0;
@@ -583,7 +592,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 20260809;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = D4KD8XCCL6;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -625,7 +634,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 20260809;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = D4KD8XCCL6;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
