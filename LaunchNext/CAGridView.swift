@@ -277,6 +277,9 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
             NotificationCenter.default.addObserver(self, selector: #selector(windowOcclusionChanged(_:)), name: NSWindow.didChangeOcclusionStateNotification, object: window)
             // launchpad 窗口通知在 setup() 中注册，这里不需要重复注册
         } else {
+            // The display link retains its target, so invalidate it before deinit.
+            displayLink?.invalidate()
+            displayLink = nil
             // 视图从窗口移除时清理窗口相关的事件监听器
             // 注意：launchpad 窗口通知不在这里移除，因为它们在 setup() 中注册
             removeScrollEventMonitor()
