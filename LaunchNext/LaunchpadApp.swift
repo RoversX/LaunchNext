@@ -1761,7 +1761,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
             NSApp.terminate(nil)
             return true
         }
-        if window?.isVisible == true {
+        if isAnimatingWindow {
+            // Dock activation can overlap auto-hide. isVisible remains true
+            // until orderOut, so treating this as a toggle would queue another
+            // hide. Queue a show instead; during fade-in it simply coalesces
+            // with the current show and cancels any pending hide.
+            showWindow()
+        } else if window?.isVisible == true {
             hideWindow()
         } else {
             showWindow()
