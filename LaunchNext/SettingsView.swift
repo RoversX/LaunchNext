@@ -85,6 +85,7 @@ struct SettingsView: View {
     @State private var showFolderQuickLaunchInfoPopover = false
     @State private var backgroundImageSourceSelection: AppStore.BackgroundImageSource
     @State private var hoveredBackgroundImageSource: AppStore.BackgroundImageSource?
+    @State private var requestingWallpaperAccess = false
     @State private var copiedCLICommand: String? = nil
     @State private var cliCommandActionMessage: String? = nil
     @State private var layoutModePreviewScope: LayoutModePreviewScope = .fullscreen
@@ -4933,7 +4934,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
             if appStore.backgroundImageEnabled {
                 HStack {
-                    Text(appStore.localized(.backgroundImageSourceTitle))
+                    Text(appStore.localized(.backgroundImageSourceTitleCompact))
+                        .help(appStore.localized(.backgroundImageSourceTitle))
                     Spacer()
                     HStack(spacing: 8) {
                         ForEach(AppStore.BackgroundImageSource.allCases) { source in
@@ -4959,6 +4961,12 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         }
                         .buttonStyle(.bordered)
                     }
+                } else if appStore.backgroundImageSource == .desktopPreview {
+                    Text(appStore.localized(.wallpaperPreviewHint))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if #available(macOS 27, *) {
+                    WallpaperCapturePermissionView(appStore: appStore)
                 }
             }
 
@@ -5055,18 +5063,20 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     private func backgroundImageSourceButton(_ source: AppStore.BackgroundImageSource) -> some View {
         let isSelected = backgroundImageSourceSelection == source
         let isHovered = hoveredBackgroundImageSource == source
-        let symbolName = source == .desktopWallpaper ? "desktopcomputer" : "photo"
+        let symbolName = source == .customImage ? "photo" : "desktopcomputer"
         let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
 
         return Button {
-            guard backgroundImageSourceSelection != source else { return }
             backgroundImageSourceSelection = source
+            if source == .desktopWallpaper {
+                Task { await requestWallpaperAccessIfNeeded() }
+            }
         } label: {
             HStack(spacing: 7) {
                 Image(systemName: symbolName)
                     .font(.system(size: 13, weight: .semibold))
                     .frame(width: 16)
-                Text(appStore.localized(source.localizationKey))
+                Text(appStore.localized(source == .customImage ? .backgroundImageSourceCustomImageCompact : source.localizationKey))
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
@@ -5100,8 +5110,24 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         }
         .animation(.easeOut(duration: 0.12), value: isSelected)
         .animation(.easeOut(duration: 0.12), value: isHovered)
+        .help(appStore.localized(source == .desktopPreview ? .wallpaperPreviewHint : source.localizationKey))
         .accessibilityLabel(appStore.localized(source.localizationKey))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    @MainActor
+    private func requestWallpaperAccessIfNeeded() async {
+        guard #available(macOS 27, *), !requestingWallpaperAccess,
+              let screen = NSApp.keyWindow?.screen ?? NSScreen.main else { return }
+        requestingWallpaperAccess = true
+        defer { requestingWallpaperAccess = false }
+        let readable = await BackgroundImageController.canReadStaticWallpaper(for: screen)
+        guard !Task.isCancelled, appStore.backgroundImageEnabled,
+              backgroundImageSourceSelection == .desktopWallpaper, !readable else { return }
+        let access = WallpaperCaptureAccess.shared
+        access.refresh()
+        guard !access.isGranted else { return }
+        if access.hasRequested { access.openSettings() } else { access.request() }
     }
 
     private func handleBackgroundImageSourceSelection(_ source: AppStore.BackgroundImageSource) {

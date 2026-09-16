@@ -58,7 +58,8 @@ public enum WallpaperIdentityResolver {
     public static func resolve(
         displayUUID: String,
         store: [String: Any],
-        currentDesktopImageURL: URL? = nil
+        currentDesktopImageURL: URL? = nil,
+        allowUnverifiedDesktopImageURL: Bool = true
     ) -> WallpaperIdentityResolution {
         let rootEntry = entry(
             for: displayUUID,
@@ -82,6 +83,9 @@ public enum WallpaperIdentityResolver {
                configuredURL.standardizedFileURL == normalizedURL {
                 return .exact(identity)
             }
+            // Recent macOS versions can return DefaultDesktop.heic even when
+            // another wallpaper is selected. A URL alone is not proof of identity.
+            guard allowUnverifiedDesktopImageURL else { return .ambiguous }
             return .exact(identityForDesktopImageURL(normalizedURL, displayUUID: displayUUID))
         }
 
@@ -96,7 +100,7 @@ public enum WallpaperIdentityResolver {
                 return .exact(identity)
             }
 
-            if uniqueCandidates.isEmpty {
+            if uniqueCandidates.isEmpty && allowUnverifiedDesktopImageURL {
                 return .exact(identityForDesktopImageURL(normalizedURL, displayUUID: displayUUID))
             }
         }
@@ -174,12 +178,13 @@ public enum WallpaperIdentityResolver {
         configuration: [String: Any]
     ) -> WallpaperSource {
         switch provider {
-        case imageProvider:
+        case imageProvider, dynamicProvider:
             guard let urlInfo = configuration["url"] as? [String: Any],
                   let rawURL = urlInfo["relative"] as? String else {
                 return .unavailable
             }
-            if let url = URL(string: rawURL), url.isFileURL {
+            if let url = URL(string: rawURL), url.scheme != nil {
+                guard url.isFileURL else { return .unavailable }
                 return .image(url.standardizedFileURL)
             }
             return .image(URL(fileURLWithPath: rawURL).standardizedFileURL)

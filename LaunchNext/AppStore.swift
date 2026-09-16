@@ -209,6 +209,7 @@ final class AppStore: ObservableObject {
     }
 
     enum BackgroundImageSource: String, CaseIterable, Identifiable {
+        case desktopPreview
         case desktopWallpaper
         case customImage
 
@@ -216,6 +217,7 @@ final class AppStore: ObservableObject {
 
         var localizationKey: LocalizationKey {
             switch self {
+            case .desktopPreview: return .backgroundImageSourceDesktopPreview
             case .desktopWallpaper: return .backgroundImageSourceDesktopWallpaper
             case .customImage: return .backgroundImageSourceCustomImage
             }
@@ -729,7 +731,7 @@ final class AppStore: ObservableObject {
     @Published var backgroundImageSource: BackgroundImageSource = {
         guard let raw = UserDefaults.standard.string(forKey: AppStore.backgroundImageSourceKey),
               let source = BackgroundImageSource(rawValue: raw) else {
-            return .desktopWallpaper
+            return .desktopPreview
         }
         return source
     }() {
@@ -810,7 +812,7 @@ final class AppStore: ObservableObject {
         defaults.set(AppearancePreference.system.rawValue, forKey: "appearancePreference")
         defaults.set(BackgroundStyle.glass.rawValue, forKey: Self.backgroundStyleKey)
         defaults.set(false, forKey: Self.backgroundImageEnabledKey)
-        defaults.set(BackgroundImageSource.desktopWallpaper.rawValue, forKey: Self.backgroundImageSourceKey)
+        defaults.set(BackgroundImageSource.desktopPreview.rawValue, forKey: Self.backgroundImageSourceKey)
         defaults.set("", forKey: Self.customBackgroundImagePathKey)
         defaults.set(false, forKey: Self.backgroundMaskEnabledKey)
         Self.persistBackgroundMaskColor(Self.defaultBackgroundMaskColor, forKey: Self.backgroundMaskLightKey)
@@ -881,7 +883,7 @@ final class AppStore: ObservableObject {
            let source = BackgroundImageSource(rawValue: raw) {
             backgroundImageSource = source
         } else {
-            backgroundImageSource = .desktopWallpaper
+            backgroundImageSource = .desktopPreview
         }
         customBackgroundImagePath = defaults.string(forKey: Self.customBackgroundImagePathKey) ?? ""
         backgroundMaskEnabled = Self.loadBackgroundMaskEnabled()

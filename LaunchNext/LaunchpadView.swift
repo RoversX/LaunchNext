@@ -326,6 +326,15 @@ struct LaunchpadView: View {
          .onChange(of: appStore.backgroundImageEnabled) { _, _ in
              refreshBackgroundImage(reason: .settingsChanged)
          }
+         .onReceive(NotificationCenter.default.publisher(for: .wallpaperCapturePermissionChanged)) { _ in
+             refreshBackgroundImage(reason: .settingsChanged)
+         }
+         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+             if #available(macOS 27, *), appStore.backgroundImageEnabled,
+                appStore.backgroundImageSource == .desktopWallpaper {
+                 WallpaperCaptureAccess.shared.refresh()
+             }
+         }
          .onChange(of: appStore.backgroundImageSource) { _, _ in
              refreshBackgroundImage(reason: .settingsChanged)
          }

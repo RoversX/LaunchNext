@@ -3,6 +3,26 @@ import XCTest
 import LaunchNextWallpaperCore
 
 final class WallpaperIdentityTests: XCTestCase {
+    func testDynamicDescriptorRetainsAnimatedIdentityAndLocalPreviewSource() throws {
+        let url = URL(fileURLWithPath: "/System/Library/Desktop Pictures/Chroma Red.madesktop")
+        let store: [String: Any] = ["Displays": [displayA: entry(
+            provider: "com.apple.wallpaper.choice.dynamic", configuration: imageConfiguration(url))]]
+        let identity = try exactIdentity(WallpaperIdentityResolver.resolve(
+            displayUUID: displayA, store: store,
+            currentDesktopImageURL: URL(fileURLWithPath: "/System/Library/Desktop Pictures/DefaultDesktop.heic"),
+            allowUnverifiedDesktopImageURL: false))
+        XCTAssertEqual(identity.kind, .animated)
+        XCTAssertEqual(identity.source, .image(url))
+    }
+
+    func testDynamicPreviewRejectsRemoteSource() throws {
+        let store: [String: Any] = ["Displays": [displayA: entry(
+            provider: "com.apple.wallpaper.choice.dynamic",
+            configuration: ["url": ["relative": "https://example.com/wallpaper.heic"]])]]
+        let identity = try exactIdentity(WallpaperIdentityResolver.resolve(displayUUID: displayA, store: store))
+        XCTAssertEqual(identity.source, .unavailable)
+    }
+
     private let displayA = "DISPLAY-A"
     private let displayB = "DISPLAY-B"
 
@@ -223,6 +243,51 @@ final class WallpaperIdentityTests: XCTestCase {
             WallpaperRefreshPolicy.windowShown(kind: nil, hasMatchingContent: true),
             .capture
         )
+    }
+
+    func testStrictResolutionDoesNotTrustDefaultImageWithoutConfiguration() {
+        XCTAssertEqual(WallpaperIdentityResolver.resolve(
+            displayUUID: displayA, store: [:],
+            currentDesktopImageURL: URL(fileURLWithPath: "/System/Library/Desktop Pictures/DefaultDesktop.heic"),
+            allowUnverifiedDesktopImageURL: false
+        ), .unavailable)
+    }
+
+    func testStrictResolutionRejectsConflictingStaticSource() {
+        let store: [String: Any] = ["Displays": [displayA: entry(
+            provider: imageProvider, configuration: imageConfiguration(URL(fileURLWithPath: "/Pictures/Actual.jpg"))
+        )]]
+        XCTAssertEqual(WallpaperIdentityResolver.resolve(
+            displayUUID: displayA, store: store,
+            currentDesktopImageURL: URL(fileURLWithPath: "/Pictures/Unrelated.heic"),
+            allowUnverifiedDesktopImageURL: false
+        ), .ambiguous)
+    }
+
+    func testStrictResolutionAcceptsMatchingStaticSource() throws {
+        let url = URL(fileURLWithPath: "/Pictures/Actual.jpg")
+        let store: [String: Any] = ["Displays": [displayA: entry(
+            provider: imageProvider, configuration: imageConfiguration(url)
+        )]]
+        let identity = try exactIdentity(WallpaperIdentityResolver.resolve(
+            displayUUID: displayA, store: store, currentDesktopImageURL: url,
+            allowUnverifiedDesktopImageURL: false
+        ))
+        XCTAssertEqual(identity.source, .image(url))
+        XCTAssertEqual(identity.kind, .staticImage)
+    }
+
+    func testStrictResolutionKeepsVideoIdentityDespiteWorkspaceDefaultImage() throws {
+        let store: [String: Any] = ["Displays": [displayA: entry(
+            provider: aerialProvider, configuration: ["assetID": "CURRENT-VIDEO"]
+        )]]
+        let identity = try exactIdentity(WallpaperIdentityResolver.resolve(
+            displayUUID: displayA, store: store,
+            currentDesktopImageURL: URL(fileURLWithPath: "/Pictures/DefaultDesktop.heic"),
+            allowUnverifiedDesktopImageURL: false
+        ))
+        XCTAssertEqual(identity.kind, .animated)
+        XCTAssertEqual(identity.source, .aerial(assetID: "CURRENT-VIDEO"))
     }
 
     func testSnapshotLifecycleRejectsQueuedWriteAfterDisable() {
