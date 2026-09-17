@@ -4923,9 +4923,12 @@ final class AppStore: ObservableObject {
             if case .folder(let f) = $0 { return f.id == folderID }
             return false
         }) {
-            newItems[folderItemIndex] = .empty(UUID().uuidString)
-            var insertIndex = folderItemIndex
-            for app in folderApps {
+            // Replace the folder itself before inserting the remaining members.
+            // Leaving an empty slot here makes cascadeInsert count an extra cell
+            // and spill a real icon even when the restored apps fit this page.
+            newItems[folderItemIndex] = folderApps.first.map { .app($0) } ?? .empty(UUID().uuidString)
+            var insertIndex = folderItemIndex + 1
+            for app in folderApps.dropFirst() {
                 newItems = cascadeInsert(into: newItems, item: .app(app), at: insertIndex)
                 insertIndex += 1
             }
