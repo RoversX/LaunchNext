@@ -62,7 +62,7 @@ final class BackgroundImageController: ObservableObject {
 
     private enum RequestIdentity: Equatable {
         case desktop(displayID: CGDirectDisplayID)
-        case preview(displayID: CGDirectDisplayID)
+        case preview(displayID: CGDirectDisplayID, isDark: Bool, isPortrait: Bool)
         case custom(path: String)
     }
 
@@ -258,13 +258,17 @@ final class BackgroundImageController: ObservableObject {
 
         switch source {
         case .desktopPreview:
-            let request = RequestIdentity.preview(displayID: displayID)
+            // LaunchNext may force its own appearance; wallpaper follows the system.
+            let isDark = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+            let isPortrait = screen.frame.height > screen.frame.width
+            let request = RequestIdentity.preview(displayID: displayID, isDark: isDark, isPortrait: isPortrait)
             let changed = requestIdentity != request
             prepare(for: request)
             if changed { content = nil }
             guard isWindowVisible else { return }
             refreshPreview(displayID: displayID, desktopImageURL: NSWorkspace.shared.desktopImageURL(for: screen),
-                           layout: StaticLayout(screen: screen), reason: reason, targetMaxDimension: targetMaxDimension)
+                           layout: StaticLayout(screen: screen), isDark: isDark, isPortrait: isPortrait,
+                           reason: reason, targetMaxDimension: targetMaxDimension)
         case .desktopWallpaper:
             let identity = RequestIdentity.desktop(displayID: displayID)
             let identityChanged = requestIdentity != identity
@@ -388,7 +392,7 @@ final class BackgroundImageController: ObservableObject {
     /// File-only preview. Never captures windows or reads/writes the live snapshot cache.
     private func refreshPreview(
         displayID: CGDirectDisplayID, desktopImageURL: URL?, layout: StaticLayout?,
-        reason: RefreshReason, targetMaxDimension: Int
+        isDark: Bool, isPortrait: Bool, reason: RefreshReason, targetMaxDimension: Int
     ) {
         loadTask?.cancel()
         loadGeneration += 1
@@ -397,7 +401,8 @@ final class BackgroundImageController: ObservableObject {
             guard let self else { return }
             defer { if generation == self.loadGeneration { self.loadTask = nil } }
             let identity = await Task.detached(priority: .userInitiated) {
-                Self.resolveWallpaperIdentity(displayID: displayID, desktopImageURL: desktopImageURL).exactIdentity
+                Self.resolveWallpaperIdentity(displayID: displayID, desktopImageURL: desktopImageURL,
+                                              forPreview: true).exactIdentity
             }.value
             guard !Task.isCancelled, generation == self.loadGeneration, self.isWindowVisible else { return }
             guard let identity else {
@@ -414,9 +419,11 @@ final class BackgroundImageController: ObservableObject {
                     if let layout, let rendered = layout.render(url: previewURL) { return rendered }
                     return Self.decodeCustomImage(at: previewURL, targetMaxDimension: targetMaxDimension)
                 case let .aerial(assetID):
-                    guard !assetID.contains("/"), !assetID.contains("..") else { return nil }
-                    let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
-                        "Library/Application Support/com.apple.wallpaper/aerials/videos/\(assetID).mov")
+                    guard let url = WallpaperAerialPreview.localResource(
+                        assetID: assetID, isDark: isDark, isPortrait: isPortrait) else { return nil }
+                    if url.pathExtension.lowercased() != "mov" {
+                        return Self.decodeCustomImage(at: url, targetMaxDimension: targetMaxDimension)
+                    }
                     guard let frame = await Self.firstVideoFrame(at: url, targetMaxDimension: 1000) else { return nil }
                     return Self.downsampleCapturedImageIfNeeded(frame)
                 case .unavailable:
@@ -427,7 +434,8 @@ final class BackgroundImageController: ObservableObject {
                   let screen = NSScreen.screens.first(where: { Self.displayID(for: $0) == displayID }) else { return }
             let currentURL = NSWorkspace.shared.desktopImageURL(for: screen)
             let current = await Task.detached(priority: .utility) {
-                Self.resolveWallpaperIdentity(displayID: displayID, desktopImageURL: currentURL).exactIdentity
+                Self.resolveWallpaperIdentity(displayID: displayID, desktopImageURL: currentURL,
+                                              forPreview: true).exactIdentity
             }.value
             guard !Task.isCancelled, generation == self.loadGeneration, self.isWindowVisible else { return }
             guard current == identity else {
@@ -896,7 +904,8 @@ final class BackgroundImageController: ObservableObject {
 
     nonisolated private static func resolveWallpaperIdentity(
         displayID: CGDirectDisplayID,
-        desktopImageURL: URL?
+        desktopImageURL: URL?,
+        forPreview: Bool = false
     ) -> ResolvedWallpaper {
         guard let uuidRef = CGDisplayCreateUUIDFromDisplayID(displayID)?.takeRetainedValue() else {
             return ResolvedWallpaper(resolution: .unavailable, verifiedStaticURL: nil)
@@ -915,6 +924,12 @@ final class BackgroundImageController: ObservableObject {
             store = root
         } else {
             store = [:]
+        }
+        if forPreview {
+            let preview = WallpaperIdentityResolver.resolvePreview(
+                displayUUID: displayUUID, store: store, currentDesktopImageURL: desktopImageURL)
+            return ResolvedWallpaper(resolution: preview.map { .exact($0) } ?? .unavailable,
+                                     verifiedStaticURL: nil)
         }
         let verified = WallpaperIdentityResolver.resolve(
             displayUUID: displayUUID,

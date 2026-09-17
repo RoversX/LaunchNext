@@ -3,6 +3,33 @@ import XCTest
 import LaunchNextWallpaperCore
 
 final class WallpaperIdentityTests: XCTestCase {
+    func testPreviewUsesConfiguredImageDespiteWorkspaceDefaultWithoutWeakeningExactIdentity() throws {
+        let configured = URL(fileURLWithPath: "/Pictures/Selected.jpg")
+        let reported = URL(fileURLWithPath: "/System/Library/CoreServices/DefaultDesktop.heic")
+        let store: [String: Any] = ["Displays": [displayA: entry(
+            provider: imageProvider, configuration: imageConfiguration(configured))]]
+        XCTAssertEqual(WallpaperIdentityResolver.resolvePreview(
+            displayUUID: displayA, store: store, currentDesktopImageURL: reported)?.source, .image(configured))
+        XCTAssertEqual(WallpaperIdentityResolver.resolve(
+            displayUUID: displayA, store: store, currentDesktopImageURL: reported,
+            allowUnverifiedDesktopImageURL: false), .ambiguous)
+    }
+
+    func testPreviewDoesNotGuessBetweenMultipleChoices() {
+        let store: [String: Any] = ["SystemDefault": entry(choices: [
+            choice(provider: aerialProvider, configuration: ["assetID": "ONE"]),
+            choice(provider: aerialProvider, configuration: ["assetID": "TWO"])
+        ])]
+        XCTAssertNil(WallpaperIdentityResolver.resolvePreview(displayUUID: displayA, store: store,
+            currentDesktopImageURL: URL(fileURLWithPath: "/System/Library/CoreServices/DefaultDesktop.heic")))
+    }
+
+    func testPreviewRetainsWorkspaceFallbackWhenStoreIsUnavailable() {
+        let url = URL(fileURLWithPath: "/Pictures/Selected.jpg")
+        XCTAssertEqual(WallpaperIdentityResolver.resolvePreview(
+            displayUUID: displayA, store: [:], currentDesktopImageURL: url)?.source, .image(url))
+    }
+
     func testDynamicDescriptorRetainsAnimatedIdentityAndLocalPreviewSource() throws {
         let url = URL(fileURLWithPath: "/System/Library/Desktop Pictures/Chroma Red.madesktop")
         let store: [String: Any] = ["Displays": [displayA: entry(

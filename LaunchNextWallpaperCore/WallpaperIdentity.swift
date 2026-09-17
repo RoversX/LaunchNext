@@ -55,6 +55,25 @@ public enum WallpaperIdentityResolver {
     private static let aerialProvider = "com.apple.wallpaper.choice.aerials"
     private static let dynamicProvider = "com.apple.wallpaper.choice.dynamic"
 
+    /// Approximate, file-only preview of the configured wallpaper. This is not
+    /// evidence of the frame currently on screen and must not key an exact capture.
+    public static func resolvePreview(
+        displayUUID: String, store: [String: Any], currentDesktopImageURL: URL? = nil
+    ) -> WallpaperIdentity? {
+        let configured = resolve(displayUUID: displayUUID, store: store,
+                                 allowUnverifiedDesktopImageURL: false)
+        switch configured {
+        case .exact(let identity): return identity
+        case .ambiguous:
+            return resolve(displayUUID: displayUUID, store: store,
+                           currentDesktopImageURL: currentDesktopImageURL,
+                           allowUnverifiedDesktopImageURL: false).exactIdentity
+        case .unavailable:
+            return resolve(displayUUID: displayUUID, store: store,
+                           currentDesktopImageURL: currentDesktopImageURL).exactIdentity
+        }
+    }
+
     /// Includes LastUse/LastSet as well as the current choice. The identity alone
     /// intentionally omits these and cannot invalidate a paused video frame.
     public static func desktopContextVersion(displayUUID: String, store: [String: Any]) -> String? {
