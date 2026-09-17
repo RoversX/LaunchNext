@@ -638,18 +638,12 @@ struct LaunchpadView: View {
             .opacity(appStore.shouldShowOnboarding ? 1 : postOnboardingGridOpacity)
             .scaleEffect(appStore.shouldShowOnboarding ? 1 : postOnboardingGridScale)
 
-            // Merged PageIndicator - add tap to jump to page
+            // Shared by both renderers; hover material stays local to this row.
             if !appStore.shouldShowOnboarding && pages.count > 1 {
-                HStack(spacing: 8) {
-                    ForEach(0..<pages.count, id: \.self) { index in
-                        Circle()
-                            .fill(appStore.currentPage == index ? Color.gray : Color.gray.opacity(0.3))
-                            .frame(width: 8, height: 8)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                navigateToPage(index)
-                            }
-                    }
+                LaunchpadPageIndicator(pageCount: pages.count,
+                                      currentPage: appStore.currentPage,
+                                      isActive: !isFolderOpen && isWindowVisible) { index in
+                    navigateToPage(index)
                 }
                 .padding(.top, CGFloat(indicatorTopPadding))
                 .padding(.bottom, CGFloat(indicatorOffset))
