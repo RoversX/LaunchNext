@@ -115,6 +115,37 @@ final class GlassProbe: NSObject, NSApplicationDelegate {
                         CATransaction.commit()
                         try await Task.sleep(for: .seconds(1))
                     }
+                    if args.contains("--hover-scale") || args.contains("--hover-return") {
+                        let folder = folders[0]
+                        for scale: CGFloat in [1.02, 1.06, 1.1] {
+                            CATransaction.begin()
+                            CATransaction.setDisableActions(true)
+                            folder.sublayers![0].transform = CATransform3DMakeScale(scale, scale, 1)
+                            folder.sublayers![1].transform = CATransform3DMakeScale(scale, scale, 1)
+                            sync()
+                            CATransaction.commit()
+                            try await Task.sleep(for: .milliseconds(17))
+                        }
+                        if args.contains("--hover-return") {
+                            for scale: CGFloat in [1.06, 1.02, 1] {
+                                CATransaction.begin()
+                                CATransaction.setDisableActions(true)
+                                folder.sublayers![0].transform = CATransform3DMakeScale(scale, scale, 1)
+                                folder.sublayers![1].transform = CATransform3DMakeScale(scale, scale, 1)
+                                sync()
+                                CATransaction.commit()
+                                try await Task.sleep(for: .milliseconds(17))
+                            }
+                        }
+                        let expected = folder.sublayers![0].convert(folder.sublayers![0].bounds, to: canvas.layer!)
+                        precondition(nativeViews(overlay!).contains {
+                            let actual = nativeRect($0)
+                            return abs(actual.minX - expected.minX) < 0.1
+                                && abs(actual.minY - expected.minY) < 0.1
+                                && abs(actual.width - expected.width) < 0.1
+                                && abs(actual.height - expected.height) < 0.1
+                        }, "hover glass must retain the expected geometry after native layout")
+                    }
                     if args.contains("--drag") || args.contains("--drop") || args.contains("--drag-start") {
                         CATransaction.begin()
                         CATransaction.setDisableActions(!args.contains("--legacy-start"))
@@ -279,6 +310,15 @@ final class GlassProbe: NSObject, NSApplicationDelegate {
         preconditionFailure("missing native effect group")
     }
 
+    func effectGroup(for view: NSView) -> NSGlassEffectContainerView {
+        var ancestor = view.superview
+        while let current = ancestor {
+            if let group = current as? NSGlassEffectContainerView { return group }
+            ancestor = current.superview
+        }
+        preconditionFailure("missing native effect group")
+    }
+
     func runChecks() {
         enableGlass()
         precondition(overlay!.activeGlassCount == count * 2, "nearby pages should stay prepared")
@@ -374,6 +414,12 @@ final class GlassProbe: NSObject, NSApplicationDelegate {
         // must stay outside the small glass view's clipping bounds at full size.
         let savedPageTransform = page.transform
         page.transform = CATransform3DIdentity
+        let stationary = folders[1]
+        overlay!.sync(containers: [stationary], root: canvas.layer!, page: page, viewport: canvas.bounds)
+        let stationaryGlass = nativeViews(overlay!).first!
+        let stationaryGroup = effectGroup(for: stationaryGlass)
+        let stationaryFrame = stationaryGlass.frame
+        precondition(overlay!.subviews.filter { $0 is NSGlassEffectContainerView }.count == 2)
         let creation = CALayer()
         creation.frame = CGRect(x: 200, y: 200, width: 96, height: 96)
         page.addSublayer(creation)
@@ -387,8 +433,12 @@ final class GlassProbe: NSObject, NSApplicationDelegate {
         targetIcon.frame = creation.bounds
         targetIcon.contents = loadedImage
         creation.addSublayer(targetIcon)
-        overlay!.sync(containers: [creation], root: canvas.layer!, page: page, viewport: canvas.bounds)
-        let creationGlass = nativeViews(overlay!).first!
+        let creationContainers = [stationary, creation]
+        overlay!.sync(containers: creationContainers, root: canvas.layer!, page: page, viewport: canvas.bounds)
+        let creationGlass = nativeViews(overlay!).first { $0 !== stationaryGlass }!
+        let creationGroup = effectGroup(for: creationGlass)
+        precondition(creationGroup !== stationaryGroup, "temporary glass must not join ordinary folders' group")
+        precondition(overlay!.subviews.filter { $0 is NSGlassEffectContainerView }.count == 3)
         let previewHost = overlay!.subviews.first { view in
             view.layer?.sublayers?.contains { ($0.contents as AnyObject?) === (loadedImage as AnyObject?) } == true
         }!
@@ -399,19 +449,45 @@ final class GlassProbe: NSObject, NSApplicationDelegate {
         precondition(fixedIconFrame.size == targetIcon.bounds.size)
         precondition(creationGlass.frame.width < fixedIconFrame.width / 2)
         creationPlate.transform = CATransform3DIdentity
-        overlay!.sync(containers: [creation], root: canvas.layer!, page: page, viewport: canvas.bounds)
+        overlay!.sync(containers: creationContainers, root: canvas.layer!, page: page, viewport: canvas.bounds)
         precondition(creationPreview.frame == fixedIconFrame, "backplate growth must not scale the app")
-        precondition(nativeViews(overlay!).first === creationGlass, "growth must reuse one native view")
+        precondition(nativeViews(overlay!).contains { $0 === creationGlass }, "growth must reuse one native view")
+        precondition(nativeViews(overlay!).contains { $0 === stationaryGlass })
+        precondition(effectGroup(for: stationaryGlass) === stationaryGroup && stationaryGlass.frame == stationaryFrame,
+                     "creation growth must preserve the ordinary folder's group and geometry")
         page.transform = CATransform3DMakeTranslation(-80, 0, 0)
-        overlay!.sync(containers: [creation], root: canvas.layer!, page: page,
+        overlay!.sync(containers: creationContainers, root: canvas.layer!, page: page,
                       viewport: canvas.bounds, geometryChanged: false)
         precondition(previewHost.layer!.sublayerTransform.m41 == -80,
                      "pure paging must carry the creation icon along with its glass")
         precondition(creationPreview.frame == fixedIconFrame)
+        precondition(nativeRect(creationGlass) == creationPlate.convert(creationPlate.bounds, to: canvas.layer!),
+                     "isolated creation glass must follow pure paging")
+        // app-to-app merge replaces the page highlight with a root-attached
+        // creation preview. That preview belongs to dragEffects, so the now
+        // empty page group must go away before the landing completes.
+        let rootCreation = CALayer()
+        rootCreation.frame = creation.frame
+        let rootPlate = CALayer(); rootPlate.name = "creationGlass"; rootPlate.frame = creationPlate.frame
+        let rootIcon = CALayer(); rootIcon.name = "icon"; rootIcon.frame = targetIcon.frame
+        rootIcon.contents = loadedImage
+        rootCreation.addSublayer(rootPlate); rootCreation.addSublayer(rootIcon)
+        canvas.layer!.addSublayer(rootCreation)
+        overlay!.sync(containers: [stationary, rootCreation], root: canvas.layer!, page: page, viewport: canvas.bounds)
+        precondition(creationGroup.superview == nil, "root merge must not retain an empty page effect group")
+        precondition(overlay!.activeGlassCount == 2, "root merge glass must remain visible after page-group removal")
+        precondition(rootPlate.isHidden && rootIcon.isHidden)
+        let mergeGlass = nativeViews(overlay!).first { $0 !== stationaryGlass }!
+        precondition(nativeRect(mergeGlass) == rootPlate.convert(rootPlate.bounds, to: canvas.layer!))
+        precondition(overlay!.subviews.filter { $0 is NSGlassEffectContainerView }.count == 2)
+        rootCreation.removeFromSuperlayer()
         creationPlate.removeFromSuperlayer()
-        overlay!.sync(containers: [creation], root: canvas.layer!, page: page, viewport: canvas.bounds)
+        overlay!.sync(containers: creationContainers, root: canvas.layer!, page: page, viewport: canvas.bounds)
         precondition(!targetIcon.isHidden && previewHost.superview == nil)
-        precondition(overlay!.activeGlassCount == 0)
+        precondition(overlay!.activeGlassCount == 1 && nativeViews(overlay!).first === stationaryGlass)
+        precondition(creationGroup.superview == nil, "last highlight removal must release its effect group")
+        precondition(overlay!.subviews.filter { $0 is NSGlassEffectContainerView }.count == 2)
+        overlay!.reset()
         creation.removeFromSuperlayer()
         page.transform = savedPageTransform
         let released = overlay
@@ -422,7 +498,7 @@ final class GlassProbe: NSObject, NSApplicationDelegate {
         // current event. Test lifecycle after that commit, not inside it.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak released] in
             precondition(released == nil, "detached effect container retained")
-            print("PASS: clear style, bitmap sharing, idle preview completion, hit testing, bounded culling, paging reuse, batch invalidation, drag-only updates, drag scale/position, source hiding, immediate drag teardown, reset and deallocation")
+            print("PASS: clear style, bitmap sharing, idle preview completion, hit testing, bounded culling, paging reuse, batch invalidation, drag-only updates, drag scale/position, source hiding, immediate drag teardown, creation group isolation and cleanup, reset and deallocation")
             fflush(stdout)
             NSApp.terminate(nil)
         }

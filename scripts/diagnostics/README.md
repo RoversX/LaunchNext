@@ -87,6 +87,12 @@ observation hook for these assertions and is never evaluated on a running frame.
 Creation checks verify that a growing backplate reuses one native glass view,
 shares the target bitmap at a fixed size outside the glass content bounds, and
 restores the original icon and removes the sibling preview on cleanup.
+They also keep an ordinary folder beside the preview, verify that the two use
+different effect containers, check paging alignment, and ensure that removing
+the last preview releases its container without replacing the ordinary folder.
+The page group must also be released when a root-attached merge preview remains
+alive in the drag group; that preview must retain its bitmap and placement.
+These state checks do not establish that the reported refraction flash is gone.
 
 Screenshot modes capture only the probe's own synthetic window via
 `SCShareableContent.currentProcess`, writing to `/tmp/launchnext-folder-*.png`.
@@ -102,6 +108,8 @@ This capture code is compiled only into the probe, not into LaunchNext.
 | `--drag-start --screenshot` | asserts presentation opacity is zero with no opacity animation (`--legacy-start` reproduces the former fade) |
 | `--split-scroll-commit` | reproduces the former separate page-commit ordering |
 | `--sparse` | 6 folders per page instead of 35 |
+| `--glass --hover-scale --screenshot` | step an existing folder to 1.1 scale, check post-layout geometry and capture its own window |
+| `--glass --hover-return --screenshot` | step the same folder back to normal scale before the geometry check and capture |
 
 Screenshot checks assert native geometry matches the source layers after
 AppKit's backing/layout pass. Capture completion is asynchronous and may land
@@ -209,6 +217,9 @@ the temporary host does not receive them.
 Guardrail mode uses a disposable preferences suite for migration checks, injects
 zero-sized merge layers and orphan state, verifies preview crop row order at a
 scaled display size, and exercises cold-grid bitmap handoff and state release.
+It checks that no-drag, unchanged-hover and missing-page position updates leave
+the glass sampling deadline unchanged, while real position updates still extend
+it in glass mode.
 It does not instantiate AppStore or mutate the user's preferences. These checks
 do not establish full-app frame rate, GPU cost, or memory-footprint improvements.
 

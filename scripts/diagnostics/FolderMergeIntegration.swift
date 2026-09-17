@@ -52,6 +52,7 @@ struct FolderMergeIntegration {
                 checkDissolveTiles(apps: apps)
                 for glass in [false, true] {
                     grid.usesLiquidGlassFolders = glass
+                    checkIdleGlassSampling(grid, apps: apps)
                     await checkDissolveHandoff(grid, apps: apps)
                     await checkMergeGuardrails(grid, apps: apps)
                     print("PASS merge guardrails glass=\(glass): zero dimensions and orphan cleanup")
@@ -271,6 +272,36 @@ struct FolderMergeIntegration {
 
     @MainActor static func nativeGlass(_ view: NSView) -> [NSGlassEffectView] {
         (view as? NSGlassEffectView).map { [$0] } ?? view.subviews.flatMap { nativeGlass($0) }
+    }
+
+    @MainActor static func checkIdleGlassSampling(_ grid: CAGridView, apps: [AppInfo]) {
+        grid.items = apps.map { .app($0) }
+        grid.currentPage = 0
+        precondition(!grid.isBatchDragging)
+        grid.draggingIndex = nil
+        grid.currentHoverIndex = nil
+        grid.pendingHoverIndex = nil
+        let deadline = CACurrentMediaTime() + 0.2
+        grid.folderGlassAnimationDeadline = deadline
+        grid.applyIconPositionUpdate()
+        precondition(grid.folderGlassAnimationDeadline == deadline, "no drag must not extend glass sampling")
+        grid.draggingIndex = 0
+        grid.applyIconPositionUpdate()
+        precondition(grid.folderGlassAnimationDeadline == deadline, "unchanged preview must preserve the deadline")
+        grid.currentPage = grid.iconLayers.count
+        grid.pendingHoverIndex = 1
+        grid.applyIconPositionUpdate()
+        precondition(grid.folderGlassAnimationDeadline == deadline, "missing page must not extend glass sampling")
+        grid.currentPage = 0
+        grid.currentHoverIndex = nil
+        grid.applyIconPositionUpdate()
+        if grid.usesLiquidGlassFolders {
+            precondition(grid.folderGlassAnimationDeadline > deadline, "actual position updates must still sample glass")
+        } else {
+            precondition(grid.folderGlassAnimationDeadline == deadline)
+        }
+        grid.cancelDragging()
+        print("PASS production grid: idle sampling guards and real position updates")
     }
 
     @MainActor static func checkPreferenceMigration() {

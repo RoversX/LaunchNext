@@ -58,6 +58,9 @@ final class FolderGlassOverlay: NSView {
     private let pageCanvas = NSView()
     private let pageEffects = NSGlassEffectContainerView()
     private let dragEffects = NSGlassEffectContainerView()
+    // Hover-created backplates must not join the ordinary folders' effect group.
+    // Allocate only while needed; the active and retiring highlights share it.
+    private var creationEffects: NSGlassEffectContainerView?
     private var entries: [ObjectIdentifier: Entry] = [:]
     // At most the active target and one outgoing creation preview.
     private var creationEntries: [Entry] = []
@@ -109,7 +112,7 @@ final class FolderGlassOverlay: NSView {
         for key in Array(entries.keys) where entries[key]?.source.superlayer === container {
             entries.removeValue(forKey: key)?.remove()
         }
-        creationEntries.removeAll { $0.previewHost?.superview == nil }
+        pruneCreationEntries()
         lastContainers.removeAll()
         CATransaction.commit()
     }
@@ -121,7 +124,7 @@ final class FolderGlassOverlay: NSView {
             && (additional == nil || entries[key]?.source.superlayer !== additional) {
             entries.removeValue(forKey: key)?.remove()
         }
-        creationEntries.removeAll { $0.previewHost?.superview == nil }
+        pruneCreationEntries()
         lastContainers.removeAll()
         lastPage = nil
     }
@@ -131,6 +134,8 @@ final class FolderGlassOverlay: NSView {
         for entry in entries.values { entry.remove() }
         entries.removeAll()
         creationEntries.removeAll()
+        creationEffects?.removeFromSuperview()
+        creationEffects = nil
         lastContainers.removeAll()
         lastPage = nil
         lastRoot = nil
@@ -158,6 +163,9 @@ final class FolderGlassOverlay: NSView {
         let translation = CATransform3DMakeTranslation(pageOrigin.x + baseX, pageOrigin.y, 0)
         if let layer = pageEffects.layer, !CATransform3DEqualToTransform(layer.sublayerTransform, translation) {
             layer.sublayerTransform = translation
+        }
+        if let effects = creationEffects {
+            updateCreationEffects(effects, frame: pageFrame, translation: translation)
         }
         if dragEffects.frame != viewport { dragEffects.frame = viewport }
         // AppKit material can composite over custom content layers. Put the
@@ -220,7 +228,6 @@ final class FolderGlassOverlay: NSView {
             } else {
                 entry = Entry(source: source, icon: icon)
                 entries[key] = entry
-                (inPage ? pageCanvas : canvas).addSubview(entry.glass)
                 if let host = entry.previewHost {
                     creationEntries.append(entry)
                     addSubview(host)
@@ -237,7 +244,9 @@ final class FolderGlassOverlay: NSView {
             let opacity = CGFloat((container.animationKeys()?.isEmpty == false
                 ? container.presentation()?.opacity : nil) ?? container.opacity)
             if entry.glass.alphaValue != opacity { entry.glass.alphaValue = opacity }
-            let parent = inPage ? pageCanvas : canvas
+            let parent = entry.isCreation && inPage
+                ? creationCanvas(frame: pageFrame, translation: translation)
+                : (inPage ? pageCanvas : canvas)
             if entry.glass.superview !== parent { parent.addSubview(entry.glass) }
             if entry.glass.frame != glassRect { entry.glass.frame = glassRect }
             let radius = glassRect.width * 0.25
@@ -257,7 +266,41 @@ final class FolderGlassOverlay: NSView {
         for key in Array(entries.keys) where !retained.contains(key) {
             entries.removeValue(forKey: key)?.remove()
         }
+        pruneCreationEntries()
+    }
+
+    private func creationCanvas(frame: CGRect, translation: CATransform3D) -> NSView {
+        if let effects = creationEffects { return effects.contentView! }
+        let effects = NSGlassEffectContainerView()
+        effects.wantsLayer = true
+        effects.spacing = 0
+        let content = NSView()
+        effects.contentView = content
+        addSubview(effects, positioned: .below, relativeTo: dragEffects)
+        creationEffects = effects
+        updateCreationEffects(effects, frame: frame, translation: translation)
+        return content
+    }
+
+    private func updateCreationEffects(_ effects: NSGlassEffectContainerView,
+                                       frame: CGRect, translation: CATransform3D) {
+        if effects.frame != frame {
+            effects.layer?.sublayerTransform = CATransform3DIdentity
+            effects.frame = frame
+        }
+        if let layer = effects.layer, !CATransform3DEqualToTransform(layer.sublayerTransform, translation) {
+            layer.sublayerTransform = translation
+        }
+    }
+
+    private func pruneCreationEntries() {
         creationEntries.removeAll { $0.previewHost?.superview == nil }
+        // Root-attached merge previews use dragEffects, not this page group.
+        // They must not keep an empty page effect surface alive during landing.
+        if creationEffects?.contentView?.subviews.isEmpty == true {
+            creationEffects?.removeFromSuperview()
+            creationEffects = nil
+        }
     }
 
     private static func rect(_ source: CALayer, in destination: CALayer) -> CGRect {

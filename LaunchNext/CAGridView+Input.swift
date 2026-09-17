@@ -745,7 +745,6 @@ extension CAGridView {
     }
     
     func applyIconPositionUpdate() {
-        defer { animateFolderGlass() }
         guard let dragIndex = draggingIndex else { return }
         
         let hoverIndex = pendingHoverIndex
@@ -757,6 +756,9 @@ extension CAGridView {
         // Get current page icons only
         let pageIndex = currentPage
         guard pageIndex < iconLayers.count else { return }
+        // Only position updates need a new glass sampling interval. Preserve
+        // an existing deadline when there is no drag, no change, or no page.
+        defer { animateFolderGlass() }
         let pageLayers = iconLayers[pageIndex]
         let pageStart = pageIndex * itemsPerPage
 
