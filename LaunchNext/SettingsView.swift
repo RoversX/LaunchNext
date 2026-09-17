@@ -2558,10 +2558,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                                 getVersion(fallback: appStore.localized(.versionFallback))))
                         .font(.title2.weight(.semibold))
                         .foregroundStyle(.white)
-
-                    Text(appStore.localized(.backgroundHint))
-                        .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.85))
                 }
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 20)
