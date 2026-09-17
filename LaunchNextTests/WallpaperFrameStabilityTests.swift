@@ -4,6 +4,25 @@ import LaunchNextWallpaperCore
 import XCTest
 
 final class WallpaperFrameStabilityTests: XCTestCase {
+    func testSharpFramesCanSettleButVisibleMovementDoesNot() throws {
+        let original = try largeImage()
+        XCTAssertTrue(WallpaperFrameStability.matches(original, original))
+        XCTAssertFalse(WallpaperFrameStability.matches(original, try largeImage(moved: true)))
+        let oversized = try largeImage(width: 2500)
+        XCTAssertFalse(WallpaperFrameStability.matches(oversized, oversized))
+    }
+
+    private func largeImage(width: Int = 2000, moved: Bool = false) throws -> CGImage {
+        let context = try XCTUnwrap(CGContext(data: nil, width: width, height: 2000,
+            bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(gray: 0.3, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: 2000))
+        context.setFillColor(CGColor(gray: 0.8, alpha: 1))
+        context.fill(CGRect(x: moved ? 1001 : 1000, y: 800, width: 300, height: 300))
+        return try XCTUnwrap(context.makeImage())
+    }
+
     func testAllowsOnlySmallBoundaryVariation() throws {
         let original = try image()
         XCTAssertTrue(WallpaperFrameStability.matches(original, original))

@@ -9,6 +9,14 @@ public enum WallpaperImageRenderer {
     }
 
     public static let maximumPixelCount = 500_000
+    public static let maximumUnfilteredPixelCount = 4_000_000
+
+    public static func pixelBudget(for pixelSize: CGSize, unfiltered: Bool) -> Int {
+        guard unfiltered else { return maximumPixelCount }
+        let pixels = pixelSize.width * pixelSize.height
+        guard pixels.isFinite, pixels > 0 else { return maximumPixelCount }
+        return max(1, Int(min(pixels.rounded(.up), CGFloat(maximumUnfilteredPixelCount))))
+    }
 
     /// Dynamic desktop descriptors expose a local thumbnail, not the current animation frame.
     public static func previewImageURL(for url: URL) -> URL? {
@@ -48,7 +56,8 @@ public enum WallpaperImageRenderer {
     }
 
     public static func render(
-        url: URL, displaySize: CGSize, pixelSize: CGSize, scaling: Scaling, fillColor: CGColor
+        url: URL, displaySize: CGSize, pixelSize: CGSize, scaling: Scaling, fillColor: CGColor,
+        maximumPixels: Int = maximumPixelCount
     ) -> CGImage? {
         guard url.isFileURL, FileManager.default.isReadableFile(atPath: url.path),
               let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
@@ -60,7 +69,7 @@ public enum WallpaperImageRenderer {
 
         // Multi-image HEIC/GIF files can represent changing wallpaper content;
         // selecting their first image would not establish the current frame.
-        let decodedSize = outputSize(for: CGSize(width: width, height: height))
+        let decodedSize = outputSize(for: CGSize(width: width, height: height), maximumPixels: maximumPixels)
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
@@ -68,7 +77,7 @@ public enum WallpaperImageRenderer {
             kCGImageSourceShouldCacheImmediately: true
         ]
         guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-        let output = outputSize(for: pixelSize)
+        let output = outputSize(for: pixelSize, maximumPixels: maximumPixels)
         guard output.width > 0, output.height > 0, displaySize.width > 0, displaySize.height > 0,
               let context = CGContext(data: nil, width: Int(output.width), height: Int(output.height),
                                       bitsPerComponent: 8, bytesPerRow: 0,

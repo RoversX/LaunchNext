@@ -197,6 +197,7 @@ final class AppStore: ObservableObject {
     enum BackgroundStyle: String, CaseIterable, Identifiable {
         case blur
         case glass
+        case unfiltered
 
         var id: String { rawValue }
 
@@ -204,6 +205,7 @@ final class AppStore: ObservableObject {
             switch self {
             case .blur: return .backgroundStyleOptionBlur
             case .glass: return .backgroundStyleOptionGlass
+            case .unfiltered: return .backgroundStyleOptionUnfiltered
             }
         }
     }

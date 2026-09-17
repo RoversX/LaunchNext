@@ -5,6 +5,34 @@ import LaunchNextWallpaperCore
 import XCTest
 
 final class WallpaperImageRendererTests: XCTestCase {
+    func testSharpBudgetAdaptsToWindowAndCapsLargeDisplays() {
+        let compact = CGSize(width: 800, height: 600)
+        XCTAssertEqual(WallpaperImageRenderer.pixelBudget(for: compact, unfiltered: true), 480_000)
+        XCTAssertEqual(WallpaperImageRenderer.pixelBudget(for: CGSize(width: 1600, height: 1200), unfiltered: true), 1_920_000)
+        let large = CGSize(width: 6016, height: 3384)
+        let budget = WallpaperImageRenderer.pixelBudget(for: large, unfiltered: true)
+        XCTAssertEqual(budget, 4_000_000)
+        let size = WallpaperImageRenderer.outputSize(for: large, maximumPixels: budget)
+        XCTAssertLessThanOrEqual(size.width * size.height, 4_000_000)
+        XCTAssertEqual(size.width / size.height, large.width / large.height, accuracy: 0.004)
+        XCTAssertEqual(WallpaperImageRenderer.pixelBudget(for: large, unfiltered: false), 500_000)
+        XCTAssertEqual(WallpaperImageRenderer.pixelBudget(for: .zero, unfiltered: true), 500_000)
+    }
+
+    func testSharpRenderingUsesRequestedBudgetWithoutChangingDefault() throws {
+        let url = try writeImage(width: 2400, height: 1600)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let size = CGSize(width: 2400, height: 1600)
+        let fill = CGColor(gray: 0, alpha: 1)
+        let sharp = try XCTUnwrap(WallpaperImageRenderer.render(url: url, displaySize: size,
+            pixelSize: size, scaling: .fill, fillColor: fill, maximumPixels: 4_000_000))
+        let blurred = try XCTUnwrap(WallpaperImageRenderer.render(url: url, displaySize: size,
+            pixelSize: size, scaling: .fill, fillColor: fill))
+        XCTAssertEqual(sharp.width, 2400)
+        XCTAssertEqual(sharp.height, 1600)
+        XCTAssertLessThanOrEqual(blurred.width * blurred.height, 500_000)
+    }
+
     func testDesktopDescriptorUsesItsThumbnail() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".madesktop")
         defer { try? FileManager.default.removeItem(at: url) }

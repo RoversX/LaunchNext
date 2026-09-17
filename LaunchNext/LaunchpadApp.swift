@@ -27,6 +27,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
 
     // let authStore = FileAuthStore()
     private var window: NSWindow?
+    // Settings sheets can become key; background geometry belongs to this window.
+    var launchpadWindow: NSWindow? { window }
     private let minimumContentSize = NSSize(width: 800, height: 600)
     private var lastShowAt: Date?
     private var cancellables = Set<AnyCancellable>()

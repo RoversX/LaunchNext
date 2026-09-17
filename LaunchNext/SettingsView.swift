@@ -5076,7 +5076,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(appStore.localized(.backgroundStyleTitle))
                         .font(.headline)
-                    Text(appStore.localized(appStore.launchpadBackgroundStyle.localizationKey))
+                    Text(appStore.localized(selectedBackgroundStyle.localizationKey))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -5087,6 +5087,18 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             HStack(spacing: 10) {
                 backgroundStyleOption(.blur, systemImage: "drop")
                 backgroundStyleOption(.glass, systemImage: "sparkles")
+                backgroundStyleOption(.unfiltered, systemImage: "photo")
+                    .disabled(!appStore.backgroundImageEnabled)
+                    .opacity(appStore.backgroundImageEnabled ? 1 : 0.45)
+                    .help(appStore.localized(appStore.backgroundImageEnabled
+                        ? .backgroundStyleUnfilteredMemoryHint : .backgroundStyleUnfilteredRequiresImage))
+            }
+            if !appStore.backgroundImageEnabled || selectedBackgroundStyle == .unfiltered {
+                Text(appStore.localized(appStore.backgroundImageEnabled
+                    ? .backgroundStyleUnfilteredMemoryHint : .backgroundStyleUnfilteredRequiresImage))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(14)
@@ -5229,8 +5241,13 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         return true
     }
 
+    private var selectedBackgroundStyle: AppStore.BackgroundStyle {
+        appStore.launchpadBackgroundStyle == .unfiltered && !appStore.backgroundImageEnabled
+            ? .glass : appStore.launchpadBackgroundStyle
+    }
+
     private func backgroundStyleOption(_ style: AppStore.BackgroundStyle, systemImage: String) -> some View {
-        let selected = appStore.launchpadBackgroundStyle == style
+        let selected = selectedBackgroundStyle == style
 
         return Button {
             appStore.launchpadBackgroundStyle = style

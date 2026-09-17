@@ -42,11 +42,11 @@ enum WallpaperCaptureError: Error {
 /// Single-frame capture only. The caller owns retries, caching and cancellation.
 @MainActor
 enum WallpaperScreenCapture {
-    static func capture(displayID: CGDirectDisplayID) async throws -> CGImage {
+    static func capture(displayID: CGDirectDisplayID, maximumPixels: Int = WallpaperImageRenderer.maximumPixelCount) async throws -> CGImage {
         WallpaperCaptureAccess.shared.refresh()
         guard WallpaperCaptureAccess.shared.isGranted else { throw WallpaperCaptureError.permissionRequired }
         do {
-            return try await captureAuthorizedWallpaper(displayID: displayID)
+            return try await captureAuthorizedWallpaper(displayID: displayID, maximumPixels: maximumPixels)
         } catch {
             let captureError = error as NSError
             if captureError.domain == SCStreamErrorDomain,
@@ -59,7 +59,7 @@ enum WallpaperScreenCapture {
         }
     }
 
-    private static func captureAuthorizedWallpaper(displayID: CGDirectDisplayID) async throws -> CGImage {
+    private static func captureAuthorizedWallpaper(displayID: CGDirectDisplayID, maximumPixels: Int) async throws -> CGImage {
         try Task.checkCancellation()
         let displayBounds = CGDisplayBounds(displayID)
         guard displayBounds.width > 0, displayBounds.height > 0 else {
@@ -84,7 +84,7 @@ enum WallpaperScreenCapture {
         let scale = CGFloat(filter.pointPixelScale)
         let size = WallpaperImageRenderer.outputSize(for: CGSize(
             width: filter.contentRect.width * scale, height: filter.contentRect.height * scale
-        ))
+        ), maximumPixels: maximumPixels)
         guard size.width > 0, size.height > 0 else { throw WallpaperCaptureError.wallpaperWindowUnavailable }
         let configuration = SCStreamConfiguration()
         configuration.width = Int(size.width)

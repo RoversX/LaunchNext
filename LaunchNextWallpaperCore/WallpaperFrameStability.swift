@@ -17,13 +17,16 @@ public enum WallpaperFrameStability {
     public static func matches(_ first: CGImage, _ second: CGImage) -> Bool {
         guard first.width == second.width, first.height == second.height,
               first.width > 4, first.height > 4,
-              first.width * first.height <= WallpaperImageRenderer.maximumPixelCount,
-              let a = pixels(first), let b = pixels(second) else { return false }
-        for y in 0..<first.height {
-            for x in 0..<first.width {
-                let offset = (y * first.width + x) * 4
+              first.width * first.height <= WallpaperImageRenderer.maximumUnfilteredPixelCount else { return false }
+        // Keep confirmation work bounded even when the displayed frame is sharp.
+        let size = WallpaperImageRenderer.outputSize(for: CGSize(width: first.width, height: first.height))
+        let width = Int(size.width), height = Int(size.height)
+        guard let a = pixels(first, size: size), let b = pixels(second, size: size) else { return false }
+        for y in 0..<height {
+            for x in 0..<width {
+                let offset = (y * width + x) * 4
                 guard a[offset + 3] == b[offset + 3] else { return false }
-                let edge = x < 2 || y < 2 || x >= first.width - 2 || y >= first.height - 2
+                let edge = x < 2 || y < 2 || x >= width - 2 || y >= height - 2
                 for channel in 0..<3 {
                     if abs(Int(a[offset + channel]) - Int(b[offset + channel])) > (edge ? 4 : 0) {
                         return false
@@ -34,16 +37,17 @@ public enum WallpaperFrameStability {
         return true
     }
 
-    private static func pixels(_ image: CGImage) -> [UInt8]? {
-        var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
+    private static func pixels(_ image: CGImage, size: CGSize) -> [UInt8]? {
+        let width = Int(size.width), height = Int(size.height)
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
         let rendered = bytes.withUnsafeMutableBytes { buffer -> Bool in
             guard let space = CGColorSpace(name: CGColorSpace.sRGB),
-                  let context = CGContext(data: buffer.baseAddress, width: image.width, height: image.height,
-                    bitsPerComponent: 8, bytesPerRow: image.width * 4, space: space,
+                  let context = CGContext(data: buffer.baseAddress, width: width, height: height,
+                    bitsPerComponent: 8, bytesPerRow: width * 4, space: space,
                     bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue)
             else { return false }
             context.setBlendMode(.copy)
-            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            context.draw(image, in: CGRect(origin: .zero, size: size))
             return true
         }
         return rendered ? bytes : nil

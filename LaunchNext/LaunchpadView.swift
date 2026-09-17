@@ -102,6 +102,12 @@ private extension View {
                 } else {
                     base
                 }
+            case .unfiltered:
+                if let maskColor {
+                    self.background(maskColor, in: shape)
+                } else {
+                    self
+                }
             }
         }
     }
@@ -189,7 +195,7 @@ struct LaunchpadView: View {
     }
 
     private var backdropOpacity: Double {
-        guard appStore.isFullscreenMode else { return 0.0 }
+        guard appStore.isFullscreenMode, effectiveBackgroundStyle != .unfiltered else { return 0.0 }
         if appStore.shouldShowOnboarding {
             return colorScheme == .dark ? 0.34 : 0.10
         }
@@ -197,7 +203,8 @@ struct LaunchpadView: View {
     }
 
     private var onboardingLightFilterOpacity: Double {
-        guard appStore.isFullscreenMode, appStore.shouldShowOnboarding, colorScheme == .light else { return 0.0 }
+        guard appStore.isFullscreenMode, effectiveBackgroundStyle != .unfiltered,
+              appStore.shouldShowOnboarding, colorScheme == .light else { return 0.0 }
         return 0.20
     }
 
@@ -320,7 +327,7 @@ struct LaunchpadView: View {
          }
          .onReceive(NotificationCenter.default.publisher(for: NSWindow.didChangeScreenNotification)) { notification in
              guard let changedWindow = notification.object as? NSWindow,
-                   changedWindow == NSApp.keyWindow else { return }
+                   changedWindow === AppDelegate.shared?.launchpadWindow else { return }
              // A window can report its screen again when it is shown. Validate
              // the display/context instead of discarding a settled frame.
              if #available(macOS 27, *) {
@@ -331,6 +338,22 @@ struct LaunchpadView: View {
          }
          .onChange(of: appStore.backgroundImageEnabled) { _, _ in
              refreshBackgroundImage(reason: .settingsChanged)
+         }
+         .onChange(of: appStore.launchpadBackgroundStyle) { old, new in
+             guard (old == .unfiltered) != (new == .unfiltered) else { return }
+             refreshBackgroundImage(reason: .settingsChanged)
+         }
+         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResizeNotification)
+             .merge(with: NotificationCenter.default.publisher(for: NSWindow.didEndLiveResizeNotification))
+             .filter { notification in
+                 guard let window = notification.object as? NSWindow else { return false }
+                 return window === AppDelegate.shared?.launchpadWindow
+             }
+             .debounce(for: .milliseconds(200), scheduler: RunLoop.main)) { notification in
+             guard appStore.backgroundImageEnabled, appStore.launchpadBackgroundStyle == .unfiltered,
+                   let window = notification.object as? NSWindow,
+                   window === AppDelegate.shared?.launchpadWindow, !window.inLiveResize else { return }
+             refreshBackgroundImage(reason: .viewportChanged)
          }
          .onReceive(NotificationCenter.default.publisher(for: .wallpaperCapturePermissionChanged)) { _ in
              refreshBackgroundImage(reason: .settingsChanged)
@@ -357,7 +380,7 @@ struct LaunchpadView: View {
               setupInitialSelection()
               setupWindowShownObserver()
               setupWindowHiddenObserver()
-              let windowIsAlreadyVisible = NSApp.keyWindow?.isVisible == true
+              let windowIsAlreadyVisible = AppDelegate.shared?.launchpadWindow?.isVisible == true
               isWindowVisible = windowIsAlreadyVisible
               if windowIsAlreadyVisible {
                   refreshBackgroundImage(reason: .windowShown)
@@ -488,7 +511,7 @@ struct LaunchpadView: View {
             launchpadMainContent(in: geo)
         }
         .padding()
-        .launchpadBackgroundStyle(appStore.launchpadBackgroundStyle,
+        .launchpadBackgroundStyle(effectiveBackgroundStyle,
                                   cornerRadius: appStore.isFullscreenMode ? 0 : 30,
                                   forcedColor: appStore.developmentBackgroundOverride.color,
                                   maskColor: appStore.backgroundMaskColor(for: colorScheme))
@@ -512,6 +535,14 @@ struct LaunchpadView: View {
             return nil
         }
         return backgroundImageController.content?.image
+    }
+
+    private var effectiveBackgroundStyle: AppStore.BackgroundStyle {
+        // Preserve the saved choice, but keep a usable backdrop without an image.
+        if appStore.launchpadBackgroundStyle == .unfiltered, displayedBackgroundImage == nil {
+            return .glass
+        }
+        return appStore.launchpadBackgroundStyle
     }
 
     private func handleHeaderBackgroundTap() {
@@ -2070,11 +2101,14 @@ extension LaunchpadView {
 // MARK: - Keyboard Navigation
 extension LaunchpadView {
     private func refreshBackgroundImage(reason: BackgroundImageController.RefreshReason) {
+        let window = AppDelegate.shared?.launchpadWindow
         backgroundImageController.refresh(
-            for: NSApp.keyWindow?.screen ?? NSScreen.main,
+            for: window?.screen ?? NSScreen.main,
             enabled: appStore.backgroundImageEnabled,
             source: appStore.backgroundImageSource,
             customImagePath: appStore.customBackgroundImagePath,
+            unfiltered: appStore.launchpadBackgroundStyle == .unfiltered,
+            targetSize: appStore.isFullscreenMode ? nil : window?.contentView?.bounds.size,
             reason: reason
         )
     }

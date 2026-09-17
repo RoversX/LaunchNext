@@ -44,6 +44,7 @@ final class BackgroundImageController: ObservableObject {
         case contextChanged
         case contextChecked
         case settingsChanged
+        case viewportChanged
     }
 
     struct Content {
@@ -116,9 +117,9 @@ final class BackgroundImageController: ObservableObject {
                                height: displaySize.height * screen.backingScaleFactor)
         }
 
-        nonisolated func render(url: URL) -> CGImage? {
+        nonisolated func render(url: URL, maximumPixels: Int = WallpaperImageRenderer.maximumPixelCount) -> CGImage? {
             WallpaperImageRenderer.render(url: url, displaySize: displaySize, pixelSize: pixelSize,
-                                          scaling: scaling, fillColor: fillColor)
+                                          scaling: scaling, fillColor: fillColor, maximumPixels: maximumPixels)
         }
     }
 
@@ -129,11 +130,11 @@ final class BackgroundImageController: ObservableObject {
         CGWindowImageOption
     ) -> Unmanaged<CGImage>?
 
-    // The background is always viewed through a frosted material (liquid glass /
-    // ultraThinMaterial), which discards high-frequency detail - captures and
-    // decodes above ~0.5MP are indistinguishable through it and only cost
-    // memory, PNG size, and encode time.
-    nonisolated private static let maximumDecodedPixelCount = WallpaperImageRenderer.maximumPixelCount
+    // Material backgrounds use 0.5 MP; unfiltered backgrounds use a bounded
+    // display-sized decode. Switching budgets invalidates all warm images.
+    private var maximumDecodedPixelCount = WallpaperImageRenderer.maximumPixelCount
+    private var usesUnfilteredBackground = false
+    private var requestedTargetSize: CGSize?
     nonisolated private static let snapshotWriter = WallpaperSnapshotWriter()
     nonisolated private static let snapshotLifecycle = WallpaperSnapshotLifecycle()
     nonisolated private static let snapshotRemovalRetryDelays: [Duration] = [
@@ -159,10 +160,11 @@ final class BackgroundImageController: ObservableObject {
     private var isWindowVisible = false
     private var desktopContextIsDirty = true
     private var backgroundIsEnabled = true
-    // Last frame published for each display. Lets a display switch paint the
+    // Last frame published for each display. Unfiltered mode retains only the current display.
+    // Lets a display switch paint the
     // right wallpaper synchronously instead of showing the previous display's
     // image (or black) for the ~0.5s the capture pipeline needs on a busy
-    // main thread. A few frames at <=0.5MP each; cleared when the feature is
+    // main thread. Material-mode frames are <=0.5MP each; cleared when the feature is
     // turned off or the view disappears.
     private var lastDesktopFrameByDisplay: [CGDirectDisplayID: Content] = [:]
 
@@ -188,7 +190,7 @@ final class BackgroundImageController: ObservableObject {
         guard case let .desktop(displayID) = requestIdentity else { return }
         let screen = NSScreen.screens.first { Self.displayID(for: $0) == displayID }
         refresh(for: screen, enabled: backgroundIsEnabled, source: .desktopWallpaper,
-                customImagePath: "", reason: force ? .contextChanged : .contextChecked)
+                customImagePath: "", unfiltered: usesUnfilteredBackground, targetSize: requestedTargetSize, reason: force ? .contextChanged : .contextChecked)
     }
 
     func refresh(
@@ -196,6 +198,8 @@ final class BackgroundImageController: ObservableObject {
         enabled: Bool,
         source: AppStore.BackgroundImageSource,
         customImagePath: String,
+        unfiltered: Bool = false,
+        targetSize: CGSize? = nil,
         reason: RefreshReason
     ) {
         switch reason {
@@ -209,7 +213,7 @@ final class BackgroundImageController: ObservableObject {
             loadGeneration += 1
         case .settingsChanged:
             cachedCaptures.removeAll()
-        case .contextChecked:
+        case .contextChecked, .viewportChanged:
             break
         }
 
@@ -246,6 +250,36 @@ final class BackgroundImageController: ObservableObject {
             let connected = Set(NSScreen.screens.compactMap { Self.displayID(for: $0) })
             lastDesktopFrameByDisplay = lastDesktopFrameByDisplay.filter { connected.contains($0.key) }
             cachedCaptures = cachedCaptures.filter { connected.contains($0.key) }
+        }
+
+        let displayPixels = CGSize(width: screen.frame.width * screen.backingScaleFactor,
+                                   height: screen.frame.height * screen.backingScaleFactor)
+        let target = targetSize ?? screen.frame.size
+        // Preserve enough source pixels for aspect-fill in a compact window.
+        let fillScale = min(1, max(target.width / screen.frame.width, target.height / screen.frame.height))
+        let neededPixels = CGSize(width: displayPixels.width * fillScale, height: displayPixels.height * fillScale)
+        let budget = WallpaperImageRenderer.pixelBudget(for: neededPixels, unfiltered: unfiltered)
+        requestedTargetSize = targetSize
+        let qualityChanged = budget != maximumDecodedPixelCount || usesUnfilteredBackground != unfiltered
+        // Resize notifications also occur when showing an unchanged window.
+        // They must not restart decoding or wallpaper capture confirmation.
+        if reason == .viewportChanged, !qualityChanged { return }
+        if qualityChanged {
+            loadTask?.cancel()
+            loadTask = nil
+            loadGeneration += 1
+            activeCacheKey = nil
+            activeWallpaperIdentity = nil
+            desktopContextIsDirty = true
+            content = nil
+            lastDesktopFrameByDisplay.removeAll()
+            cachedCaptures.removeAll()
+        }
+        maximumDecodedPixelCount = budget
+        usesUnfilteredBackground = unfiltered
+        if unfiltered {
+            lastDesktopFrameByDisplay = lastDesktopFrameByDisplay.filter { $0.key == displayID }
+            cachedCaptures = cachedCaptures.filter { $0.key == displayID }
         }
 
         let targetMaxDimension = max(
@@ -394,6 +428,7 @@ final class BackgroundImageController: ObservableObject {
         displayID: CGDirectDisplayID, desktopImageURL: URL?, layout: StaticLayout?,
         isDark: Bool, isPortrait: Bool, reason: RefreshReason, targetMaxDimension: Int
     ) {
+        let maximumPixels = maximumDecodedPixelCount
         loadTask?.cancel()
         loadGeneration += 1
         let generation = loadGeneration
@@ -416,16 +451,17 @@ final class BackgroundImageController: ObservableObject {
                 switch identity.source {
                 case let .image(url):
                     guard let previewURL = WallpaperImageRenderer.previewImageURL(for: url) else { return nil }
-                    if let layout, let rendered = layout.render(url: previewURL) { return rendered }
-                    return Self.decodeCustomImage(at: previewURL, targetMaxDimension: targetMaxDimension)
+                    if let layout, let rendered = layout.render(url: previewURL, maximumPixels: maximumPixels) { return rendered }
+                    return Self.decodeCustomImage(at: previewURL, targetMaxDimension: targetMaxDimension, maximumPixels: maximumPixels)
                 case let .aerial(assetID):
                     guard let url = WallpaperAerialPreview.localResource(
                         assetID: assetID, isDark: isDark, isPortrait: isPortrait) else { return nil }
                     if url.pathExtension.lowercased() != "mov" {
-                        return Self.decodeCustomImage(at: url, targetMaxDimension: targetMaxDimension)
+                        return Self.decodeCustomImage(at: url, targetMaxDimension: targetMaxDimension, maximumPixels: maximumPixels)
                     }
-                    guard let frame = await Self.firstVideoFrame(at: url, targetMaxDimension: 1000) else { return nil }
-                    return Self.downsampleCapturedImageIfNeeded(frame)
+                    guard let frame = await Self.firstVideoFrame(at: url, targetMaxDimension: targetMaxDimension,
+                                                                 maximumPixels: maximumPixels) else { return nil }
+                    return Self.downsampleCapturedImageIfNeeded(frame, maximumPixels: maximumPixels)
                 case .unavailable:
                     return nil
                 }
@@ -456,6 +492,7 @@ final class BackgroundImageController: ObservableObject {
         reason: RefreshReason,
         targetMaxDimension: Int
     ) {
+        let maximumPixels = maximumDecodedPixelCount
         loadTask?.cancel()
         loadGeneration += 1
         let generation = loadGeneration
@@ -513,7 +550,7 @@ final class BackgroundImageController: ObservableObject {
             // The renderer reproduces the desktop's scaling and letterboxing.
             if let url = resolution.verifiedStaticURL, let staticLayout {
                 let image = await Task.detached(priority: .userInitiated) {
-                    staticLayout.render(url: url)
+                    staticLayout.render(url: url, maximumPixels: maximumPixels)
                 }.value
                 if let image, await self.publishDesktopImage(
                     image, identity: identity, displayID: displayID, generation: generation,
@@ -542,7 +579,7 @@ final class BackgroundImageController: ObservableObject {
                 let image: CGImage?
                 if #available(macOS 27, *) {
                     do {
-                        image = try await WallpaperScreenCapture.capture(displayID: displayID)
+                        image = try await WallpaperScreenCapture.capture(displayID: displayID, maximumPixels: maximumPixels)
                     } catch WallpaperCaptureError.permissionRequired {
                         permissionRequired = true
                         image = nil
@@ -554,7 +591,7 @@ final class BackgroundImageController: ObservableObject {
                         autoreleasepool {
                             guard let windowID = Self.findDesktopWallpaperWindow(for: displayID),
                                   let captured = Self.capture(windowID: windowID) else { return nil }
-                            return Self.downsampleCapturedImageIfNeeded(captured)
+                            return Self.downsampleCapturedImageIfNeeded(captured, maximumPixels: maximumPixels)
                         }
                     }.value
                 }
@@ -576,7 +613,7 @@ final class BackgroundImageController: ObservableObject {
                         fallback = await Task.detached(priority: .userInitiated) {
                             await Self.loadExactFallbackImage(
                                 for: identity,
-                                targetMaxDimension: targetMaxDimension
+                                targetMaxDimension: targetMaxDimension, maximumPixels: maximumPixels
                             )
                         }.value
                     } else {
@@ -642,8 +679,9 @@ final class BackgroundImageController: ObservableObject {
         desktopContextIsDirty = false
         if persist, let stableIdentity {
             let token = Self.snapshotLifecycle.currentToken()
+            let maximumPixels = maximumDecodedPixelCount
             await Self.snapshotWriter.persist(using: token, lifecycle: Self.snapshotLifecycle) {
-                Self.persistSnapshot(image, for: stableIdentity)
+                Self.persistSnapshot(image, for: stableIdentity, maximumPixels: maximumPixels)
             }
         }
         return true
@@ -676,6 +714,7 @@ final class BackgroundImageController: ObservableObject {
     @available(macOS 27, *)
     private func settleDesktopCapture(_ initial: CachedCapture, displayID: CGDirectDisplayID,
                                       generation: Int) async {
+        let maximumPixels = maximumDecodedPixelCount
         var candidate = initial
         guard await captureContextStillMatches(candidate.context, displayID: displayID, generation: generation),
               await publishDesktopImage(candidate.image, identity: candidate.context.identity,
@@ -687,7 +726,7 @@ final class BackgroundImageController: ObservableObject {
             do { try await ContinuousClock().sleep(until: deadline) } catch { return }
             guard await captureContextStillMatches(candidate.context, displayID: displayID, generation: generation) else { return }
             let image: CGImage
-            do { image = try await WallpaperScreenCapture.capture(displayID: displayID) }
+            do { image = try await WallpaperScreenCapture.capture(displayID: displayID, maximumPixels: maximumPixels) }
             catch { return } // Keep the displayed frame unconfirmed; retry only on a later open/event.
             let sampledAt = ContinuousClock.now
             let previous = candidate.image
@@ -727,6 +766,7 @@ final class BackgroundImageController: ObservableObject {
     }
 
     private func refreshCustom(path: String, targetMaxDimension: Int) {
+        let maximumPixels = maximumDecodedPixelCount
         loadTask?.cancel()
         loadGeneration += 1
         let generation = loadGeneration
@@ -763,7 +803,7 @@ final class BackgroundImageController: ObservableObject {
                 autoreleasepool {
                     Self.decodeCustomImage(
                         at: URL(fileURLWithPath: path),
-                        targetMaxDimension: targetMaxDimension
+                        targetMaxDimension: targetMaxDimension, maximumPixels: maximumPixels
                     )
                 }
             }.value
@@ -845,11 +885,11 @@ final class BackgroundImageController: ObservableObject {
         )?.takeRetainedValue()
     }
 
-    nonisolated private static func downsampleCapturedImageIfNeeded(_ image: CGImage) -> CGImage? {
+    nonisolated private static func downsampleCapturedImageIfNeeded(_ image: CGImage, maximumPixels: Int) -> CGImage? {
         let pixelCount = image.width * image.height
-        guard pixelCount > maximumDecodedPixelCount else { return image }
+        guard pixelCount > maximumPixels else { return image }
 
-        let scale = sqrt(Double(maximumDecodedPixelCount) / Double(pixelCount))
+        let scale = sqrt(Double(maximumPixels) / Double(pixelCount))
         let width = max(1, Int((Double(image.width) * scale).rounded(.down)))
         let height = max(1, Int((Double(image.height) * scale).rounded(.down)))
         let colorSpace = image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
@@ -872,7 +912,8 @@ final class BackgroundImageController: ObservableObject {
 
     nonisolated private static func decodeCustomImage(
         at url: URL,
-        targetMaxDimension: Int
+        targetMaxDimension: Int,
+        maximumPixels: Int
     ) -> CGImage? {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithURL(url as CFURL, sourceOptions),
@@ -886,7 +927,7 @@ final class BackgroundImageController: ObservableObject {
 
         let sourceMaxDimension = max(width, height)
         let dimensionScale = min(1, Double(targetMaxDimension) / sourceMaxDimension)
-        let pixelScale = min(1, sqrt(Double(maximumDecodedPixelCount) / (width * height)))
+        let pixelScale = min(1, sqrt(Double(maximumPixels) / (width * height)))
         let thumbnailMaxDimension = max(
             1,
             Int((sourceMaxDimension * min(dimensionScale, pixelScale)).rounded(.down))
@@ -953,11 +994,12 @@ final class BackgroundImageController: ObservableObject {
 
     nonisolated private static func loadExactFallbackImage(
         for identity: WallpaperIdentity,
-        targetMaxDimension: Int
+        targetMaxDimension: Int,
+        maximumPixels: Int
     ) async -> CGImage? {
         if let cached = loadPersistentSnapshot(
             for: identity,
-            targetMaxDimension: targetMaxDimension
+            targetMaxDimension: targetMaxDimension, maximumPixels: maximumPixels
         ) {
             return cached
         }
@@ -967,13 +1009,15 @@ final class BackgroundImageController: ObservableObject {
             // Preserve the macOS 26 fallback when the store or wallpaper window
             // is temporarily unavailable. macOS 27 requires verified rendering.
             if #available(macOS 27, *) { return nil }
-            return decodeCustomImage(at: url, targetMaxDimension: targetMaxDimension)
+            return decodeCustomImage(at: url, targetMaxDimension: targetMaxDimension, maximumPixels: maximumPixels)
         case let .aerial(assetID):
             if #available(macOS 27, *) { return nil }
             let videoURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
                 "Library/Application Support/com.apple.wallpaper/aerials/videos/\(assetID).mov"
             )
-            return await firstVideoFrame(at: videoURL, targetMaxDimension: targetMaxDimension)
+            guard let frame = await firstVideoFrame(at: videoURL, targetMaxDimension: targetMaxDimension,
+                                                   maximumPixels: maximumPixels) else { return nil }
+            return downsampleCapturedImageIfNeeded(frame, maximumPixels: maximumPixels)
         case .unavailable:
             return nil
         }
@@ -993,30 +1037,32 @@ final class BackgroundImageController: ObservableObject {
             .appendingPathComponent("WallpaperSnapshots", isDirectory: true)
     }
 
-    nonisolated private static func snapshotURL(for identity: WallpaperIdentity) -> URL? {
+    nonisolated private static func snapshotURL(for identity: WallpaperIdentity, maximumPixels: Int) -> URL? {
         // Do not reuse gray captures left by CGWindowListCreateImage on macOS 27.
         let prefix: String
         if #available(macOS 27, *) { prefix = "sck-" } else { prefix = "" }
-        return snapshotDirectoryURL()?.appendingPathComponent("\(prefix)\(identity.cacheFileStem).png")
+        let quality = maximumPixels == WallpaperImageRenderer.maximumPixelCount ? "" : "-p\(maximumPixels)"
+        return snapshotDirectoryURL()?.appendingPathComponent("\(prefix)\(identity.cacheFileStem)\(quality).png")
     }
 
     nonisolated private static func loadPersistentSnapshot(
         for identity: WallpaperIdentity,
-        targetMaxDimension: Int
+        targetMaxDimension: Int,
+        maximumPixels: Int
     ) -> CGImage? {
-        guard let url = snapshotURL(for: identity),
+        guard let url = snapshotURL(for: identity, maximumPixels: maximumPixels),
               FileManager.default.isReadableFile(atPath: url.path) else {
             return nil
         }
-        return decodeCustomImage(at: url, targetMaxDimension: targetMaxDimension)
+        return decodeCustomImage(at: url, targetMaxDimension: targetMaxDimension, maximumPixels: maximumPixels)
     }
 
     nonisolated private static func persistSnapshot(
         _ image: CGImage,
-        for identity: WallpaperIdentity
+        for identity: WallpaperIdentity, maximumPixels: Int
     ) {
         guard let directory = snapshotDirectoryURL(),
-              let destinationURL = snapshotURL(for: identity) else { return }
+              let destinationURL = snapshotURL(for: identity, maximumPixels: maximumPixels) else { return }
 
         let fileManager = FileManager.default
         // The file name is the wallpaper identity digest, so an existing file
@@ -1164,12 +1210,23 @@ final class BackgroundImageController: ObservableObject {
 
     nonisolated private static func firstVideoFrame(
         at url: URL,
-        targetMaxDimension: Int
+        targetMaxDimension: Int,
+        maximumPixels: Int
     ) async -> CGImage? {
         guard FileManager.default.isReadableFile(atPath: url.path) else { return nil }
-        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: targetMaxDimension, height: targetMaxDimension)
+        // Bound the generated frame itself, not just the later cached copy.
+        var maximumDimension = min(targetMaxDimension, Int(sqrt(Double(maximumPixels))))
+        if let track = try? await asset.loadTracks(withMediaType: .video).first,
+           let naturalSize = try? await track.load(.naturalSize) {
+            let size = WallpaperImageRenderer.outputSize(for: naturalSize, maximumPixels: maximumPixels)
+            if size.width > 0, size.height > 0 {
+                maximumDimension = min(targetMaxDimension, Int(max(size.width, size.height)))
+            }
+        }
+        generator.maximumSize = CGSize(width: maximumDimension, height: maximumDimension)
         return try? await generator.image(at: .zero).image
     }
 }
