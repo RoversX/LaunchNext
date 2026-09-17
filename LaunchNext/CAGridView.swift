@@ -26,6 +26,8 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     }
     var folderGlassOverlay: FolderGlassOverlay?
     var folderGlassAnimationDeadline: CFTimeInterval = 0
+    var folderCreationHighlight: FolderCreationHighlight?
+    var retiringFolderCreationHighlight: FolderCreationHighlight?
 
     // 网格配置
     var columns: Int = 7 { didSet { rebuildLayers() } }
@@ -138,6 +140,8 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     var draggingItem: LaunchpadItem?
     var draggingLayer: CALayer?
     var dragLanding: DragLanding?
+    var folderMergeLanding: FolderMergeLanding?
+    var folderDissolveTransition: FolderDissolveTransition?
     var dragStartPoint: CGPoint = .zero
     var dragCurrentPoint: CGPoint = .zero
     var dropTargetIndex: Int?
@@ -229,6 +233,8 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     }
 
     func setup() {
+        NotificationCenter.default.addObserver(self, selector: #selector(folderWillDissolve(_:)),
+                                               name: .launchpadFolderWillDissolve, object: nil)
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
 
@@ -287,7 +293,9 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
             NotificationCenter.default.addObserver(self, selector: #selector(windowOcclusionChanged(_:)), name: NSWindow.didChangeOcclusionStateNotification, object: window)
             // launchpad 窗口通知在 setup() 中注册，这里不需要重复注册
         } else {
+            finishFolderDissolve()
             finishDragLanding()
+            removeFolderCreationHighlight()
             resetFolderGlass()
             // The display link retains its target, so invalidate it before deinit.
             displayLink?.invalidate()
@@ -355,7 +363,9 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
         // 不再移除监听器 - 让它保持活跃，这样窗口重新显示时就能立即使用
         // removeScrollEventMonitor()
         wasWindowVisible = false
+        finishFolderDissolve()
         finishDragLanding()
+        removeFolderCreationHighlight()
         resetFolderGlass()
     }
 
@@ -446,11 +456,13 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     }
 
     @objc func displayLinkFired(_ link: CADisplayLink) {
+        updateFolderDissolve(at: CACurrentMediaTime())
+        let creationUpdated = updateFolderCreationHighlight(at: CACurrentMediaTime())
         updateDragLanding(at: CACurrentMediaTime())
         let glassAnimating = usesLiquidGlassFolders && CACurrentMediaTime() < folderGlassAnimationDeadline
         let updatesScroll = isScrollAnimating
         defer {
-            if glassAnimating && !updatesScroll {
+            if glassAnimating && !updatesScroll && !creationUpdated {
                 syncFolderGlass()
             }
         }
@@ -742,6 +754,7 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
 
     func clearIconCache() {
         // An explicit content refresh must not reuse pre-refresh layers.
+        finishFolderDissolve()
         finishDragLanding()
         iconCacheLock.lock()
         iconCache.removeAll()

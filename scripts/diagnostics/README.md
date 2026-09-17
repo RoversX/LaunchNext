@@ -8,7 +8,7 @@ outstanding acceptance work live in
 
 ## What these are, and what they are not
 
-Each probe compiles **real production source** together with a **simplified
+The older probes compile **real production source** together with a **simplified
 host**: a minimal `CAGridView`, model types and layer tree, built just far
 enough to exercise the extension under test.
 
@@ -23,6 +23,10 @@ without booting the app — but it has hard limits:
 - Their simplified model types can drift from production. When a production type
   changes, a probe can keep compiling while no longer representing it. Treat a
   passing probe as evidence about the extension it hosts, not about the app.
+
+The production-grid merge integration check below is an exception: it compiles
+the full app target with a replacement entry point, without shadow grid/model
+types. Its model callbacks still use fixtures rather than AppStore.
 
 Nothing here runs in CI, and none of it ships in LaunchNext.
 
@@ -50,7 +54,8 @@ python3 scripts/diagnostics/check_grid_visual_policy.py
 Checks that ordinary-app hover/press does not schedule glass geometry work, that
 actual folder scaling still synchronises, that unchanged transforms do not
 extend the deadline, and that missing placeholders reuse only when their content
-is unchanged.
+is unchanged. Also checks that folder creation keeps the target app at its
+normal size while merging into an existing folder retains its scaling feedback.
 
 **This is not a lint and not an integration test.** It extracts production
 methods out of `CAGridView+Input.swift`, `CAGridView+Layout.swift` and
@@ -78,6 +83,10 @@ drag-only position updates, leaving and re-entering the viewport, drag
 scale/position, source hiding, reset and deallocation. It reads
 `FolderGlassOverlay.activeGlassCount`, which exists in production as an
 observation hook for these assertions and is never evaluated on a running frame.
+
+Creation checks verify that a growing backplate reuses one native glass view,
+shares the target bitmap at a fixed size outside the glass content bounds, and
+restores the original icon and removes the sibling preview on cleanup.
 
 Screenshot modes capture only the probe's own synthetic window via
 `SCShareableContent.currentProcess`, writing to `/tmp/launchnext-folder-*.png`.
@@ -141,7 +150,7 @@ second rebuild, native material retention, interruption and new-drag cleanup, an
 unpublished reorder, and an item disappearing. It also drives the target
 continuously until the absolute 0.5-second landing bound, then checks preview
 removal and source restoration in both classic and glass modes for return and
-merge landings, and covers an old-order refresh arriving before the reorder plus
+fallback merge landings, and covers an old-order refresh arriving before the reorder plus
 empty-page removal during landing — both must retain the same target and
 animation start time.
 
@@ -171,3 +180,55 @@ Pointer hit testing stays a main-app acceptance check: movement at the
 merge-zone boundary (default 1.6 icon widths), expanded-target release outside
 the icon's smaller click rectangle, moving back out to insertion, folder-to-slot
 drags, row and page boundaries, and both glass modes.
+
+## Production-grid folder merge integration
+
+```sh
+python3 scripts/diagnostics/run_folder_merge_integration.py
+# Optional recording of only the verifier window (no audio or other apps):
+python3 scripts/diagnostics/run_folder_merge_integration.py --record
+# Focused rebuild/state regression, without requiring display-link frames:
+python3 scripts/diagnostics/run_folder_merge_integration.py --hover-rebuild-only
+# Deterministic robustness and cold-icon handoff checks:
+python3 scripts/diagnostics/run_folder_merge_integration.py --guardrails-only
+```
+
+Requires an unlocked macOS GUI session and Xcode. Builds a temporary copy of
+the app target, replacing its entry point with `FolderMergeIntegration.swift`.
+The production CAGridView, input/landing/layout, FolderInfo renderer and native
+glass are used unchanged. It neither invokes AppDelegate/AppStore nor loads or
+saves the user's launcher layout. The installed app is not replaced.
+
+The focused mode checks app/folder merge highlights after duplicate publication,
+target movement/removal, and preservation of entrance timing in classic/glass
+styles. It explicitly advances the production highlight update for its state
+assertion; it does not validate compositor animation or frame rate. The full
+mode requires live display-link callbacks and fails with a bounded timeout if
+the temporary host does not receive them.
+
+Guardrail mode uses a disposable preferences suite for migration checks, injects
+zero-sized merge layers and orphan state, verifies preview crop row order at a
+scaled display size, and exercises cold-grid bitmap handoff and state release.
+It does not instantiate AppStore or mutate the user's preferences. These checks
+do not establish full-app frame rate, GPU cost, or memory-footprint improvements.
+
+Checks classic/glass creation, model publication delayed by 120 ms, actual
+intermediate CA presentation scale, opaque visible-slot arrival, overflow fade,
+repeated model publication, rejected merges, cancellation and layer cleanup.
+The callback deliberately compacts the fixture model to exercise a moving
+destination. Recording uses ScreenCaptureKit **only in this diagnostic entry
+point**, selecting its own process window. Video is written to
+`/tmp/launchnext-merge-integration.mp4`; build output goes to
+`/tmp/launchnext-folder-merge-integration-build.log`. The temporary project and
+binary are removed at exit.
+
+This goes beyond the simplified landing probe, but it still does not exercise
+AppStore persistence, SwiftUI publication timing, real mouse/trackpad gesture
+input, full-app responsiveness, GPU cost or memory benchmarks.
+
+The same production-grid integration run also checks folder dissolution through
+the production notification observer: two/ten apps, initial full-size native
+backplate, intermediate growth, overflow, neighbor movement, repeated publication,
+no-op cleanup, window teardown and disabled animations. Creation asserts that
+neighbor compaction animates and survives a duplicate publication. The fixture
+publishes replacement items; it does not execute the AppStore dissolve method.

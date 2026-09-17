@@ -24,6 +24,7 @@ final class CAGridView: NSView {
     let pageContainerLayer = CALayer()
     var draggingLayer: CALayer?
     var dragLanding: DragLanding?
+    var folderMergeLanding: Bool? // Dedicated real-grid integration covers merge state.
     var overlay: FolderGlassOverlay?
 
     override init(frame: NSRect) {
@@ -40,6 +41,12 @@ final class CAGridView: NSView {
                       geometryChanged: geometryChanged)
     }
 
+    // The dedicated FolderMergeProbe covers the production merge visual.
+    // This host exercises the original fallback and reorder landing only.
+    func beginFolderMergeLanding(itemID: String, targetID: String) -> Bool { false }
+    func updateFolderMergeLanding(at now: CFTimeInterval) -> Bool { false }
+    func finishFolderMergeLanding() {}
+    func isFolderMergeDestination(_ item: LaunchpadItem) -> Bool { false }
     func animateFolderGlass() { syncFolderGlass() }
 
     func removeDraggingVisuals() {

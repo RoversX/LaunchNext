@@ -12,14 +12,24 @@ final class FolderGlassOverlay: NSView {
         let icon: CALayer
         let glass = NSGlassEffectView()
         let preview = CALayer()
+        let previewHost: NSView?
+        var isCreation: Bool { previewHost != nil }
 
         init(source: CALayer, icon: CALayer) {
             self.source = source
             self.icon = icon
+            previewHost = source.name == "creationGlass" ? NSView() : nil
+            previewHost?.wantsLayer = true
             glass.style = .clear
             let content = NSView()
             content.wantsLayer = true
-            content.layer?.addSublayer(preview)
+            // A creation target stays full-sized while only its backplate grows.
+            // Keep its shared bitmap outside the glass content clipping bounds.
+            if let previewHost {
+                previewHost.layer?.addSublayer(preview)
+            } else {
+                content.layer?.addSublayer(preview)
+            }
             preview.contentsGravity = .resizeAspect
             glass.contentView = content
             source.isHidden = true
@@ -31,6 +41,7 @@ final class FolderGlassOverlay: NSView {
             source.isHidden = false
             icon.isHidden = false
             glass.removeFromSuperview()
+            previewHost?.removeFromSuperview()
         }
 
         func updatePreviewContents() {
@@ -48,6 +59,8 @@ final class FolderGlassOverlay: NSView {
     private let pageEffects = NSGlassEffectContainerView()
     private let dragEffects = NSGlassEffectContainerView()
     private var entries: [ObjectIdentifier: Entry] = [:]
+    // At most the active target and one outgoing creation preview.
+    private var creationEntries: [Entry] = []
     private var lastContainers: [CALayer] = []
     private weak var lastPage: CALayer?
     private weak var lastRoot: CALayer?
@@ -96,16 +109,19 @@ final class FolderGlassOverlay: NSView {
         for key in Array(entries.keys) where entries[key]?.source.superlayer === container {
             entries.removeValue(forKey: key)?.remove()
         }
+        creationEntries.removeAll { $0.previewHost?.superview == nil }
         lastContainers.removeAll()
         CATransaction.commit()
     }
 
     /// A model reorder rebuilds page layers while the lifted folder is landing.
     /// Keep that native view alive so its material does not disappear/reappear.
-    func resetPageGlass(keeping container: CALayer) {
-        for key in Array(entries.keys) where entries[key]?.source.superlayer !== container {
+    func resetPageGlass(keeping container: CALayer, alsoKeeping additional: CALayer? = nil) {
+        for key in Array(entries.keys) where entries[key]?.source.superlayer !== container
+            && (additional == nil || entries[key]?.source.superlayer !== additional) {
             entries.removeValue(forKey: key)?.remove()
         }
+        creationEntries.removeAll { $0.previewHost?.superview == nil }
         lastContainers.removeAll()
         lastPage = nil
     }
@@ -114,6 +130,7 @@ final class FolderGlassOverlay: NSView {
         dragEffects.isHidden = true
         for entry in entries.values { entry.remove() }
         entries.removeAll()
+        creationEntries.removeAll()
         lastContainers.removeAll()
         lastPage = nil
         lastRoot = nil
@@ -143,6 +160,18 @@ final class FolderGlassOverlay: NSView {
             layer.sublayerTransform = translation
         }
         if dragEffects.frame != viewport { dragEffects.frame = viewport }
+        // AppKit material can composite over custom content layers. Put the
+        // creation icon in a sibling view above the complete material group.
+        // Even a pure page translation must carry this single preview along.
+        for entry in creationEntries {
+            guard let host = entry.previewHost else { continue }
+            if host.frame != viewport { host.frame = viewport }
+            let previewTranslation = entry.source.superlayer?.superlayer === page
+                ? translation : CATransform3DIdentity
+            if let layer = host.layer, !CATransform3DEqualToTransform(layer.sublayerTransform, previewTranslation) {
+                layer.sublayerTransform = previewTranslation
+            }
+        }
         // Pure paging only translates the complete native material subtree. Rebuild
         // geometry on layout/animation changes, a new nearby batch, or rebasing.
         let reusePageGeometry = !geometryChanged && lastPage === page && lastRoot === root
@@ -166,7 +195,7 @@ final class FolderGlassOverlay: NSView {
         for container in changedContainers {
             guard container.opacity > 0, !container.isHidden,
                   let children = container.sublayers,
-                  let source = children.first(where: { $0.name == "glass" }),
+                  let source = children.first(where: { $0.name == "glass" || $0.name == "creationGlass" }),
                   let icon = children.first(where: { $0.name == "icon" }) else { continue }
             let inPage = container.superlayer === page
             let destination = inPage ? page : root
@@ -179,6 +208,7 @@ final class FolderGlassOverlay: NSView {
                 // column as it crosses the viewport during a swipe.
                 if let entry = entries[key] {
                     if !entry.glass.isHidden { entry.glass.isHidden = true }
+                    entry.previewHost?.isHidden = true
                     if source.isHidden { source.isHidden = false }
                     if icon.isHidden { icon.isHidden = false }
                 }
@@ -191,8 +221,16 @@ final class FolderGlassOverlay: NSView {
                 entry = Entry(source: source, icon: icon)
                 entries[key] = entry
                 (inPage ? pageCanvas : canvas).addSubview(entry.glass)
+                if let host = entry.previewHost {
+                    creationEntries.append(entry)
+                    addSubview(host)
+                    host.frame = viewport
+                    host.layer?.zPosition = 2
+                    host.layer?.sublayerTransform = inPage ? translation : CATransform3DIdentity
+                }
             }
             if entry.glass.isHidden { entry.glass.isHidden = false }
+            entry.previewHost?.isHidden = false
             if !inPage, dragEffects.isHidden { dragEffects.isHidden = false }
             if !source.isHidden { source.isHidden = true }
             if !icon.isHidden { icon.isHidden = true }
@@ -207,13 +245,19 @@ final class FolderGlassOverlay: NSView {
             if entry.glass.layer?.zPosition != container.zPosition {
                 entry.glass.layer?.zPosition = container.zPosition
             }
-            let iconRect = Self.rect(icon, in: destination).offsetBy(dx: (inPage ? -baseX : 0) - glassRect.minX, dy: -glassRect.minY)
+            if entry.isCreation {
+                entry.preview.opacity = Float(opacity)
+            }
+            let iconRect = Self.rect(icon, in: destination).offsetBy(
+                dx: (inPage ? -baseX : 0) - (entry.isCreation ? 0 : glassRect.minX),
+                dy: entry.isCreation ? 0 : -glassRect.minY)
             if entry.preview.frame != iconRect { entry.preview.frame = iconRect }
             entry.updatePreviewContents()
         }
         for key in Array(entries.keys) where !retained.contains(key) {
             entries.removeValue(forKey: key)?.remove()
         }
+        creationEntries.removeAll { $0.previewHost?.superview == nil }
     }
 
     private static func rect(_ source: CALayer, in destination: CALayer) -> CGRect {

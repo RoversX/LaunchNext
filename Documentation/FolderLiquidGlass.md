@@ -97,7 +97,7 @@ diagnostics README. They explain why the implementation is shaped the way it is.
 - The final destination is resolved by item identity, including across pages and
   subsequent compaction rebuilds; corrections continue from the current
   trajectory without jumping.
-- Landing has an absolute 0.5-second upper bound in addition to the normal
+- Reorder/fallback landing has an absolute 0.5-second upper bound in addition to the normal
   0.18-second duration. The bound adds no timer and uses the existing display
   link.
 - Pure reorders during landing reuse page layers, bitmaps and native glass.
@@ -106,15 +106,45 @@ diagnostics README. They explain why the implementation is shaped the way it is.
 - At arrival, the native drag group and CA preview are removed together before
   revealing the grid icon. New pointer input, scrolling or window teardown
   finishes the handoff immediately.
-- Creating/moving into folders retains the source preview while shrinking and
-  fading it into the target, without revealing the old source before the
-  asynchronous model update. A replaced target uses its snapshotted rect;
-  rejected merges restore the source after bounded cleanup.
+- Folder merges with available target bitmaps retain a temporary backplate and
+  shared preview, independently of grid rebuilds. Creation animates both app
+  icons; insertion into an existing folder preserves its old preview and moves
+  only the incoming app. `FolderPreviewLayout` supplies the same nine tile rects
+  to the bitmap renderer and the animation.
+- Merge animation starts after model/layout publication and uses explicit CA
+  position/scale animations for 0.24 seconds. Unlike display-link interpolation,
+  these continue in the compositor during subsequent main-thread work. Visible
+  tiles remain opaque; overflow beyond nine tiles fades only at the end.
+- The destination stays hidden through both full rebuilds and content-identical
+  layer reuse until the animation and current preview bitmap are ready. A stale
+  carried-forward bitmap is not treated as ready. Cleanup is bounded at 0.8
+  seconds from release, including model/bitmap waits; rejected merges restore
+  both original cells. Missing target artwork uses the original bounded fallback.
+- Temporary visuals retain existing CGImages, without rendering another bitmap
+  or adding a persistent cache. Native glass geometry is sampled only during
+  this short transition on the existing display link.
 - Batch drops retain their existing behaviour. Cancellation still tears down
   immediately.
 
 ### Displayed operation
 
+- A full layer rebuild restores an active merge highlight by target ID, including
+  its original animation timing. A removed target cancels the preview. Rebuilds
+  that retain their layers also retain the existing highlight.
+- When an app targets another app for folder creation, a temporary backplate
+  expands behind the unchanged target icon over 0.18 seconds. Leaving reverses
+  the scale animation back to its initial size, keeping the material and app
+  opaque until the backplate is removed. Exit uses ease-in, the reverse of the
+  entrance's ease-out, so its visible rim does not collapse immediately. Switching targets
+  retains at most one outgoing highlight while the new one enters; rapid switches
+  discard the oldest outgoing highlight. Existing-folder merge feedback is unchanged.
+  Both highlights use the existing display link and are removed after exit.
+  The native preview shares the app bitmap in a sibling view above the material
+  group so a small backplate neither clips nor covers the icon. With glass off,
+  the same animation uses a CA backplate. A drop keeps the plate until the model
+  replaces the target, with a bounded fallback if the merge is not published.
+  Isolated lifecycle and rendered-stage checks passed; main-app interaction feel
+  and the incremental performance cost still require acceptance testing.
 - A single-item drag stores one displayed operation: merge into a highlighted
   target, insert into a previewed slot, or return to the source. Mouse-up
   consumes that operation without a second pointer hit test.
@@ -247,3 +277,44 @@ frame delivery and GPU work, and **Time Profiler** for CPU attribution. Compare
 memory after the same workload and after hiding; also check that memory does not
 grow across repeated cycles. The app's existing FPS display is not sufficient
 for this comparison. **Do not change defaults solely on a synthetic CPU result.**
+
+### Merge verification (2026-09-17)
+
+The production-grid integration entry point runs real `CAGridView`, mouse-up,
+layout, folder rendering and native glass code in an isolated copy of the app
+target. Classic and glass cases passed creation with delayed model publication,
+intermediate presentation-scale checks, existing/overflow-folder insertion,
+repeated publication, rejection, cancellation and cleanup. An own-window video
+was inspected for the intermediate frames and final preview handoff. The
+callbacks use in-memory fixture data, **not AppStore or persisted user layout**.
+This is not a full-app performance, GPU, memory or macOS 26 measurement.
+
+### Folder dissolution and merge neighbors
+
+- The explicit AppStore dissolve operation posts a pre-update notification; only
+  a visible CA grid with animations enabled prepares a transition. Unrelated
+  folder deletions or ordinary refreshes do not infer this animation.
+- After the replacement layout is available, visible app layers expand from the
+  shared folder-preview tile geometry over 0.24 seconds. Overflow beyond nine
+  tiles starts near the folder center with a fade. Visible neighbors move from
+  their prior coordinates; offscreen apps receive their final layout directly.
+- Cold destination icons borrow cropped tiles from the already-rendered folder
+  bitmap until the existing asynchronous icon load replaces them. Crops use the
+  original logical preview size (not its hover-scaled display rect). This avoids
+  synchronous app-image conversion on the animation's first frame and adds no
+  persistent cache. Overflow slots have no old tile and use the async load.
+- One temporary empty backplate shrinks/fades while actual app layers expand
+  above it. There are no separate floating app bitmaps or long-lived image
+  caches. Initial model geometry remains full-sized until the presentation
+  animation exists, avoiding a native-glass first-frame size flash.
+- Identical publications preserve the animated layers. New content/layout,
+  pointer/scroll interruption, cache invalidation and window teardown finish the
+  transition; an unpublished operation is bounded at 0.8 seconds.
+- Creating a folder also animates visible neighbors into their compacted slots.
+  A second full rebuild samples their current presentation positions and uses
+  the remaining duration; identical publications keep the running animation.
+
+The production-grid verifier exercises two- and ten-app dissolution, overflow,
+neighbors, repeated publication, no-op cleanup, teardown and disabled animation.
+It also checks merge-neighbor animation retention. Model callbacks remain test
+fixtures; these are not full AppStore/persistence or performance benchmarks.

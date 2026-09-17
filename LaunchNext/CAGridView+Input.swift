@@ -81,6 +81,7 @@ extension CAGridView {
     }
 
     func handleScrollWheel(with event: NSEvent) {
+        finishFolderDissolve()
         finishDragLanding()
         // Prefer horizontal movement; vertical precise input can be flipped separately.
         let deltaX = event.scrollingDeltaX
@@ -251,6 +252,7 @@ extension CAGridView {
 
     override func mouseDown(with event: NSEvent) {
         guard !externalAppDragSessionActive else { return }
+        finishFolderDissolve()
         finishDragLanding()
         // 确保成为第一响应者，这样后续的滚轮事件才能被接收
         window?.makeFirstResponder(self)
@@ -1099,7 +1101,8 @@ extension CAGridView {
         let selectionScale: CGFloat = 1.2
         var iconScale: CGFloat = 1.0
         if dropTargetIndex == index {
-            iconScale = 1.1
+            // Creating a folder expands only its temporary backplate.
+            iconScale = containerLayer.sublayers?.contains(where: { $0.name == "creationGlass" }) == true ? 1 : 1.1
         } else if selectedIndex == index {
             iconScale = selectionScale
         } else if hoverMagnificationEnabled, hoveredIndex == index {
@@ -1326,10 +1329,16 @@ extension CAGridView {
         }
 
         dropTargetIndex = index
+        if items.indices.contains(index), case .app = items[index] {
+            showFolderCreationHighlight(at: index)
+        } else {
+            hideFolderCreationHighlight()
+        }
         applyScaleForIndex(index, animated: true)
     }
 
-    func clearDropTargetHighlight() {
+    func clearDropTargetHighlight(preservingCreation: Bool = false) {
+        hideFolderCreationHighlight(preservingForDrop: preservingCreation)
         if let target = dropTargetIndex {
             dropTargetIndex = nil
             applyScaleForIndex(target, animated: true)
@@ -1355,8 +1364,9 @@ extension CAGridView {
         // Save current hover position before clearing
         let savedHoverIndex = currentHoverIndex
 
-        // Clear highlights and reset
-        clearDropTargetHighlight()
+        // Keep a creation backplate until the model replaces it with the folder.
+        let isMerge: Bool = { if case .merge = displayedDrop { return true }; return false }()
+        clearDropTargetHighlight(preservingCreation: isMerge)
         cancelEdgeDragTimer()
 
         // Calculate target position

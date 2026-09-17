@@ -78,32 +78,9 @@ struct FolderInfo: Identifiable, Equatable {
             ctx.shouldAntialias = true
         }
 
-        let rect = NSRect(origin: .zero, size: pointSize)
+        for (index, app) in apps.prefix(9).enumerated() {
+            let iconRect = FolderPreviewLayout.iconRect(at: index, side: side)!
 
-        let outerInset = round(side * 0.12)
-        let contentRect = rect.insetBy(dx: outerInset, dy: outerInset)
-        let innerInset = round(contentRect.width * 0.08)
-        let innerRect = contentRect.insetBy(dx: innerInset, dy: innerInset)
-
-        // 外层缩略图：3x3 马赛克
-        let cols = 3
-        let rows = 3
-        let spacing = max(1, round(innerRect.width * 0.02))
-        let tileW = floor((innerRect.width - CGFloat(cols - 1) * spacing) / CGFloat(cols))
-        let tileH = floor((innerRect.height - CGFloat(rows - 1) * spacing) / CGFloat(rows))
-        let tile = min(tileW, tileH)
-        let totalW = CGFloat(cols) * tile + CGFloat(cols - 1) * spacing
-        let totalH = CGFloat(rows) * tile + CGFloat(rows - 1) * spacing
-        let startX = innerRect.minX + (innerRect.width - totalW) / 2
-        let startYTop = innerRect.maxY - (innerRect.height - totalH) / 2
-
-        for (index, app) in apps.prefix(cols * rows).enumerated() {
-            let row = index / cols
-            let col = index % cols
-            let x = startX + CGFloat(col) * (tile + spacing)
-            let y = startYTop - CGFloat(row + 1) * tile - CGFloat(row) * spacing
-            let iconRect = NSRect(x: x, y: y, width: tile, height: tile)
-            
             // 图标兜底：若应用图标尺寸为0，回退到系统文件图标
             let iconToDraw: NSImage = {
                 let baseIcon = IconStore.shared.icon(for: app)

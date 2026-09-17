@@ -78,6 +78,24 @@ checks = '''
   grid.applyScaleForIndex(1, animated: true)
   precondition(backplate.transform.m11 == 1.2 && grid.syncCalls == 2)
 
+  let creationGrid = CAGridView()
+  let targetIcon = CALayer(); targetIcon.name = "icon"
+  let creationPlate = CALayer(); creationPlate.name = "creationGlass"
+  creationGrid.iconLayers[0][0].addSublayer(targetIcon)
+  creationGrid.iconLayers[0][0].addSublayer(creationPlate)
+  creationGrid.dropTargetIndex = 0
+  creationGrid.applyScaleForIndex(0, animated: true)
+  precondition(CATransform3DIsIdentity(targetIcon.transform),
+               "folder creation must keep the target app at its normal size")
+  let folderIcon = CALayer(); folderIcon.name = "icon"
+  let folderPlate = CALayer(); folderPlate.name = "glass"
+  creationGrid.iconLayers[0][1].addSublayer(folderIcon)
+  creationGrid.iconLayers[0][1].addSublayer(folderPlate)
+  creationGrid.dropTargetIndex = 1
+  creationGrid.applyScaleForIndex(1, animated: true)
+  precondition(folderIcon.transform.m11 == 1.1 && folderPlate.transform.m11 == 1.1,
+               "dropping into an existing folder must retain its existing feedback")
+
   let missing = LaunchpadItem.missingApp(MissingAppPlaceholder(bundlePath:"/missing.app", displayName:"Missing", removableSource:nil))
   precondition(missing.hasSameGridContent(as: missing))
   let renamed = LaunchpadItem.missingApp(MissingAppPlaceholder(bundlePath:"/missing.app", displayName:"Renamed", removableSource:nil))

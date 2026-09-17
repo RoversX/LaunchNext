@@ -31,7 +31,11 @@ extension CAGridView {
     // MARK: - Layer Management
 
     func rebuildLayers(reusing previousItems: [LaunchpadItem]? = nil) {
+        if preserveFolderDissolveLayers(previousItems: previousItems) { return }
         if let previousItems, reuseLayersDuringLanding(previousItems: previousItems) { return }
+        let previousCreationHighlight = folderCreationHighlight
+        removeFolderCreationHighlight(sync: false)
+        captureFolderMergeNeighbors(previousItems: previousItems)
         // Keep the last rendered folder bitmap until its updated contents are
         // ready. This temporary handoff adds no persistent image cache.
         var previousFolderImages: [String: Any] = [:]
@@ -44,7 +48,7 @@ extension CAGridView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         if dragLanding != nil, let draggingLayer {
-            folderGlassOverlay?.resetPageGlass(keeping: draggingLayer)
+            folderGlassOverlay?.resetPageGlass(keeping: draggingLayer, alsoKeeping: folderMergeLanding?.container)
         } else {
             resetFolderGlass()
         }
@@ -58,6 +62,7 @@ extension CAGridView {
         iconLayers.removeAll()
 
         guard !items.isEmpty else {
+            restoreMergePreviewAfterRebuild(previousCreationHighlight: nil)
             CATransaction.commit()
             // print("⚠️ [CAGrid] rebuildLayers: no items")
             return
@@ -79,7 +84,7 @@ extension CAGridView {
                    let previousImage = previousFolderImages[items[i].id] {
                     icon.contents = previousImage
                 }
-                if items[i].id == dragLanding?.itemID { layer.opacity = 0 }
+                if items[i].id == dragLanding?.itemID || isFolderMergeDestination(items[i]) { layer.opacity = 0 }
                 pageContainerLayer.addSublayer(layer)
                 pageLayers.append(layer)
             }
@@ -96,6 +101,9 @@ extension CAGridView {
 
         // Navigate to current page (will be handled by layout() if bounds not ready)
         navigateToPage(currentPage, animated: false)
+        restoreMergePreviewAfterRebuild(previousCreationHighlight: previousCreationHighlight)
+        animateFolderMergeNeighbors()
+        startFolderDissolveIfReady()
         logIfMismatch("rebuildLayers")
     }
 
@@ -230,6 +238,7 @@ extension CAGridView {
             if let cached = folder.cachedIcon(of: folderIconSize, scale: previewScale),
                let cgImage = cached.cgImage(forProposedRect: nil, context: nil, hints: nil) {
                 layer.contents = cgImage
+                layer.setValue(true, forKey: "folderPreviewReady")
                 folderGlassOverlay?.updatePreviewContents(for: layer)
                 return
             }
@@ -242,6 +251,7 @@ extension CAGridView {
                         CATransaction.begin()
                         CATransaction.setDisableActions(true)
                         layer.contents = cgImage
+                        layer.setValue(true, forKey: "folderPreviewReady")
                         self.folderGlassOverlay?.updatePreviewContents(for: layer)
                         CATransaction.commit()
                     }

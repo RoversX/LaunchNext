@@ -437,13 +437,16 @@ final class AppStore: ObservableObject {
     private static let soundEffectsEnabledKey = "soundEffectsEnabled"
 
     static func loadFolderLiquidGlassEnabled(from defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: folderLiquidGlassKey) as? Bool ?? true
+    }
+
+    static func migrateFolderLiquidGlassDefaultIfNeeded(from defaults: UserDefaults) {
         // Enable once for both new and existing installations. Keep the marker
         // across appearance resets so later manual opt-outs remain respected.
         if !defaults.bool(forKey: folderLiquidGlassDefaultMigrationKey) {
             defaults.set(true, forKey: folderLiquidGlassKey)
             defaults.set(true, forKey: folderLiquidGlassDefaultMigrationKey)
         }
-        return defaults.object(forKey: folderLiquidGlassKey) as? Bool ?? true
     }
 
     static func migrateLegacyPreferencesIfNeeded(
@@ -1401,7 +1404,7 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(showLabels, forKey: "showLabels") }
     }
 
-    @Published var folderLiquidGlassEnabled = AppStore.loadFolderLiquidGlassEnabled() {
+    @Published var folderLiquidGlassEnabled = true {
         didSet {
             guard folderLiquidGlassEnabled != oldValue else { return }
             UserDefaults.standard.set(folderLiquidGlassEnabled, forKey: Self.folderLiquidGlassKey)
@@ -2693,6 +2696,8 @@ final class AppStore: ObservableObject {
 
     init() {
         let defaults = UserDefaults.standard
+        Self.migrateFolderLiquidGlassDefaultIfNeeded(from: defaults)
+        folderLiquidGlassEnabled = Self.loadFolderLiquidGlassEnabled(from: defaults)
         let existingInstallBeforeDefaults = defaults.object(forKey: Self.onboardingVersionKey) != nil ||
             defaults.object(forKey: Self.useCAGridRendererKey) != nil ||
             defaults.object(forKey: "isFullscreenMode") != nil ||
@@ -4766,6 +4771,8 @@ final class AppStore: ObservableObject {
         } else {
             return false
         }
+
+        NotificationCenter.default.post(name: .launchpadFolderWillDissolve, object: resolvedFolder)
 
         let folderApps = resolvedFolder.apps
         let folderAppPaths = Set(folderApps.map { standardizedFilePath($0.url.path) })

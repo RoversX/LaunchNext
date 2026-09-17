@@ -36,10 +36,12 @@ extension CAGridView {
             for index in first...last { visible.append(contentsOf: iconLayers[index]) }
         }
         if let draggingLayer { visible.append(draggingLayer) }
+        if let merge = folderMergeLanding { visible.append(merge.container) }
+        if let dissolve = folderDissolveTransition, dissolve.startedAt != nil { visible.append(dissolve.plate) }
         // Avoid allocating even the effect container when the visible pages
         // contain no folders. sync also removes records that left the viewport.
         guard folderGlassOverlay != nil || visible.contains(where: {
-            $0.sublayers?.contains(where: { $0.name == "glass" }) == true
+            $0.sublayers?.contains(where: { $0.name == "glass" || $0.name == "creationGlass" }) == true
         }) else { return }
         let overlay: FolderGlassOverlay
         if let existing = folderGlassOverlay {

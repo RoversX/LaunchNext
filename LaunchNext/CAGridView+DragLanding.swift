@@ -34,6 +34,7 @@ extension CAGridView {
     }
 
     func beginMergeLanding(itemID: String, targetID: String) -> Bool {
+        if beginFolderMergeLanding(itemID: itemID, targetID: targetID) { return true }
         guard let parent = draggingLayer?.superlayer,
               let target = gridContainer(for: targetID),
               let icon = target.sublayers?.first(where: { $0.name == "icon" }) else { return false }
@@ -70,6 +71,7 @@ extension CAGridView {
     /// Sample using the grid's existing display link. Both native glass and its
     /// CA preview read these same model coordinates, with no extra bitmap work.
     func updateDragLanding(at now: CFTimeInterval) {
+        if updateFolderMergeLanding(at: now) { return }
         guard var landing = dragLanding else { return }
         guard now - landing.createdAt < DragLanding.maximumDuration else {
             finishDragLanding()
@@ -160,10 +162,11 @@ extension CAGridView {
     /// Called on arrival, new input, and window teardown. No delayed completion
     /// can accidentally remove a subsequent drag's layer.
     func finishDragLanding() {
-        guard dragLanding != nil else { return }
+        guard dragLanding != nil || folderMergeLanding != nil else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         let destination = dragLandingDestination()
+        finishFolderMergeLanding()
         dragLanding = nil
         removeDraggingVisuals()
         destination?.removeAnimation(forKey: "opacity")
@@ -198,7 +201,7 @@ extension CAGridView {
         for (index, item) in items.enumerated() {
             let container = iconLayers[index / itemsPerPage][index % itemsPerPage]
             container.removeAnimation(forKey: "opacity")
-            container.opacity = item.id == dragLanding?.itemID ? 0 : 1
+            container.opacity = item.id == dragLanding?.itemID || isFolderMergeDestination(item) ? 0 : 1
             container.transform = CATransform3DIdentity
             if let label = container.sublayers?.first(where: { $0.name == "label" }) as? CATextLayer {
                 label.string = item.name

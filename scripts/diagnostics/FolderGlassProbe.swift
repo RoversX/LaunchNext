@@ -370,6 +370,50 @@ final class GlassProbe: NSObject, NSApplicationDelegate {
         overlay!.reset()
         precondition(overlay!.activeGlassCount == 0)
         precondition(folders.allSatisfy { !$0.sublayers![0].isHidden && !$0.sublayers![1].isHidden })
+        // Folder creation grows only its backplate. The target's shared bitmap
+        // must stay outside the small glass view's clipping bounds at full size.
+        let savedPageTransform = page.transform
+        page.transform = CATransform3DIdentity
+        let creation = CALayer()
+        creation.frame = CGRect(x: 200, y: 200, width: 96, height: 96)
+        page.addSublayer(creation)
+        let creationPlate = CALayer()
+        creationPlate.name = "creationGlass"
+        creationPlate.frame = CGRect(x: 5, y: 5, width: 86, height: 86)
+        creationPlate.transform = CATransform3DMakeScale(0.15, 0.15, 1)
+        creation.addSublayer(creationPlate)
+        let targetIcon = CALayer()
+        targetIcon.name = "icon"
+        targetIcon.frame = creation.bounds
+        targetIcon.contents = loadedImage
+        creation.addSublayer(targetIcon)
+        overlay!.sync(containers: [creation], root: canvas.layer!, page: page, viewport: canvas.bounds)
+        let creationGlass = nativeViews(overlay!).first!
+        let previewHost = overlay!.subviews.first { view in
+            view.layer?.sublayers?.contains { ($0.contents as AnyObject?) === (loadedImage as AnyObject?) } == true
+        }!
+        let creationPreview = previewHost.layer!.sublayers!.first {
+            ($0.contents as AnyObject?) === (loadedImage as AnyObject?)
+        }!
+        let fixedIconFrame = creationPreview.frame
+        precondition(fixedIconFrame.size == targetIcon.bounds.size)
+        precondition(creationGlass.frame.width < fixedIconFrame.width / 2)
+        creationPlate.transform = CATransform3DIdentity
+        overlay!.sync(containers: [creation], root: canvas.layer!, page: page, viewport: canvas.bounds)
+        precondition(creationPreview.frame == fixedIconFrame, "backplate growth must not scale the app")
+        precondition(nativeViews(overlay!).first === creationGlass, "growth must reuse one native view")
+        page.transform = CATransform3DMakeTranslation(-80, 0, 0)
+        overlay!.sync(containers: [creation], root: canvas.layer!, page: page,
+                      viewport: canvas.bounds, geometryChanged: false)
+        precondition(previewHost.layer!.sublayerTransform.m41 == -80,
+                     "pure paging must carry the creation icon along with its glass")
+        precondition(creationPreview.frame == fixedIconFrame)
+        creationPlate.removeFromSuperlayer()
+        overlay!.sync(containers: [creation], root: canvas.layer!, page: page, viewport: canvas.bounds)
+        precondition(!targetIcon.isHidden && previewHost.superview == nil)
+        precondition(overlay!.activeGlassCount == 0)
+        creation.removeFromSuperlayer()
+        page.transform = savedPageTransform
         let released = overlay
         overlay!.removeFromSuperview()
         overlay = nil
