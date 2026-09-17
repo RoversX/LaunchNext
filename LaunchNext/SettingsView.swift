@@ -4794,6 +4794,26 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     .toggleStyle(.switch)
             }
 
+            if !appStore.isFullscreenMode {
+                WindowDimensionLimitField(title: appStore.localized(.windowMaxWidthTitle),
+                                          automatic: appStore.localized(.windowSizeAutomatic),
+                                          value: $appStore.compactWindowMaxWidth)
+                    .help(appStore.localized(.windowSizeLimitHint))
+                WindowDimensionLimitField(title: appStore.localized(.windowMaxHeightTitle),
+                                          automatic: appStore.localized(.windowSizeAutomatic),
+                                          value: $appStore.compactWindowMaxHeight)
+                    .help(appStore.localized(.windowSizeLimitHint))
+                HStack {
+                    Text(appStore.localized(.windowShadowTitle))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Toggle(appStore.localized(.windowShadowTitle), isOn: $appStore.windowShadowEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+                .help(appStore.localized(.windowShadowHint))
+            }
+
             HStack {
                 Text(appStore.localized(.showLabels))
                 Spacer()
@@ -5856,58 +5876,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert(AppStore.gestureShowAllInputDevicesKey)
                 }
                 if appearanceCheckbox.state == .on {
-                    keys.insert(AppStore.sidebarIconPresetKey)
-                    keys.insert(AppStore.backgroundStyleKey)
-                    keys.insert(AppStore.backgroundImageEnabledKey)
-                    keys.insert(AppStore.backgroundImageSourceKey)
-                    keys.insert(AppStore.customBackgroundImagePathKey)
-                    keys.insert(AppStore.backgroundMaskEnabledKey)
-                    keys.insert(AppStore.backgroundMaskLightKey)
-                    keys.insert(AppStore.backgroundMaskDarkKey)
-                    keys.insert("scrollSensitivity")
-                    keys.insert("isFullscreenMode")
-                    keys.insert("showLabels")
-                    keys.insert("hideDock")
-                    keys.insert(AppStore.hideMenuBarKey)
-                    keys.insert("enableAnimations")
-                    keys.insert(AppStore.windowOpenAnimationKey)
-                    keys.insert(AppStore.windowAnimationDurationKey)
-                    keys.insert("useLocalizedThirdPartyTitles")
-                    keys.insert("enableDropPrediction")
-                    keys.insert(AppStore.reverseWheelPagingKey)
-                    keys.insert(AppStore.reverseWheelVerticalKey)
-                    keys.insert(AppStore.trackpadVerticalDirectionKey)
-                    keys.insert(AppStore.rememberPageKey)
-                    keys.insert(AppStore.rememberedPageIndexKey)
-                    keys.insert("iconScale")
-                    keys.insert("iconLabelFontSize")
-                    keys.insert(AppStore.iconLabelFontWeightKey)
-                    keys.insert("gridColumnsPerPage")
-                    keys.insert("gridRowsPerPage")
-                    keys.insert("gridColumnSpacing")
-                    keys.insert("gridRowSpacing")
-                    keys.insert("folderDropZoneScale")
-                    keys.insert(AppStore.folderPreviewHighResKey)
-                    keys.insert(AppStore.folderQuickLaunchEnabledKey)
-                    keys.insert(AppStore.folderLayoutModeKey)
-                    keys.insert("pageIndicatorOffset")
-                    keys.insert(AppStore.pageIndicatorTopPaddingKey)
-                    keys.insert(AppStore.pageIndicatorPerDisplayEnabledKey)
-                    keys.insert(AppStore.pageIndicatorPerDisplayOverridesKey)
-                    keys.insert(AppStore.dualModeAppearanceSettingsKey)
-                    keys.insert(AppStore.dockDragEnabledKey)
-                    keys.insert("folderPopoverWidthFactor")
-                    keys.insert("folderPopoverHeightFactor")
-                    keys.insert(AppStore.hoverMagnificationKey)
-                    keys.insert(AppStore.hoverMagnificationScaleKey)
-                    keys.insert(AppStore.activePressEffectKey)
-                    keys.insert(AppStore.activePressScaleKey)
-                    keys.insert("animationDuration")
-                    keys.insert("globalHotKeyConfiguration")
-                    keys.insert(AppStore.useCAGridRendererKey)
-                    keys.insert("showFPSOverlay")
-                    keys.insert("gameControllerEnabled")
-                    keys.insert(AppStore.gameControllerMenuToggleKey)
+                    keys.formUnion(appStore.appearanceBackupPreferenceKeys)
                 }
                 if hiddenCheckbox.state == .on {
                     keys.insert(AppStore.hiddenAppsKey)
@@ -5958,11 +5927,10 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         }
 
         let domain = currentPrefsDomain
-        guard var dict = UserDefaults.standard.persistentDomain(forName: domain), !dict.isEmpty else { return }
-        dict.removeValue(forKey: AppStore.showQuarantineRemovalActionKey)
-        guard !dict.isEmpty else { return }
         let url = folder.appendingPathComponent("\(domain).plist")
         do {
+            let persisted = UserDefaults.standard.persistentDomain(forName: domain) ?? [:]
+            let dict = try appStore.preferencesForBackup(persisted: persisted)
             let data = try PropertyListSerialization.data(fromPropertyList: dict, format: .xml, options: 0)
             try data.write(to: url)
         } catch {
@@ -6494,5 +6462,43 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 .stroke(Color.white.opacity(0.18), lineWidth: 1.4)
         )
         .padding(.bottom, 12)
+    }
+}
+
+// Commit on Return or focus loss so typing does not repeatedly resize the window.
+private struct WindowDimensionLimitField: View {
+    let title: String
+    let automatic: String
+    @Binding var value: Int
+    @State private var draft = ""
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        HStack {
+            Text(title).fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            TextField(automatic, text: $draft)
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 128)
+                .focused($isFocused)
+                .accessibilityLabel(title)
+                .onSubmit { commit() }
+            Text("pt").foregroundStyle(.secondary)
+        }
+        .onAppear { syncDraft() }
+        .onChange(of: value) { _, _ in syncDraft() }
+        .onChange(of: isFocused) { _, focused in
+            if !focused { commit() }
+        }
+    }
+
+    private func syncDraft() { draft = value == 0 ? "" : String(value) }
+
+    private func commit() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { value = 0 }
+        else if let number = Int(text), number >= 0 { value = number }
+        syncDraft()
     }
 }

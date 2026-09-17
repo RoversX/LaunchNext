@@ -1377,10 +1377,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
         window?.collectionBehavior = [.transient, .canJoinAllApplications, .fullScreenAuxiliary, .ignoresCycle]
         window?.isOpaque = false
         window?.backgroundColor = .clear
-        window?.hasShadow = true
         window?.contentAspectRatio = NSSize(width: 4, height: 3)
-        window?.contentMinSize = minimumContentSize
-        window?.minSize = window?.frameRect(forContentRect: NSRect(origin: .zero, size: minimumContentSize)).size ?? minimumContentSize
+        if let window { updateMinimumWindowSize(window, for: screen) }
         
         configureModelLayerIfNeeded()
         if let container = modelContainer {
@@ -1580,13 +1578,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     func updateWindowMode(isFullscreen: Bool) {
         guard let window = window else { return }
         let screen = getCurrentActiveScreen() ?? NSScreen.main!
-        window.setFrame(isFullscreen ? screen.frame : calculateContentRect(for: screen), display: true)
-        window.hasShadow = !isFullscreen
+        updateMinimumWindowSize(window, for: screen)
         window.contentAspectRatio = isFullscreen ? NSSize(width: 0, height: 0) : NSSize(width: 4, height: 3)
+        window.setFrame(isFullscreen ? screen.frame : calculateContentRect(for: screen), display: true)
         applyCornerRadius()
     }
     
+    func updateWindowShadow() {
+        guard let window else { return }
+        let enabled = !appStore.isFullscreenMode && appStore.windowShadowEnabled
+        if window.hasShadow != enabled { window.hasShadow = enabled }
+    }
+
     private func applyCornerRadius() {
+        updateWindowShadow()
         guard let contentView = window?.contentView else { return }
         contentView.wantsLayer = true
         contentView.layer?.cornerRadius = appStore.isFullscreenMode ? 0 : 30
@@ -1594,10 +1599,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     }
     
     private func calculateContentRect(for screen: NSScreen) -> NSRect {
-        let frame = screen.visibleFrame
-        let width = max(frame.width * 0.4, minimumContentSize.width, minimumContentSize.height * 4/3)
-        let height = width * 3/4
-        return NSRect(x: frame.midX - width/2, y: frame.midY - height/2, width: width, height: height)
+        CompactWindowLayout.frame(in: screen.visibleFrame, minimum: minimumContentSize,
+                                  maximumWidth: appStore.compactWindowMaxWidth,
+                                  maximumHeight: appStore.compactWindowMaxHeight)
+    }
+
+    private func updateMinimumWindowSize(_ window: NSWindow, for screen: NSScreen) {
+        let size = CompactWindowLayout.minimumSize(in: screen.visibleFrame, preferred: minimumContentSize)
+        window.contentMinSize = size
+        window.minSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: size)).size
     }
     
     private func getCurrentActiveScreen() -> NSScreen? {
@@ -1626,6 +1636,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
 
         let screen = getCurrentActiveScreen() ?? NSScreen.main!
         let rect = appStore.isFullscreenMode ? screen.frame : calculateContentRect(for: screen)
+        updateMinimumWindowSize(window, for: screen)
         window.setFrame(rect, display: true)
         applyCornerRadius()
 
@@ -1740,7 +1751,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     }
     
     func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
-        let minSize = minimumContentSize
+        let minSize = sender.contentMinSize
         let contentSize = sender.contentRect(forFrameRect: NSRect(origin: .zero, size: frameSize)).size
         let clamped = NSSize(width: max(contentSize.width, minSize.width), height: max(contentSize.height, minSize.height))
         return sender.frameRect(forContentRect: NSRect(origin: .zero, size: clamped)).size

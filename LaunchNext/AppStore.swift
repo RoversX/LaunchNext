@@ -389,6 +389,9 @@ final class AppStore: ObservableObject {
     static let useCAGridRendererKey = "useCAGridRenderer"
     static let folderLayoutModeKey = "folderLayoutMode"
     static let windowOpenAnimationKey = "windowOpenAnimationEnabled"
+    static let windowShadowEnabledKey = "windowShadowEnabled"
+    static let compactWindowMaxWidthKey = "compactWindowMaxWidth"
+    static let compactWindowMaxHeightKey = "compactWindowMaxHeight"
     static let windowAnimationDurationKey = "windowAnimationDuration"
     static let developmentEnableCLICodeKey = "developmentEnableCLICode"
     static let showQuarantineRemovalActionKey = "showQuarantineRemovalAction"
@@ -822,6 +825,90 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // One catalogue supplies both effective export values and the appearance
+    // import allowlist. Reading it must not register or persist defaults.
+    private var appearanceBackupValues: [String: Any] {
+        [
+            Self.sidebarIconPresetKey: sidebarIconPreset.rawValue,
+            Self.backgroundStyleKey: launchpadBackgroundStyle.rawValue,
+            Self.backgroundImageEnabledKey: backgroundImageEnabled,
+            Self.backgroundImageSourceKey: backgroundImageSource.rawValue,
+            Self.customBackgroundImagePathKey: customBackgroundImagePath,
+            Self.backgroundMaskEnabledKey: backgroundMaskEnabled,
+            "scrollSensitivity": scrollSensitivity,
+            "isFullscreenMode": isFullscreenMode,
+            "showLabels": showLabels,
+            "hideDock": hideDock,
+            Self.hideMenuBarKey: hideMenuBar,
+            "enableAnimations": enableAnimations,
+            Self.windowOpenAnimationKey: enableWindowOpenAnimation,
+            Self.windowShadowEnabledKey: windowShadowEnabled,
+            Self.compactWindowMaxWidthKey: compactWindowMaxWidth,
+            Self.compactWindowMaxHeightKey: compactWindowMaxHeight,
+            Self.windowAnimationDurationKey: windowAnimationDuration,
+            "useLocalizedThirdPartyTitles": useLocalizedThirdPartyTitles,
+            "enableDropPrediction": enableDropPrediction,
+            Self.reverseWheelPagingKey: reverseWheelPagingDirection,
+            Self.reverseWheelVerticalKey: reverseWheelVerticalDirection,
+            Self.trackpadVerticalDirectionKey: trackpadVerticalDirection.rawValue,
+            Self.rememberPageKey: rememberLastPage,
+            Self.rememberedPageIndexKey: UserDefaults.standard.integer(forKey: Self.rememberedPageIndexKey),
+            "iconScale": iconScale,
+            "iconLabelFontSize": iconLabelFontSize,
+            Self.iconLabelFontWeightKey: iconLabelFontWeight.rawValue,
+            Self.gridColumnsKey: gridColumnsPerPage,
+            Self.gridRowsKey: gridRowsPerPage,
+            Self.columnSpacingKey: iconColumnSpacing,
+            Self.rowSpacingKey: iconRowSpacing,
+            Self.folderDropZoneScaleKey: folderDropZoneScale,
+            Self.folderLiquidGlassKey: folderLiquidGlassEnabled,
+            Self.folderPreviewHighResKey: enableHighResFolderPreviews,
+            Self.folderQuickLaunchEnabledKey: folderQuickLaunchEnabled,
+            Self.folderLayoutModeKey: folderLayoutMode.rawValue,
+            "pageIndicatorOffset": pageIndicatorOffset,
+            Self.pageIndicatorTopPaddingKey: pageIndicatorTopPadding,
+            Self.pageIndicatorPerDisplayEnabledKey: pageIndicatorPerDisplayEnabled,
+            Self.dockDragEnabledKey: dockDragEnabled,
+            "folderPopoverWidthFactor": folderPopoverWidthFactor,
+            "folderPopoverHeightFactor": folderPopoverHeightFactor,
+            Self.hoverMagnificationKey: enableHoverMagnification,
+            Self.hoverMagnificationScaleKey: hoverMagnificationScale,
+            Self.activePressEffectKey: enableActivePressEffect,
+            Self.activePressScaleKey: activePressScale,
+            "animationDuration": animationDuration,
+            Self.globalHotKeyKey: globalHotKey?.dictionaryRepresentation ?? [:],
+            Self.useCAGridRendererKey: useCAGridRenderer,
+            "showFPSOverlay": showFPSOverlay,
+            Self.gameControllerEnabledKey: gameControllerEnabled,
+            Self.gameControllerMenuToggleKey: gameControllerMenuTogglesLaunchpad
+        ]
+    }
+
+    private var encodedAppearanceBackupValues: [String: any Encodable] {
+        [
+            Self.backgroundMaskLightKey: backgroundMaskLightColor,
+            Self.backgroundMaskDarkKey: backgroundMaskDarkColor,
+            Self.pageIndicatorPerDisplayOverridesKey: pageIndicatorOverrides,
+            Self.dualModeAppearanceSettingsKey: dualModeAppearanceSettings
+        ]
+    }
+
+    var appearanceBackupPreferenceKeys: Set<String> {
+        Set(appearanceBackupValues.keys).union(encodedAppearanceBackupValues.keys)
+    }
+
+    func preferencesForBackup(persisted: [String: Any]) throws -> [String: Any] {
+        var result = persisted
+        result.merge(appearanceBackupValues) { _, effectiveValue in effectiveValue }
+        let encoder = JSONEncoder()
+        for (key, value) in encodedAppearanceBackupValues {
+            result[key] = try encoder.encode(value)
+        }
+        // Developer quarantine tooling remains local to this Mac.
+        result.removeValue(forKey: Self.showQuarantineRemovalActionKey)
+        return result
+    }
+
     private static func writeDefaultAppearancePreferences(to defaults: UserDefaults) {
         defaults.set(SidebarIconPreset.large.rawValue, forKey: Self.sidebarIconPresetKey)
         defaults.set(AppearancePreference.system.rawValue, forKey: "appearancePreference")
@@ -859,6 +946,9 @@ final class AppStore: ObservableObject {
         defaults.set(IconLabelFontWeightOption.medium.rawValue, forKey: Self.iconLabelFontWeightKey)
         defaults.set(Self.defaultAnimationDuration, forKey: "animationDuration")
         defaults.set(true, forKey: Self.windowOpenAnimationKey)
+        defaults.set(false, forKey: Self.windowShadowEnabledKey)
+        defaults.set(0, forKey: Self.compactWindowMaxWidthKey)
+        defaults.set(0, forKey: Self.compactWindowMaxHeightKey)
         defaults.set(Self.defaultWindowAnimationDuration, forKey: Self.windowAnimationDurationKey)
         defaults.set(true, forKey: "useLocalizedThirdPartyTitles")
         defaults.set(Self.defaultPageIndicatorOffset, forKey: "pageIndicatorOffset")
@@ -934,6 +1024,9 @@ final class AppStore: ObservableObject {
         iconLabelFontWeight = defaults.string(forKey: Self.iconLabelFontWeightKey).flatMap(IconLabelFontWeightOption.init(rawValue:)) ?? .medium
         showFPSOverlay = defaults.object(forKey: "showFPSOverlay") as? Bool ?? false
         enableWindowOpenAnimation = defaults.object(forKey: Self.windowOpenAnimationKey) as? Bool ?? true
+        windowShadowEnabled = defaults.object(forKey: Self.windowShadowEnabledKey) as? Bool ?? false
+        compactWindowMaxWidth = CompactWindowLayout.normalizedMaximumWidth(defaults.integer(forKey: Self.compactWindowMaxWidthKey))
+        compactWindowMaxHeight = CompactWindowLayout.normalizedMaximumHeight(defaults.integer(forKey: Self.compactWindowMaxHeightKey))
         windowAnimationDuration = Self.clampWindowAnimationDuration(
             defaults.object(forKey: Self.windowAnimationDurationKey) as? Double ?? Self.defaultWindowAnimationDuration
         )
@@ -1755,6 +1848,39 @@ final class AppStore: ObservableObject {
         return UserDefaults.standard.bool(forKey: AppStore.windowOpenAnimationKey)
     }() {
         didSet { UserDefaults.standard.set(enableWindowOpenAnimation, forKey: Self.windowOpenAnimationKey) }
+    }
+
+    @Published var compactWindowMaxWidth = 0 {
+        didSet {
+            compactWindowMaxWidth = CompactWindowLayout.normalizedMaximumWidth(compactWindowMaxWidth)
+            guard compactWindowMaxWidth != oldValue else { return }
+            UserDefaults.standard.set(compactWindowMaxWidth, forKey: Self.compactWindowMaxWidthKey)
+            refreshCompactWindowSize()
+        }
+    }
+
+    @Published var compactWindowMaxHeight = 0 {
+        didSet {
+            compactWindowMaxHeight = CompactWindowLayout.normalizedMaximumHeight(compactWindowMaxHeight)
+            guard compactWindowMaxHeight != oldValue else { return }
+            UserDefaults.standard.set(compactWindowMaxHeight, forKey: Self.compactWindowMaxHeightKey)
+            refreshCompactWindowSize()
+        }
+    }
+
+    private func refreshCompactWindowSize() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.isFullscreenMode else { return }
+            AppDelegate.shared?.updateWindowMode(isFullscreen: false)
+        }
+    }
+
+    @Published var windowShadowEnabled = false {
+        didSet {
+            guard windowShadowEnabled != oldValue else { return }
+            UserDefaults.standard.set(windowShadowEnabled, forKey: Self.windowShadowEnabledKey)
+            AppDelegate.shared?.updateWindowShadow()
+        }
     }
 
     @Published var windowAnimationDuration: Double = {
@@ -2696,6 +2822,9 @@ final class AppStore: ObservableObject {
 
     init() {
         let defaults = UserDefaults.standard
+        compactWindowMaxWidth = CompactWindowLayout.normalizedMaximumWidth(defaults.integer(forKey: Self.compactWindowMaxWidthKey))
+        compactWindowMaxHeight = CompactWindowLayout.normalizedMaximumHeight(defaults.integer(forKey: Self.compactWindowMaxHeightKey))
+        windowShadowEnabled = defaults.object(forKey: Self.windowShadowEnabledKey) as? Bool ?? false
         Self.migrateFolderLiquidGlassDefaultIfNeeded(from: defaults)
         folderLiquidGlassEnabled = Self.loadFolderLiquidGlassEnabled(from: defaults)
         let existingInstallBeforeDefaults = defaults.object(forKey: Self.onboardingVersionKey) != nil ||
@@ -4907,6 +5036,9 @@ final class AppStore: ObservableObject {
             Self.iconLabelFontWeightKey,
             "animationDuration",
             Self.windowOpenAnimationKey,
+            Self.windowShadowEnabledKey,
+            Self.compactWindowMaxWidthKey,
+            Self.compactWindowMaxHeightKey,
             Self.windowAnimationDurationKey,
             "useLocalizedThirdPartyTitles",
             "pageIndicatorOffset",

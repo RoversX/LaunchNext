@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B10000242F70000100ABCDEF /* CompactWindowLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000232F70000100ABCDEF /* CompactWindowLayout.swift */; };
 		A1E2B5C02F4A8A1B00F12345 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = A1E2B5CB2F4A8A1B00F12345 /* Localizable.strings */; };
 		B10000222F70000100ABCDEF /* GridReorderPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000212F70000100ABCDEF /* GridReorderPlan.swift */; };
 		C200000D2F70000100ABCDEF /* libLaunchNextContextMenuCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */; };
@@ -47,6 +48,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		B10000232F70000100ABCDEF /* CompactWindowLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CompactWindowLayout.swift; path = LaunchNext/CompactWindowLayout.swift; sourceTree = SOURCE_ROOT; };
 		0D1B0B402E4CDE460083EEF9 /* LaunchNext.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LaunchNext.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0F7A6B1C3E2D4F5A6B7C8D9E /* OpenMultitouchSupport.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = OpenMultitouchSupport.xcconfig; sourceTree = "<group>"; };
 		690FA1FB2E88822200948FA6 /* cs */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = cs; path = cs.lproj/Localizable.strings; sourceTree = "<group>"; };
@@ -165,6 +167,7 @@
 			isa = PBXGroup;
 			children = (
 				B10000212F70000100ABCDEF /* GridReorderPlan.swift */,
+				B10000232F70000100ABCDEF /* CompactWindowLayout.swift */,
 			);
 			name = "Recovered References";
 			sourceTree = "<group>";
@@ -386,6 +389,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B10000222F70000100ABCDEF /* GridReorderPlan.swift in Sources */,
+				B10000242F70000100ABCDEF /* CompactWindowLayout.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

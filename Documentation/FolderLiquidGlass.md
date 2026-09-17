@@ -51,6 +51,47 @@ diagnostics README. They explain why the implementation is shaped the way it is.
   itself.
 - Folder preview images share the existing CA bitmap. The original preview and
   backplate layers remain layout references and are hidden only while replaced.
+- Temporary folder-creation backplates use a separate effect container from
+  ordinary folders. It is allocated on demand, follows the same bounded page
+  coordinates, and is removed when its last native glass child is released.
+  Root-attached merge previews use the drag group and do not keep this empty
+  page group alive during landing.
+  This isolates hover-driven group membership changes; the user confirmed that
+  the reported whole-grid refraction flash stopped in the main app. No new
+  bitmap cache or timer is introduced, but the transient effect surface has not
+  been profiled for GPU or memory cost.
+- A separate transient rectangular edge remains under investigation in windowed
+  mode. The user also observed it with stationary folders and pointer, so drag
+  or hover scaling is not a necessary trigger. Forced native subtree layout on
+  resize did not solve it and has been removed. The user reported that disabling
+  the native window shadow on macOS 27 removed the artifact while preserving
+  rounded clipping and folder glass. Appearance settings now offer a Window
+  shadow toggle only in windowed mode. It defaults to off, persists across launches,
+  and applies immediately without rebuilding grid content. Appearance reset
+  restores the default, and appearance backup import includes the preference.
+  Fullscreen remains shadowless regardless of this preference.
+  No timer, bitmap cache or per-frame shadow invalidation is added.
+  Isolated static-folder recordings with
+  a changing backdrop have not reproduced the reported rectangular edge.
+  Scaling a plain outer view instead was rejected: layer
+  coordinates passed, but the rendered material stayed small and clipped the
+  enlarged preview. That wrapper is not present in the implementation.
+
+### Appearance backup and idle work
+
+- Appearance backup export overlays effective settings, including unwritten
+  defaults, onto the persisted preferences. The same catalogue supplies the
+  appearance import allowlist, including the folder-glass opt-out and window
+  shadow setting. Export does not write defaults or migrate preferences.
+  Other import categories retain their existing selection boundaries. Older
+  backups with absent keys still leave the corresponding target settings alone.
+- A drag-position update that has no drag, unchanged single-item hover, or no
+  page leaves the existing glass sampling deadline unchanged. Actual position
+  updates continue to schedule sampling; already-running animations can finish.
+- The overlay probe checks release of the empty page group while a root merge
+  preview remains visible. The production-grid guardrail checks cover the idle
+  deadline and real updates in both glass modes. These are state checks, not
+  CPU, GPU, memory-footprint or complete backup/restore UI measurements.
 
 ### Paging
 
