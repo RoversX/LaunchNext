@@ -677,15 +677,27 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(appStore.localized(section.localizationKey))
                         .font(.title3.bold())
+                        .padding(.horizontal, 24)
 
                     ScrollView(showsIndicators: false) {
                         scrollContent(for: section)
+                            // Keep glass overflow inside the scroll viewport,
+                            // rather than clipping it at the card's side edges.
+                            .padding(.horizontal, 24)
                     }
                     .scrollDisabled(section == .about || section == .general)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .scrollBounceBehavior(.basedOnSize)
+
+                    if section == .general {
+                        // Reserve the controls' native height and anchor them
+                        // to the panel bottom independently of the cards above.
+                        generalActions
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 24)
+                            .padding(.bottom, 16)
+                    }
                 }
-                .padding(.horizontal, 24)
                 .padding(.top, 16)
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
             }
@@ -1572,6 +1584,9 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         hiddenAppsEmptyState
                     }
                 }
+                // Leave room for glass outside the cards within the disclosure content.
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
             } label: {
                 Label(appStore.localized(.settingsSectionHiddenApps), systemImage: "eye.slash")
                     .font(.headline)
@@ -1610,6 +1625,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         }
                     }
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
             } label: {
                 Label(appStore.localized(.notHiddenAppsTitle), systemImage: "eye")
                     .font(.headline)
@@ -2882,46 +2899,48 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .padding(.top, -15)
+        }
+    }
 
-            HStack {
-                Button { appStore.refresh() } label: {
-                    Label(appStore.localized(.refresh), systemImage: "arrow.clockwise")
-                }
-                Spacer()
-                Menu {
-                    Button(role: .destructive) {
-                        showResetConfirm = true
-                    } label: {
-                        Label(appStore.localized(.resetLayout), systemImage: "square.grid.3x3")
-                    }
-                    Button(role: .destructive) {
-                        showResetAppearanceConfirm = true
-                    } label: {
-                        Label(appStore.localized(.resetAppearanceSettings), systemImage: "paintbrush")
-                    }
+    private var generalActions: some View {
+        HStack {
+            Button { appStore.refresh() } label: {
+                Label(appStore.localized(.refresh), systemImage: "arrow.clockwise")
+            }
+            Spacer()
+            Menu {
+                Button(role: .destructive) {
+                    showResetConfirm = true
                 } label: {
-                    Label(appStore.localized(.resetConfirm), systemImage: "arrow.counterclockwise")
-                        .foregroundStyle(Color.red)
+                    Label(appStore.localized(.resetLayout), systemImage: "square.grid.3x3")
                 }
-                .menuStyle(.borderlessButton)
-                .alert(appStore.localized(.resetAlertTitle), isPresented: $showResetConfirm) {
-                    Button(appStore.localized(.resetConfirm), role: .destructive) { appStore.resetLayout() }
-                    Button(appStore.localized(.cancel), role: .cancel) {}
-                } message: {
-                    Text(appStore.localized(.resetAlertMessage))
-                }
-                .alert(appStore.localized(.resetAppearanceAlertTitle), isPresented: $showResetAppearanceConfirm) {
-                    Button(appStore.localized(.resetConfirm), role: .destructive) { appStore.resetAppearanceSettings() }
-                    Button(appStore.localized(.cancel), role: .cancel) {}
-                } message: {
-                    Text(appStore.localized(.resetAppearanceAlertMessage))
-                }
-                Button {
-                    AppDelegate.shared?.quitWithFade()
+                Button(role: .destructive) {
+                    showResetAppearanceConfirm = true
                 } label: {
-                    Label(appStore.localized(.quit), systemImage: "xmark.circle")
-                        .foregroundStyle(Color.red)
+                    Label(appStore.localized(.resetAppearanceSettings), systemImage: "paintbrush")
                 }
+            } label: {
+                Label(appStore.localized(.resetConfirm), systemImage: "arrow.counterclockwise")
+                    .foregroundStyle(Color.red)
+            }
+            .menuStyle(.borderlessButton)
+            .alert(appStore.localized(.resetAlertTitle), isPresented: $showResetConfirm) {
+                Button(appStore.localized(.resetConfirm), role: .destructive) { appStore.resetLayout() }
+                Button(appStore.localized(.cancel), role: .cancel) {}
+            } message: {
+                Text(appStore.localized(.resetAlertMessage))
+            }
+            .alert(appStore.localized(.resetAppearanceAlertTitle), isPresented: $showResetAppearanceConfirm) {
+                Button(appStore.localized(.resetConfirm), role: .destructive) { appStore.resetAppearanceSettings() }
+                Button(appStore.localized(.cancel), role: .cancel) {}
+            } message: {
+                Text(appStore.localized(.resetAppearanceAlertMessage))
+            }
+            Button {
+                AppDelegate.shared?.quitWithFade()
+            } label: {
+                Label(appStore.localized(.quit), systemImage: "xmark.circle")
+                    .foregroundStyle(Color.red)
             }
         }
     }
