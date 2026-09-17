@@ -5012,7 +5012,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     Text(appStore.localized(.wallpaperPreviewHint))
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                } else if #available(macOS 27, *) {
+                } else {
                     WallpaperCapturePermissionView(appStore: appStore)
                 }
             }
@@ -5176,8 +5176,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     @MainActor
     private func requestWallpaperAccessIfNeeded() async {
-        guard #available(macOS 27, *), !requestingWallpaperAccess,
-              let screen = NSApp.keyWindow?.screen ?? NSScreen.main else { return }
+        guard !requestingWallpaperAccess,
+              let screen = AppDelegate.shared?.launchpadWindow?.screen ?? NSScreen.main else { return }
         requestingWallpaperAccess = true
         defer { requestingWallpaperAccess = false }
         let readable = await BackgroundImageController.canReadStaticWallpaper(for: screen)

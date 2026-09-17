@@ -1,8 +1,8 @@
 import AppKit
 import Combine
 
-/// Observes desktop changes, never screen pixels. Kept alive while the matching
-/// wallpaper option is enabled, including while the launcher is hidden.
+/// Observes desktop changes, never screen pixels. Kept alive for either system
+/// wallpaper source, including while the launcher is hidden.
 @MainActor
 final class WallpaperContextMonitor {
     private var subscriptions: Set<AnyCancellable> = []

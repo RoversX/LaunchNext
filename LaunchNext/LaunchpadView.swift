@@ -330,11 +330,7 @@ struct LaunchpadView: View {
                    changedWindow === AppDelegate.shared?.launchpadWindow else { return }
              // A window can report its screen again when it is shown. Validate
              // the display/context instead of discarding a settled frame.
-             if #available(macOS 27, *) {
-                 refreshBackgroundImage(reason: .contextChecked)
-             } else {
-                 refreshBackgroundImage(reason: .contextChanged)
-             }
+             refreshBackgroundImage(reason: .contextChecked)
          }
          .onChange(of: appStore.backgroundImageEnabled) { _, _ in
              refreshBackgroundImage(reason: .settingsChanged)
@@ -359,7 +355,7 @@ struct LaunchpadView: View {
              refreshBackgroundImage(reason: .settingsChanged)
          }
          .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-             if #available(macOS 27, *), appStore.backgroundImageEnabled,
+             if appStore.backgroundImageEnabled,
                 appStore.backgroundImageSource == .desktopWallpaper {
                  WallpaperCaptureAccess.shared.refresh()
              }

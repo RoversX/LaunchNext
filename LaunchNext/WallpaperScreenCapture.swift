@@ -124,7 +124,7 @@ struct WallpaperCapturePermissionView: View {
         }
         .task(id: checkGeneration) {
             access.refresh()
-            guard let screen = NSApp.keyWindow?.screen ?? NSScreen.main else { return }
+            guard let screen = AppDelegate.shared?.launchpadWindow?.screen ?? NSScreen.main else { return }
             let readable = await BackgroundImageController.canReadStaticWallpaper(for: screen)
             guard !Task.isCancelled else { return }
             staticImageIsReadable = readable
