@@ -1420,114 +1420,52 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     // }
 
     private var performanceSection: some View {
-        let stats = appStore.cacheStatistics
         let isLeanMode = appStore.performanceMode == .lean
-        let canUseCAGrid = appStore.performanceMode == .lean
-
-        return VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 20) {
                 Text(appStore.localized(.performanceModeTitle))
-                    .font(.title3.weight(.semibold))
-                Text(appStore.localized(.performanceModeSubtitle))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-
+                    .font(.headline)
                 performanceModePicker()
-
-                Text(appStore.localized(isLeanMode ? .performanceModeDescriptionLean : .performanceModeDescriptionFull))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
 
                 Divider()
 
-                HStack(alignment: .center, spacing: 10) {
-                    HStack(alignment: .top, spacing: 8) {
-                        Text(appStore.localized(.performanceRendererBadge))
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(Color.accentColor)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.accentColor.opacity(0.15), in: Capsule())
+                Toggle(isOn: $appStore.useCAGridRenderer) {
+                    VStack(alignment: .leading, spacing: 6) {
                         Text(appStore.localized(.performanceRendererTitle))
-                            .font(.headline)
+                            .font(.body.weight(.medium))
+                        Text(appStore.localized(!isLeanMode ? .performanceRendererSubtitle :
+                            (appStore.useCAGridRenderer ? .performanceRendererWarning : .performanceRendererRecommendation)))
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Spacer()
-                    Toggle("", isOn: $appStore.useCAGridRenderer)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .disabled(!canUseCAGrid)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .opacity(canUseCAGrid ? 1 : 0.5)
-
-                if !canUseCAGrid {
-                    Text(appStore.localized(.performanceRendererSubtitle))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                if appStore.useCAGridRenderer {
-                    Text(appStore.localized(.performanceRendererWarning))
-                        .font(.footnote)
-                        .foregroundStyle(Color.accentColor)
-                }
-
-                if !appStore.useCAGridRenderer {
-                    Text(appStore.localized(.performanceRendererRecommendation))
-                        .font(.caption)
-                        .foregroundStyle(Color.accentColor)
-                }
+                .toggleStyle(.switch)
+                .tint(PerformanceEngineSelector.accent)
+                .disabled(!isLeanMode)
+                .help(appStore.localized(.performanceRendererBadge))
             }
-            .padding(10)
+            .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(Color(nsColor: .quaternarySystemFill),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 16) {
                     Text(appStore.localized(.performanceCacheTitle))
-                        .font(.title3.weight(.semibold))
-                    Spacer()
-                    if isLeanMode {
-                        leanModeBadge()
-                    }
-                    cacheStatusBadge(isValid: stats.isCacheValid)
+                        .font(.headline)
+                    Spacer(minLength: 8)
+                    cacheStatusLabel(isValid: appStore.cacheStatistics.isCacheValid)
                 }
-
-                Text("\(appStore.localized(.performanceCacheLastUpdateLabel)): \(formattedCacheUpdate(stats.lastUpdate))")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                if isLeanMode {
-                    Text(appStore.localized(.performanceCacheLeanHint))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    cacheCountRow(title: appStore.localized(.performanceCacheIconLabel),
-                                  valueText: isLeanMode ? appStore.localized(.performanceCacheIconsDisabled) : "\(stats.iconCacheSize)")
-                    cacheCountRow(title: appStore.localized(.performanceCacheAppInfoLabel),
-                                  valueText: "\(stats.appInfoCacheSize)")
-                    cacheCountRow(title: appStore.localized(.performanceCacheGridLabel),
-                                  valueText: "\(stats.gridLayoutCacheSize)")
-                    cacheCountRow(title: appStore.localized(.performanceCacheTotalLabel),
-                                  valueText: "\(stats.totalCacheSize)")
-                }
-
-                Button {
-                    appStore.clearCache()
-                    IconStore.shared.clear()
-                    FolderPreviewCache.shared.clear()
-                } label: {
-                    Label(appStore.localized(.performanceCacheClearButton), systemImage: "trash")
-                        .font(.footnote.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                }
-                .buttonStyle(.bordered)
+                .help(appStore.localized(.performanceCacheCountsHint))
+                Divider()
+                performanceCacheDetails
             }
-            .padding(10)
+            .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(Color(nsColor: .quaternarySystemFill),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .onChange(of: appStore.performanceMode) { _, _ in
             showPerformanceRestartPrompt = true
@@ -1536,6 +1474,39 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             Button(appStore.localized(.okButton), role: .cancel) {}
         } message: {
             Text(appStore.localized(.performanceModeRestartMessage))
+        }
+    }
+
+    private var performanceCacheDetails: some View {
+        let stats = appStore.cacheStatistics
+        let isLeanMode = appStore.performanceMode == .lean
+        return VStack(alignment: .leading, spacing: 0) {
+            cacheDetailRow(title: appStore.localized(.performanceCacheIconLabel),
+                           valueText: isLeanMode ? appStore.localized(.performanceCacheIconsDisabled) : "\(stats.iconCacheSize)")
+                .help(appStore.localized(isLeanMode ? .performanceCacheLeanHint : .performanceCacheCountsHint))
+            Divider()
+            cacheDetailRow(title: appStore.localized(.performanceCacheAppInfoLabel),
+                           valueText: "\(stats.appInfoCacheSize)")
+            Divider()
+            cacheDetailRow(title: appStore.localized(.performanceCacheGridLabel),
+                           valueText: "\(stats.gridLayoutCacheSize)")
+            Divider()
+            cacheDetailRow(title: appStore.localized(.performanceCacheLastUpdateLabel),
+                           valueText: formattedCacheUpdate(stats.lastUpdate))
+
+            HStack {
+                Spacer(minLength: 0)
+                Button {
+                    appStore.clearCache()
+                    IconStore.shared.clear()
+                    FolderPreviewCache.shared.clear()
+                } label: {
+                    Label(appStore.localized(.performanceCacheClearButton), systemImage: "trash")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+            }
+            .padding(.top, 12)
         }
     }
 
@@ -2790,87 +2761,46 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     }
 
     private func performanceModePicker() -> some View {
-        HStack(spacing: 6) {
-            performanceModeButton(mode: .lean, title: appStore.localized(.performanceModeLean))
-            performanceModeButton(mode: .full, title: appStore.localized(.performanceModeFull))
-        }
-        .padding(6)
-        .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .quaternarySystemFill))
+        PerformanceEngineSelector(
+            selection: $appStore.performanceMode,
+            nextTitle: appStore.localized(.performanceModeLean),
+            legacyTitle: appStore.localized(.performanceModeFull),
+            nextDescription: appStore.localized(.performanceModeDescriptionLean),
+            legacyDescription: appStore.localized(.performanceModeDescriptionFull),
+            restartHint: appStore.localized(.performanceModeRestartHint)
         )
     }
 
-    private func performanceModeButton(mode: PerformanceMode, title: String) -> some View {
-        let isSelected = appStore.performanceMode == mode
-        return Button {
-            withAnimation(.easeInOut(duration: 0.15)) {
-                appStore.performanceMode = mode
-            }
-        } label: {
-            Text(title)
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
-                )
-                .overlay(
-                    Capsule(style: .continuous)
-                        .stroke(isSelected ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1)
-                )
-        }
-        .buttonStyle(.plain)
-        .frame(maxWidth: .infinity)
-        .contentShape(Rectangle())
-    }
-
-    private func cacheStatusBadge(isValid: Bool) -> some View {
+    private func cacheStatusLabel(isValid: Bool) -> some View {
         let title = appStore.localized(isValid ? .performanceCacheStatusValid : .performanceCacheStatusInvalid)
         let color = isValid ? Color.green : Color.orange
-        return Text(title)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(color.opacity(0.16))
-            )
+        return HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
-    private func leanModeBadge() -> some View {
-        Text(appStore.localized(.performanceModeLean))
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(Color.green)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.green.opacity(0.16))
-            )
-    }
-
-    private func cacheCountRow(title: String, valueText: String) -> some View {
-        HStack(spacing: 8) {
+    private func cacheDetailRow(title: String, valueText: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
             Text(title)
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            Spacer()
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
             Text(valueText)
                 .font(.callout.weight(.semibold).monospacedDigit())
                 .foregroundStyle(.primary)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.vertical, 11)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .quaternarySystemFill))
-        )
     }
 
     private var generalSection: some View {
