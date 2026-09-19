@@ -4,6 +4,87 @@ import LaunchNextWallpaperCore
 import XCTest
 
 final class WallpaperFrameStabilityTests: XCTestCase {
+    func testCaptureQuietPeriodCoalescesChangesWithoutDelayingOrdinaryOpens() {
+        var period = WallpaperCaptureQuietPeriod<String>()
+        period.observe("A", at: 0)
+        XCTAssertEqual(period.delay(at: 0), 0)
+        period.observe("A", at: 1)
+        XCTAssertEqual(period.delay(at: 1), 0)
+        period.observe("B", at: 2)
+        XCTAssertEqual(period.delay(at: 2), 2)
+        period.observe("C", at: 3)
+        XCTAssertEqual(period.delay(at: 3), 2)
+        period.observe("C", at: 4) // Reopening does not restart the wait.
+        XCTAssertEqual(period.delay(at: 4), 1)
+        XCTAssertEqual(period.delay(at: 5), 0)
+        period.captureStarted()
+        period.observe("C", at: 6)
+        XCTAssertEqual(period.delay(at: 6), 0)
+        period.observe("D", at: 7)
+        XCTAssertEqual(period.delay(at: 7), 2)
+    }
+
+    func testCaptureQuietPeriodIsBoundedAndIndependentPerDisplay() {
+        var first = WallpaperCaptureQuietPeriod<Int>()
+        var second = WallpaperCaptureQuietPeriod<Int>()
+        first.observe(0, at: 0)
+        second.observe(0, at: 0)
+        for tick in 1...7 { first.observe(tick, at: Double(tick)) }
+        XCTAssertEqual(first.delay(at: 7), 0) // Six seconds since the first change.
+        XCTAssertEqual(second.delay(at: 7), 0)
+        first.captureStarted()
+        first.observe(8, at: 8)
+        XCTAssertEqual(first.delay(at: 8), 2)
+    }
+
+    func testDifferenceDiagnosticsMeasureSmallInteriorChangeWithoutChangingDecision() throws {
+        let original = try image()
+        let changed = try image(change: (8, 8, 1))
+        let comparison = WallpaperFrameStability.compare(original, changed, collectDiagnostics: true)
+        XCTAssertFalse(comparison.matches)
+        let details = try XCTUnwrap(comparison.diagnostics)
+        XCTAssertTrue(details.contains("reason=pixels first=16x16 second=16x16"))
+        XCTAssertTrue(details.contains("changed=1 total=256"))
+        XCTAssertTrue(details.contains("changedPct=0.39062"))
+        XCTAssertTrue(details.contains("maxRGB=1 alphaChanged=0 edgeChanged=0 interiorChanged=1"))
+        XCTAssertTrue(details.contains("rgbBins=1,0,0,0"))
+        XCTAssertTrue(details.contains("regions=0,0,0,0,1,0,0,0,0"))
+        XCTAssertEqual(comparison.matches, WallpaperFrameStability.matches(original, changed))
+        XCTAssertNil(WallpaperFrameStability.compare(original, changed).diagnostics)
+    }
+
+    func testDifferenceDiagnosticsDistinguishDimensionsAlphaAndBoundary() throws {
+        let original = try image()
+        let dimensions = WallpaperFrameStability.compare(original, try image(width: 17), collectDiagnostics: true)
+        XCTAssertFalse(dimensions.matches)
+        XCTAssertEqual(dimensions.diagnostics, "reason=dimensions first=16x16 second=17x16")
+        let alpha = WallpaperFrameStability.compare(original, try image(alpha: 254), collectDiagnostics: true)
+        XCTAssertFalse(alpha.matches)
+        XCTAssertTrue(try XCTUnwrap(alpha.diagnostics).contains("alphaChanged=256"))
+        let boundary = WallpaperFrameStability.compare(original, try image(change: (5, 15, 5)), collectDiagnostics: true)
+        XCTAssertFalse(boundary.matches)
+        XCTAssertTrue(try XCTUnwrap(boundary.diagnostics).contains("edgeChanged=1 interiorChanged=0"))
+        let tolerated = WallpaperFrameStability.compare(original, try image(change: (5, 15, 4)), collectDiagnostics: true)
+        XCTAssertTrue(tolerated.matches)
+        XCTAssertNil(tolerated.diagnostics)
+    }
+
+    func testRevalidationRequiresPreviouslySettledAndMatchingPixels() {
+        var previous = WallpaperSettlingState()
+        XCTAssertFalse(previous.revalidated(matchesPrevious: true).isSettled)
+        previous.observe(matchesPrevious: true)
+        XCTAssertEqual(previous.revalidated(matchesPrevious: true).stableComparisons, 0)
+        previous.observe(matchesPrevious: true)
+        XCTAssertTrue(previous.revalidated(matchesPrevious: true).isSettled)
+
+        var changed = previous.revalidated(matchesPrevious: false)
+        XCTAssertEqual(changed.stableComparisons, 0)
+        changed.observe(matchesPrevious: true)
+        XCTAssertFalse(changed.isSettled)
+        changed.observe(matchesPrevious: true)
+        XCTAssertTrue(changed.isSettled)
+    }
+
     func testSharpFramesCanSettleButVisibleMovementDoesNot() throws {
         let original = try largeImage()
         XCTAssertTrue(WallpaperFrameStability.matches(original, original))
@@ -80,6 +161,24 @@ final class WallpaperFrameStabilityTests: XCTestCase {
         store["Displays"] = ["A": changed]
         XCTAssertNotEqual(WallpaperIdentityResolver.desktopContextVersion(displayUUID: "A", store: store), first)
         XCTAssertNil(WallpaperIdentityResolver.desktopContextVersion(displayUUID: "A", store: [:]))
+    }
+
+    func testContextDiagnosticsIsolateTimestampFromContentChanges() {
+        let desktop: [String: Any] = ["Content": ["Choices": [["Provider": "default"]]],
+                                     "LastUse": Date(timeIntervalSince1970: 1), "LastSet": Date(timeIntervalSince1970: 1)]
+        func components(_ value: [String: Any]) -> [String: String] {
+            WallpaperIdentityResolver.desktopContextComponents(displayUUID: "A",
+                store: ["Displays": ["A": ["Desktop": value, "Idle": ["private": "ignored"]]]])
+        }
+        let before = components(desktop)
+        var updated = desktop
+        updated["LastUse"] = Date(timeIntervalSince1970: 2)
+        let after = components(updated)
+        XCTAssertEqual(Set(before.keys).union(after.keys).filter { before[$0] != after[$0] }, ["Desktop.LastUse"])
+        updated["Content"] = ["Choices": [["Provider": "different"]]]
+        XCTAssertNotEqual(after["Desktop.Content"], components(updated)["Desktop.Content"])
+        XCTAssertEqual(after["Desktop.LastUse"], components(updated)["Desktop.LastUse"])
+        XCTAssertFalse(before.keys.contains { $0.contains("Idle") || $0.contains("private") })
     }
 
     private func identity(_ provider: String) -> WallpaperIdentity {

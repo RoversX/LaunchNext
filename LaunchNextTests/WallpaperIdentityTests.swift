@@ -1,8 +1,76 @@
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 import XCTest
 import LaunchNextWallpaperCore
 
 final class WallpaperIdentityTests: XCTestCase {
+    func testWorkspacePlaceholderAllowsCaptureKeyWithoutVerifyingStaticFile() throws {
+        let url = try temporaryImage()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store: [String: Any] = ["Displays": [displayA: entry(
+            provider: imageProvider, configuration: imageConfiguration(url))]]
+        let reported = URL(fileURLWithPath: "/System/Library/CoreServices/DefaultDesktop.heic")
+        let identity = try XCTUnwrap(WallpaperIdentityResolver.captureFallbackIdentity(
+            displayUUID: displayA, store: store, currentDesktopImageURL: reported))
+        XCTAssertEqual(identity.source, .image(url))
+        XCTAssertTrue(WallpaperFrameStability.supportsReuse(for: identity))
+        XCTAssertEqual(WallpaperIdentityResolver.resolve(displayUUID: displayA, store: store,
+            currentDesktopImageURL: reported, allowUnverifiedDesktopImageURL: false), .ambiguous)
+        // Identity/context changes must still invalidate the observed frame.
+        let otherURL = try temporaryImage()
+        defer { try? FileManager.default.removeItem(at: otherURL) }
+        let changed: [String: Any] = ["Displays": [displayA: entry(
+            provider: imageProvider, configuration: imageConfiguration(otherURL))]]
+        XCTAssertNotEqual(identity, WallpaperIdentityResolver.captureFallbackIdentity(
+            displayUUID: displayA, store: changed, currentDesktopImageURL: reported))
+    }
+
+    func testCaptureKeyDoesNotGuessForOtherConflictsOrMissingDisplay() throws {
+        let url = try temporaryImage()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let configured = entry(provider: imageProvider, configuration: imageConfiguration(url))
+        let store: [String: Any] = ["Displays": [displayA: configured], "SystemDefault": configured]
+        for reported in [nil, URL(fileURLWithPath: "/Pictures/Other.jpg"),
+                         URL(fileURLWithPath: "/Pictures/DefaultDesktop.heic"), url] {
+            XCTAssertNil(WallpaperIdentityResolver.captureFallbackIdentity(
+                displayUUID: displayA, store: store, currentDesktopImageURL: reported))
+        }
+        XCTAssertNil(WallpaperIdentityResolver.captureFallbackIdentity(displayUUID: displayB, store: store,
+            currentDesktopImageURL: URL(fileURLWithPath: "/System/Library/CoreServices/DefaultDesktop.heic")))
+    }
+
+    func testCaptureKeyRejectsMultipleChoicesAndMultiFrameOrUnreadableImages() throws {
+        let multiFrame = try temporaryImage(frameCount: 2)
+        defer { try? FileManager.default.removeItem(at: multiFrame) }
+        let reported = URL(fileURLWithPath: "/System/Library/CoreServices/DefaultDesktop.heic")
+        for url in [multiFrame, URL(fileURLWithPath: "/unavailable/Selected.png")] {
+            let store: [String: Any] = ["Displays": [displayA: entry(
+                provider: imageProvider, configuration: imageConfiguration(url))]]
+            XCTAssertNil(WallpaperIdentityResolver.captureFallbackIdentity(
+                displayUUID: displayA, store: store, currentDesktopImageURL: reported))
+        }
+        let store: [String: Any] = ["Displays": [displayA: entry(choices: [
+            choice(provider: imageProvider, configuration: imageConfiguration(multiFrame)),
+            choice(provider: aerialProvider, configuration: ["assetID": "ANOTHER"])
+        ])]]
+        XCTAssertNil(WallpaperIdentityResolver.captureFallbackIdentity(
+            displayUUID: displayA, store: store, currentDesktopImageURL: reported))
+    }
+
+    private func temporaryImage(frameCount: Int = 1) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".gif")
+        let context = try XCTUnwrap(CGContext(data: nil, width: 8, height: 8, bitsPerComponent: 8,
+            bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let image = try XCTUnwrap(context.makeImage())
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL,
+            UTType.gif.identifier as CFString, frameCount, nil))
+        for _ in 0..<frameCount { CGImageDestinationAddImage(destination, image, nil) }
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return url
+    }
+
     func testPreviewUsesConfiguredImageDespiteWorkspaceDefaultWithoutWeakeningExactIdentity() throws {
         let configured = URL(fileURLWithPath: "/Pictures/Selected.jpg")
         let reported = URL(fileURLWithPath: "/System/Library/CoreServices/DefaultDesktop.heic")

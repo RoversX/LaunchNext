@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import ImageIO
 
 public enum WallpaperKind: Sendable, Equatable, Hashable {
     case staticImage
@@ -55,6 +56,28 @@ public enum WallpaperIdentityResolver {
     private static let aerialProvider = "com.apple.wallpaper.choice.aerials"
     private static let dynamicProvider = "com.apple.wallpaper.choice.dynamic"
 
+    /// A key for an observed, settled screenshot, not proof that the configured
+    /// file is the desktop's pixels. Keep direct-file and disk-fallback identity
+    /// resolution strict when NSWorkspace reports the system placeholder.
+    public static func captureFallbackIdentity(
+        displayUUID: String, store: [String: Any], currentDesktopImageURL: URL?
+    ) -> WallpaperIdentity? {
+        guard let reportedURL = currentDesktopImageURL?.standardizedFileURL,
+              reportedURL.isFileURL,
+              reportedURL.path == "/System/Library/CoreServices/DefaultDesktop.heic",
+              (store["Displays"] as? [String: Any])?[displayUUID] is [String: Any],
+              resolve(displayUUID: displayUUID, store: store, currentDesktopImageURL: reportedURL,
+                      allowUnverifiedDesktopImageURL: false) == .ambiguous,
+              let configured = resolve(displayUUID: displayUUID, store: store,
+                  allowUnverifiedDesktopImageURL: false).exactIdentity,
+              configured.provider == imageProvider, configured.kind == .staticImage,
+              case let .image(url) = configured.source,
+              let source = CGImageSourceCreateWithURL(url as CFURL,
+                  [kCGImageSourceShouldCache: false] as CFDictionary),
+              CGImageSourceGetCount(source) == 1 else { return nil }
+        return configured
+    }
+
     /// Approximate, file-only preview of the configured wallpaper. This is not
     /// evidence of the frame currently on screen and must not key an exact capture.
     public static func resolvePreview(
@@ -82,6 +105,30 @@ public enum WallpaperIdentityResolver {
               entry["Desktop"] != nil || entry["Linked"] != nil else { return nil }
         var context = entry
         context.removeValue(forKey: "Idle")
+        return contextDigest(context)
+    }
+
+    /// Fixed diagnostic labels and opaque fingerprints only. Never expose file
+    /// paths, display UUIDs, configuration data or timestamp values in logs.
+    public static func desktopContextComponents(displayUUID: String, store: [String: Any]) -> [String: String] {
+        guard var entry = entry(for: displayUUID, displays: store["Displays"] as? [String: Any],
+                                defaultEntry: store["SystemDefault"]) else { return [:] }
+        entry.removeValue(forKey: "Idle")
+        var components: [String: String] = [:]
+        for branch in ["Desktop", "Linked"] {
+            guard var section = entry.removeValue(forKey: branch) as? [String: Any] else { continue }
+            for field in ["Content", "LastUse", "LastSet"] {
+                if let value = section.removeValue(forKey: field) {
+                    components["\(branch).\(field)"] = contextDigest(["value": value])
+                }
+            }
+            components["\(branch).Other"] = contextDigest(section)
+        }
+        components["Display.Other"] = contextDigest(entry)
+        return components
+    }
+
+    private static func contextDigest(_ context: [String: Any]) -> String? {
         func canonical(_ value: Any) -> Any {
             if let dictionary = value as? [String: Any] { return dictionary.mapValues { canonical($0) } }
             if let array = value as? [Any] { return array.map { canonical($0) } }
