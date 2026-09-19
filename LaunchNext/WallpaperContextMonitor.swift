@@ -70,6 +70,7 @@ final class WallpaperContextMonitor {
         let store = Self.stamp(Self.storeURL)
         let source = sourceURL.flatMap(Self.stamp)
         guard store != storeStamp || source != sourceStamp else { return }
+        WallpaperDiagnostics.record("context.files storeChanged=\(store != storeStamp) sourceChanged=\(source != sourceStamp)")
         storeStamp = store
         sourceStamp = source
         // A store write may concern another display or historical Space. Let
@@ -90,7 +91,13 @@ final class WallpaperContextMonitor {
                     if suspend { self.suspendedReasons.insert(reason) }
                     else { self.suspendedReasons.remove(reason) }
                 }
-                self.changed(true)
+                WallpaperDiagnostics.record("context.notification name=\(name.rawValue) suspended=\(self.isSuspended)")
+                // These notifications can describe another display/Space, or
+                // repeat without changing wallpaper pixels. Validate the full
+                // capture context instead of discarding every display's cache.
+                let needsValidation = name == NSApplication.didChangeScreenParametersNotification
+                    || name.rawValue == "com.apple.desktop"
+                self.changed(!needsValidation)
             }
             .store(in: &subscriptions)
     }

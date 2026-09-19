@@ -42,13 +42,23 @@ enum WallpaperCaptureError: Error {
 /// Single-frame capture only. The caller owns retries, caching and cancellation.
 @MainActor
 enum WallpaperScreenCapture {
+    private static var diagnosticAttempt = 0
     static func capture(displayID: CGDirectDisplayID, maximumPixels: Int = WallpaperImageRenderer.maximumPixelCount) async throws -> CGImage {
+        diagnosticAttempt += 1
+        let attempt = diagnosticAttempt
+        WallpaperDiagnostics.record("capture.request attempt=\(attempt) display=\(displayID) budget=\(maximumPixels)")
         WallpaperCaptureAccess.shared.refresh()
-        guard WallpaperCaptureAccess.shared.isGranted else { throw WallpaperCaptureError.permissionRequired }
+        guard WallpaperCaptureAccess.shared.isGranted else {
+            WallpaperDiagnostics.record("capture.denied attempt=\(attempt)")
+            throw WallpaperCaptureError.permissionRequired
+        }
         do {
-            return try await captureAuthorizedWallpaper(displayID: displayID, maximumPixels: maximumPixels)
+            let image = try await captureAuthorizedWallpaper(displayID: displayID, maximumPixels: maximumPixels, attempt: attempt)
+            WallpaperDiagnostics.record("capture.success attempt=\(attempt)")
+            return image
         } catch {
             let captureError = error as NSError
+            WallpaperDiagnostics.record("capture.failed attempt=\(attempt) code=\(captureError.code) cancelled=\(Task.isCancelled)")
             if captureError.domain == SCStreamErrorDomain,
                captureError.code == SCStreamError.Code.userDeclined.rawValue {
                 // Access can be revoked between preflight and the capture call.
@@ -59,12 +69,13 @@ enum WallpaperScreenCapture {
         }
     }
 
-    private static func captureAuthorizedWallpaper(displayID: CGDirectDisplayID, maximumPixels: Int) async throws -> CGImage {
+    private static func captureAuthorizedWallpaper(displayID: CGDirectDisplayID, maximumPixels: Int, attempt: Int) async throws -> CGImage {
         try Task.checkCancellation()
         let displayBounds = CGDisplayBounds(displayID)
         guard displayBounds.width > 0, displayBounds.height > 0 else {
             throw WallpaperCaptureError.wallpaperWindowUnavailable
         }
+        WallpaperDiagnostics.record("capture.enumerate attempt=\(attempt) display=\(displayID)")
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         try Task.checkCancellation()
         let matches = content.windows.filter { window in
@@ -78,6 +89,7 @@ enum WallpaperScreenCapture {
                 && intersection.width * intersection.height / (window.frame.width * window.frame.height) >= 0.95
         }
         guard matches.count == 1, let window = matches.first else {
+            WallpaperDiagnostics.record("capture.windowUnavailable display=\(displayID) matches=\(matches.count)")
             throw WallpaperCaptureError.wallpaperWindowUnavailable
         }
         let filter = SCContentFilter(desktopIndependentWindow: window)
@@ -95,6 +107,7 @@ enum WallpaperScreenCapture {
         configuration.captureMicrophone = false
         configuration.ignoreShadowsSingleWindow = true
         configuration.includeChildWindows = false
+        WallpaperDiagnostics.record("capture.screenshotAPI attempt=\(attempt) display=\(displayID)")
         let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
         try Task.checkCancellation()
         return image

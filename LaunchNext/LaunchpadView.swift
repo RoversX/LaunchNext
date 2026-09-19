@@ -323,7 +323,8 @@ struct LaunchpadView: View {
              handleControllerCommand(command)
          }
          .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.activeSpaceDidChangeNotification)) { _ in
-             refreshBackgroundImage(reason: .contextChanged)
+             WallpaperDiagnostics.record("context.spaceChanged")
+             refreshBackgroundImage(reason: .contextChecked)
          }
          .onReceive(NotificationCenter.default.publisher(for: NSWindow.didChangeScreenNotification)) { notification in
              guard let changedWindow = notification.object as? NSWindow,
