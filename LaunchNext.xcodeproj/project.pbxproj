@@ -7,9 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		B10000242F70000100ABCDEF /* CompactWindowLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000232F70000100ABCDEF /* CompactWindowLayout.swift */; };
 		A1E2B5C02F4A8A1B00F12345 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = A1E2B5CB2F4A8A1B00F12345 /* Localizable.strings */; };
 		B10000222F70000100ABCDEF /* GridReorderPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000212F70000100ABCDEF /* GridReorderPlan.swift */; };
+		B10000242F70000100ABCDEF /* CompactWindowLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000232F70000100ABCDEF /* CompactWindowLayout.swift */; };
 		C200000D2F70000100ABCDEF /* libLaunchNextContextMenuCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */; };
 		C200000E2F70000100ABCDEF /* libLaunchNextContextMenuCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */; };
 		D300000D2F70000100ABCDEF /* libLaunchNextWallpaperCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = D30000012F70000100ABCDEF /* libLaunchNextWallpaperCore.a */; };
@@ -48,7 +48,6 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		B10000232F70000100ABCDEF /* CompactWindowLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CompactWindowLayout.swift; path = LaunchNext/CompactWindowLayout.swift; sourceTree = SOURCE_ROOT; };
 		0D1B0B402E4CDE460083EEF9 /* LaunchNext.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LaunchNext.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0F7A6B1C3E2D4F5A6B7C8D9E /* OpenMultitouchSupport.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = OpenMultitouchSupport.xcconfig; sourceTree = "<group>"; };
 		690FA1FB2E88822200948FA6 /* cs */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = cs; path = cs.lproj/Localizable.strings; sourceTree = "<group>"; };
@@ -67,6 +66,7 @@
 		A1E2B5CD2F4A8A1B00F12345 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		B10000012F70000100ABCDEF /* LaunchNextTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LaunchNextTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B10000212F70000100ABCDEF /* GridReorderPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GridReorderPlan.swift; path = LaunchNext/GridReorderPlan.swift; sourceTree = SOURCE_ROOT; };
+		B10000232F70000100ABCDEF /* CompactWindowLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CompactWindowLayout.swift; path = LaunchNext/CompactWindowLayout.swift; sourceTree = SOURCE_ROOT; };
 		C20000012F70000100ABCDEF /* libLaunchNextContextMenuCore.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libLaunchNextContextMenuCore.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		D30000012F70000100ABCDEF /* libLaunchNextWallpaperCore.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libLaunchNextWallpaperCore.a; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
