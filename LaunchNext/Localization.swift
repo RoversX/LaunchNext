@@ -354,6 +354,8 @@ enum LocalizationKey: String {
     case developmentPlaceholderSubtitle
     case developmentEnableCLICodeTitle
     case developmentEnableCLICodeHint
+    case developmentWallpaperDiagnosticsTitle
+    case developmentWallpaperDiagnosticsHint
     case developmentQuarantineRemovalTitle
     case developmentQuarantineRemovalInfoTitle
     case developmentQuarantineRemovalInfoBody
@@ -7534,6 +7536,68 @@ final class LocalizationManager {
         ]
 
         for (language, strings) in quarantineTranslations {
+            builder[language, default: [:]].merge(strings) { _, new in new }
+        }
+
+        let wallpaperDiagnosticTranslations: [AppLanguage: [LocalizationKey: String]] = [
+            .english: [
+                .developmentWallpaperDiagnosticsTitle: "Wallpaper diagnostic logging",
+                .developmentWallpaperDiagnosticsHint: "Records wallpaper capture and cache events locally. Logs contain no screenshots or file paths."
+            ],
+            .simplifiedChinese: [
+                .developmentWallpaperDiagnosticsTitle: "壁纸诊断日志",
+                .developmentWallpaperDiagnosticsHint: "在本机记录壁纸截图与缓存事件。日志不包含截图内容或文件路径。"
+            ],
+            .traditionalChinese: [
+                .developmentWallpaperDiagnosticsTitle: "桌布診斷日誌",
+                .developmentWallpaperDiagnosticsHint: "在本機記錄桌布截圖與快取事件。日誌不包含截圖內容或檔案路徑。"
+            ],
+            .japanese: [
+                .developmentWallpaperDiagnosticsTitle: "壁紙の診断ログ",
+                .developmentWallpaperDiagnosticsHint: "壁紙のキャプチャとキャッシュのイベントをこの Mac に記録します。ログにスクリーンショットやファイルパスは含まれません。"
+            ],
+            .korean: [
+                .developmentWallpaperDiagnosticsTitle: "배경화면 진단 로그",
+                .developmentWallpaperDiagnosticsHint: "배경화면 캡처 및 캐시 이벤트를 이 Mac에 기록합니다. 로그에는 스크린샷이나 파일 경로가 포함되지 않습니다."
+            ],
+            .french: [
+                .developmentWallpaperDiagnosticsTitle: "Journal de diagnostic du fond d’écran",
+                .developmentWallpaperDiagnosticsHint: "Enregistre localement les captures du fond d’écran et les opérations du cache. Le journal ne contient ni images ni chemins de fichiers."
+            ],
+            .spanish: [
+                .developmentWallpaperDiagnosticsTitle: "Registro de diagnóstico del fondo",
+                .developmentWallpaperDiagnosticsHint: "Registra localmente los eventos de captura del fondo y de caché. El registro no contiene capturas de pantalla ni rutas de archivos."
+            ],
+            .italian: [
+                .developmentWallpaperDiagnosticsTitle: "Log diagnostico dello sfondo",
+                .developmentWallpaperDiagnosticsHint: "Registra localmente gli eventi di cattura dello sfondo e della cache. Il log non contiene screenshot o percorsi di file."
+            ],
+            .czech: [
+                .developmentWallpaperDiagnosticsTitle: "Diagnostický protokol tapety",
+                .developmentWallpaperDiagnosticsHint: "Zaznamenává události snímání tapety a mezipaměti místně. Protokol neobsahuje snímky obrazovky ani cesty k souborům."
+            ],
+            .german: [
+                .developmentWallpaperDiagnosticsTitle: "Diagnoseprotokoll für Hintergrundbilder",
+                .developmentWallpaperDiagnosticsHint: "Zeichnet Aufnahme- und Cache-Ereignisse für Hintergrundbilder lokal auf. Das Protokoll enthält keine Screenshots oder Dateipfade."
+            ],
+            .russian: [
+                .developmentWallpaperDiagnosticsTitle: "Журнал диагностики обоев",
+                .developmentWallpaperDiagnosticsHint: "Локально записывает события захвата обоев и работы кэша. Журнал не содержит снимков экрана или путей к файлам."
+            ],
+            .hindi: [
+                .developmentWallpaperDiagnosticsTitle: "वॉलपेपर डायग्नोस्टिक लॉग",
+                .developmentWallpaperDiagnosticsHint: "वॉलपेपर कैप्चर और कैश की गतिविधियाँ इस Mac पर रिकॉर्ड करता है। लॉग में स्क्रीनशॉट या फ़ाइल पथ शामिल नहीं होते।"
+            ],
+            .vietnamese: [
+                .developmentWallpaperDiagnosticsTitle: "Nhật ký chẩn đoán hình nền",
+                .developmentWallpaperDiagnosticsHint: "Ghi lại cục bộ các sự kiện chụp hình nền và bộ nhớ đệm. Nhật ký không chứa ảnh chụp màn hình hoặc đường dẫn tệp."
+            ],
+            .portugueseBrazil: [
+                .developmentWallpaperDiagnosticsTitle: "Registro de diagnóstico do papel de parede",
+                .developmentWallpaperDiagnosticsHint: "Registra localmente eventos de captura do papel de parede e de cache. O registro não contém capturas de tela nem caminhos de arquivos."
+            ],
+        ]
+        for (language, strings) in wallpaperDiagnosticTranslations {
             builder[language, default: [:]].merge(strings) { _, new in new }
         }
 

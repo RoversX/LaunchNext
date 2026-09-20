@@ -1301,6 +1301,17 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
             Divider()
 
+            Toggle(appStore.localized(.developmentWallpaperDiagnosticsTitle),
+                   isOn: $appStore.wallpaperDiagnosticsEnabled)
+                .font(.subheadline.weight(.semibold))
+                .toggleStyle(.switch)
+            Text(appStore.localized(.developmentWallpaperDiagnosticsHint))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
             updateControlButton(
                 title: appStore.localized(.developmentForceOnboardingButton),
                 systemImage: "rectangle.stack.badge.play",
@@ -5895,8 +5906,9 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             let data = try Data(contentsOf: url)
             guard var incoming = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else { return }
 
-            // Developer quarantine tooling is intentionally local to this Mac.
+            // Developer tooling and diagnostic logging are local to this Mac.
             incoming.removeValue(forKey: AppStore.showQuarantineRemovalActionKey)
+            incoming.removeValue(forKey: WallpaperDiagnostics.enabledKey)
 
             if let allowedKeys, !allowedKeys.isEmpty {
                 incoming = incoming.filter { allowedKeys.contains($0.key) }

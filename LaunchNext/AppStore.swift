@@ -796,6 +796,10 @@ final class AppStore: ObservableObject {
         }
     }
 
+    @Published var wallpaperDiagnosticsEnabled = WallpaperDiagnostics.isEnabled {
+        didSet { WallpaperDiagnostics.isEnabled = wallpaperDiagnosticsEnabled }
+    }
+
     @Published var backgroundMaskEnabled: Bool = AppStore.loadBackgroundMaskEnabled() {
         didSet {
             UserDefaults.standard.set(backgroundMaskEnabled, forKey: Self.backgroundMaskEnabledKey)
@@ -906,8 +910,9 @@ final class AppStore: ObservableObject {
         for (key, value) in encodedAppearanceBackupValues {
             result[key] = try encoder.encode(value)
         }
-        // Developer quarantine tooling remains local to this Mac.
+        // Developer tooling and diagnostic logging remain local to this Mac.
         result.removeValue(forKey: Self.showQuarantineRemovalActionKey)
+        result.removeValue(forKey: WallpaperDiagnostics.enabledKey)
         return result
     }
 
@@ -1069,6 +1074,7 @@ final class AppStore: ObservableObject {
 
         developmentEnableCLICode = UserDefaults.standard.object(forKey: Self.developmentEnableCLICodeKey) as? Bool ?? false
         showQuarantineRemovalAction = UserDefaults.standard.object(forKey: Self.showQuarantineRemovalActionKey) as? Bool ?? false
+        wallpaperDiagnosticsEnabled = UserDefaults.standard.bool(forKey: WallpaperDiagnostics.enabledKey)
         fuzzySearchEnabled = UserDefaults.standard.object(forKey: Self.fuzzySearchEnabledKey) as? Bool ?? true
         searchDebounceMilliseconds = Self.clampedSearchDebounceMilliseconds(
             UserDefaults.standard.object(forKey: Self.searchDebounceMillisecondsKey) as? Double ?? 300

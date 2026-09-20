@@ -1,18 +1,26 @@
 import Foundation
 
-/// Temporary, always-on diagnostics for the local wallpaper investigation.
+/// Opt-in local diagnostics for investigating wallpaper capture behavior.
 /// Callers pass only event names, counters and booleans, never paths or image data.
 @MainActor
 enum WallpaperDiagnostics {
+    static let enabledKey = "wallpaperDiagnosticsEnabled"
+    static var isEnabled = UserDefaults.standard.bool(forKey: enabledKey) {
+        didSet {
+            guard isEnabled != oldValue else { return }
+            UserDefaults.standard.set(isEnabled, forKey: enabledKey)
+        }
+    }
     private static let session = String(UUID().uuidString.prefix(8))
     private static var sequence = 0
     private static let queue = DispatchQueue(label: "com.roversx.launchnext.wallpaper-diagnostics", qos: .utility)
     private static let directory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/LaunchNext", isDirectory: true)
 
-    static func record(_ event: String) {
+    static func record(_ event: @autoclosure () -> String) {
+        guard isEnabled else { return }
         sequence += 1
-        let line = "\(Date().timeIntervalSince1970) session=\(session) seq=\(sequence) \(event)\n"
+        let line = "\(Date().timeIntervalSince1970) session=\(session) seq=\(sequence) \(event())\n"
         let directory = directory
         queue.async { append(line, directory: directory) }
     }

@@ -609,10 +609,12 @@ final class BackgroundImageController: ObservableObject {
             }
             guard let self else { return }
 
+            let collectDiagnostics = WallpaperDiagnostics.isEnabled
             let resolution = await Task.detached(priority: .userInitiated) {
                 Self.resolveWallpaperIdentity(
                     displayID: displayID,
-                    desktopImageURL: desktopImageURL
+                    desktopImageURL: desktopImageURL,
+                    collectDiagnostics: collectDiagnostics
                 )
             }.value
 
@@ -625,18 +627,22 @@ final class BackgroundImageController: ObservableObject {
             quietPeriod.observe(CaptureConfiguration(identity: resolution.captureIdentity, version: resolution.contextVersion),
                                 at: ProcessInfo.processInfo.systemUptime)
             self.captureQuietPeriods[displayID] = quietPeriod
-            if let previous = self.diagnosticContextComponents[displayID] {
-                let changed = Set(previous.keys).union(resolution.contextComponents.keys)
-                    .filter { previous[$0] != resolution.contextComponents[$0] }.sorted()
-                if !changed.isEmpty {
-                    WallpaperDiagnostics.record("context.fieldsChanged display=\(displayID) fields=\(changed.joined(separator: ","))")
+            if WallpaperDiagnostics.isEnabled {
+                if let previous = self.diagnosticContextComponents[displayID] {
+                    let changed = Set(previous.keys).union(resolution.contextComponents.keys)
+                        .filter { previous[$0] != resolution.contextComponents[$0] }.sorted()
+                    if !changed.isEmpty {
+                        WallpaperDiagnostics.record("context.fieldsChanged display=\(displayID) fields=\(changed.joined(separator: ","))")
+                    }
                 }
-            }
-            // Keep the diagnostic history tiny and independent of bitmap eviction.
-            if self.diagnosticContextComponents[displayID] == nil, self.diagnosticContextComponents.count >= 8 {
+                // Keep the diagnostic history tiny and independent of bitmap eviction.
+                if self.diagnosticContextComponents[displayID] == nil, self.diagnosticContextComponents.count >= 8 {
+                    self.diagnosticContextComponents.removeAll()
+                }
+                self.diagnosticContextComponents[displayID] = resolution.contextComponents
+            } else {
                 self.diagnosticContextComponents.removeAll()
             }
-            self.diagnosticContextComponents[displayID] = resolution.contextComponents
             if self.lastDesktopContextVersion != resolution.contextVersion {
                 self.desktopContextIsDirty = true
                 self.lastDesktopContextVersion = resolution.contextVersion
@@ -773,8 +779,9 @@ final class BackgroundImageController: ObservableObject {
                     if let cached, cached.settling.isSettled,
                        cached.context.hasSameWallpaperAndGeometry(as: captureContext) {
                         let previous = cached.image
+                        let collectDiagnostics = WallpaperDiagnostics.isEnabled
                         let comparison = await Task.detached(priority: .utility) {
-                            autoreleasepool { WallpaperFrameStability.compare(previous, image, collectDiagnostics: true) }
+                            autoreleasepool { WallpaperFrameStability.compare(previous, image, collectDiagnostics: collectDiagnostics) }
                         }.value
                         guard !Task.isCancelled, generation == self.loadGeneration,
                               self.isWindowVisible else { return }
@@ -940,8 +947,9 @@ final class BackgroundImageController: ObservableObject {
             catch { return } // Keep the displayed frame unconfirmed; retry only on a later open/event.
             let sampledAt = ContinuousClock.now
             let previous = candidate.image
+            let collectDiagnostics = WallpaperDiagnostics.isEnabled
             let comparison = await Task.detached(priority: .utility) {
-                autoreleasepool { WallpaperFrameStability.compare(previous, image, collectDiagnostics: true) }
+                autoreleasepool { WallpaperFrameStability.compare(previous, image, collectDiagnostics: collectDiagnostics) }
             }.value
             guard await captureContextStillMatches(candidate.context, displayID: displayID, generation: generation) else { return }
             let matches = comparison.matches
@@ -1185,7 +1193,8 @@ final class BackgroundImageController: ObservableObject {
     nonisolated private static func resolveWallpaperIdentity(
         displayID: CGDirectDisplayID,
         desktopImageURL: URL?,
-        forPreview: Bool = false
+        forPreview: Bool = false,
+        collectDiagnostics: Bool = false
     ) -> ResolvedWallpaper {
         guard let uuidRef = CGDisplayCreateUUIDFromDisplayID(displayID)?.takeRetainedValue() else {
             return ResolvedWallpaper(resolution: .unavailable, verifiedStaticURL: nil)
@@ -1224,7 +1233,8 @@ final class BackgroundImageController: ObservableObject {
             staticURL = url
         } else { staticURL = nil }
         return ResolvedWallpaper(resolution: verified, verifiedStaticURL: staticURL, contextVersion: contextVersion,
-            contextComponents: WallpaperIdentityResolver.desktopContextComponents(displayUUID: displayUUID, store: store),
+            contextComponents: collectDiagnostics
+                ? WallpaperIdentityResolver.desktopContextComponents(displayUUID: displayUUID, store: store) : [:],
             captureFallbackIdentity: verified.exactIdentity == nil
                 ? WallpaperIdentityResolver.captureFallbackIdentity(displayUUID: displayUUID, store: store,
                     currentDesktopImageURL: desktopImageURL) : nil)
