@@ -7,6 +7,7 @@ struct FolderView: View {
     @Binding var folder: FolderInfo
     // 若提供，将强制使用与外层一致的图标尺寸
     var preferredIconSize: CGFloat? = nil
+    var presentationState: CAFolderPresentationState? = nil
     @State private var folderName: String = ""
     @State private var isEditingName = false
     @State private var forceRefreshTrigger: UUID = UUID()
@@ -59,9 +60,7 @@ struct FolderView: View {
     var body: some View {
         folderContent
         .padding()
-        .liquidGlass(in: RoundedRectangle(cornerRadius: 30))
-        .clipShape(RoundedRectangle(cornerRadius: 30))
-        .transition(LNAnimations.folderOpenTransition)
+        .modifier(FolderSurfaceModifier(isNativePresentation: presentationState != nil))
         .onTapGesture {
             // 当点击文件夹视图的非编辑区域时，如果正在编辑名称，则退出编辑模式
             if isEditingName {
@@ -287,7 +286,8 @@ struct FolderView: View {
                 iconSize: iconSize,
                 verticalHeaderHeight: shouldScrollFolderTitleWithContent ? folderTitleHeight : 0,
                 onClose: onClose,
-                onLaunchApp: onLaunchApp
+                onLaunchApp: onLaunchApp,
+                presentationState: presentationState
             )
             .id("ca_folder_grid_\(folder.id)_\(appStore.folderLayoutMode.rawValue)")
             .onAppear { columnsCount = desiredColumns }
@@ -755,6 +755,7 @@ extension FolderView {
     }
 
     private func handleControllerCommand(_ command: ControllerCommand) {
+        guard presentationState?.allowsInteraction != false else { return }
         guard appStore.gameControllerEnabled else { return }
         guard ControllerInputManager.shared.isActive else { return }
         guard !isEditingName else { return }
@@ -829,5 +830,18 @@ extension FolderView {
               let index = selectedIndex,
               folder.apps.indices.contains(index) else { return }
         VoiceManager.shared.announceSelection(item: .app(folder.apps[index]))
+    }
+}
+
+private struct FolderSurfaceModifier: ViewModifier {
+    let isNativePresentation: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        if isNativePresentation {
+            content
+        } else {
+            content.liquidGlass(in: RoundedRectangle(cornerRadius: 30))
+                .clipShape(RoundedRectangle(cornerRadius: 30))
+                .transition(LNAnimations.folderOpenTransition)
+        }
     }
 }

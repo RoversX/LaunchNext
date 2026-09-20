@@ -3,6 +3,9 @@ import QuartzCore
 import LaunchNextContextMenuCore
 
 final class CAFolderGridView: NSView {
+    var presentationState: CAFolderPresentationState?
+    private var presentationIcons: [ObjectIdentifier: CALayer] = [:]
+    private var renderedBackingScale: CGFloat?
     var apps: [AppInfo] = [] {
         didSet { rebuildLayers() }
     }
@@ -20,7 +23,6 @@ final class CAFolderGridView: NSView {
     var iconSize: CGFloat = 72 {
         didSet {
             guard iconSize != oldValue else { return }
-            clearIconCache()
             rebuildLayers()
         }
     }
@@ -97,8 +99,6 @@ final class CAFolderGridView: NSView {
     private var displayLink: CADisplayLink?
     private var appLayers: [CALayer] = []
     private var itemFrames: [CGRect] = []
-    private var iconCache: [String: CGImage] = [:]
-    private let iconCacheLock = NSLock()
     private var hoverTrackingArea: NSTrackingArea?
     private var currentPage = 0
     private var horizontalOffset: CGFloat = 0
@@ -137,6 +137,13 @@ final class CAFolderGridView: NSView {
 
     var displayedPage: Int { currentPage }
     var displayedPageCount: Int { pageCount }
+
+    // SwiftUI adds the page indicator after receiving the asynchronous page
+    // count. Do not capture animation endpoints using the preceding grid height.
+    var representedPageCount = 1
+    var isPresentationLayoutReady: Bool {
+        layoutMode != .paged || representedPageCount == pageCount
+    }
 
     func setDisplayedPage(_ page: Int, animated: Bool) {
         navigateToPage(page, animated: animated)
@@ -184,6 +191,7 @@ final class CAFolderGridView: NSView {
             targetHorizontalOffset = horizontalOffset
         }
         updateLayout(animated: false)
+        presentationState?.onLayout?()
     }
 
     override func updateTrackingAreas() {
@@ -201,6 +209,7 @@ final class CAFolderGridView: NSView {
         super.viewDidMoveToWindow()
         window?.acceptsMouseMovedEvents = true
         if window != nil {
+            refreshBackingScaleIfNeeded()
             setupDisplayLinkIfNeeded()
         } else {
             displayLink?.invalidate()
@@ -210,6 +219,16 @@ final class CAFolderGridView: NSView {
             guard let self, let window = self.window else { return }
             window.makeFirstResponder(self)
         }
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        refreshBackingScaleIfNeeded()
+    }
+
+    private func refreshBackingScaleIfNeeded() {
+        guard window != nil, renderedBackingScale != backingScale else { return }
+        rebuildLayers()
     }
 
     private func setupDisplayLinkIfNeeded() {
@@ -232,12 +251,6 @@ final class CAFolderGridView: NSView {
         if let old { applyScale(at: old, animated: animated) }
         if let clamped { applyScale(at: clamped, animated: animated) }
         ensureSelectionVisible()
-    }
-
-    func clearIconCache() {
-        iconCacheLock.lock()
-        iconCache.removeAll()
-        iconCacheLock.unlock()
     }
 
     private struct Metrics {
@@ -299,7 +312,10 @@ final class CAFolderGridView: NSView {
     }
 
     private func rebuildLayers() {
+        renderedBackingScale = window?.backingScaleFactor
         appLayers.forEach { $0.removeFromSuperlayer() }
+        appLayers.removeAll()
+        guard window != nil else { return }
         appLayers = apps.map { makeAppLayer(for: $0) }
         appLayers.forEach { contentLayer.addSublayer($0) }
         if selectedIndex.map({ !apps.indices.contains($0) }) ?? false {
@@ -473,67 +489,73 @@ final class CAFolderGridView: NSView {
     }
 
     private func setIcon(for layer: CALayer, app: AppInfo) {
+        // Wait for the actual destination screen rather than render at the main
+        // screen's scale and then repeat all work when this view is attached.
+        guard window != nil else { return }
         let path = app.url.path
         let scale = backingScale
         let side = iconSize
-        let expectedKey = iconCacheKey(for: path, scale: scale)
-        layer.setValue(expectedKey, forKey: "iconCacheKey")
-        if let cached = cachedIcon(for: path) {
+        let cache = FolderIconBitmapCache.shared
+        let appearance = effectiveAppearance
+        let request = cache.request(for: .init(path: path, side: side, scale: scale,
+                                              appearance: appearance.name.rawValue))
+        let token = UUID().uuidString
+        layer.setValue(token, forKey: "iconLoadToken")
+        if let cached = cache.image(for: request, source: app.icon) {
             layer.contents = cached
             return
         }
         layer.contents = nil
         DispatchQueue.global(qos: .userInitiated).async { [weak self, weak layer] in
-            guard let self, let layer else { return }
-            guard layer.value(forKey: "iconCacheKey") as? String == expectedKey else { return }
-            let icon: NSImage
-            if FileManager.default.fileExists(atPath: path) {
-                icon = IconStore.shared.icon(forPath: path)
-            } else {
-                icon = MissingAppPlaceholder.defaultIcon
+            guard self != nil else { return }
+            var rendered: CGImage?
+            appearance.performAsCurrentDrawingAppearance {
+                let icon: NSImage
+                if FileManager.default.fileExists(atPath: path) {
+                    icon = IconStore.shared.icon(forPath: path)
+                } else {
+                    icon = MissingAppPlaceholder.defaultIcon
+                }
+                rendered = Self.renderIcon(icon, side: side, scale: scale)
             }
-            guard let cgImage = self.renderIcon(icon, key: expectedKey, side: side, scale: scale) else { return }
-            DispatchQueue.main.async {
-                guard layer.value(forKey: "iconCacheKey") as? String == expectedKey else { return }
+            guard let cgImage = rendered else { return }
+            cache.insert(cgImage, for: request, source: app.icon)
+            DispatchQueue.main.async { [weak self, weak layer] in
+                guard let self, let layer,
+                      layer.value(forKey: "iconLoadToken") as? String == token else { return }
+                guard cache.isCurrent(request) else {
+                    self.setIcon(for: layer, app: app)
+                    return
+                }
                 CATransaction.begin()
                 CATransaction.setDisableActions(true)
                 layer.contents = cgImage
+                self.presentationIcons[ObjectIdentifier(layer)]?.contents = cgImage
+                if self.presentationIcons[ObjectIdentifier(layer)] == nil {
+                    for child in layer.superlayer?.sublayers ?? [] where child !== layer { child.opacity = 1 }
+                }
                 CATransaction.commit()
+                self.presentationState?.onLayout?()
             }
         }
     }
 
-    private func cachedIcon(for path: String) -> CGImage? {
-        let key = iconCacheKey(for: path, scale: backingScale)
-        iconCacheLock.lock()
-        defer { iconCacheLock.unlock() }
-        return iconCache[key]
-    }
-
-    private func iconCacheKey(for path: String, scale: CGFloat) -> String {
-        "\(path)#\(Int(iconSize.rounded()))#\(Int((scale * 100).rounded()))"
-    }
-
-    private func renderIcon(_ icon: NSImage, key: String, side: CGFloat, scale: CGFloat) -> CGImage? {
-        iconCacheLock.lock()
-        if let cached = iconCache[key] {
-            iconCacheLock.unlock()
-            return cached
-        }
-        iconCacheLock.unlock()
-
+    private static func renderIcon(_ icon: NSImage, side: CGFloat, scale: CGFloat) -> CGImage? {
         let pixelSide = max(16, Int((side * scale).rounded()))
-        let image = NSImage(size: NSSize(width: pixelSide, height: pixelSide))
-        image.lockFocus()
+        // pixelSide already includes backingScale. NSImage.lockFocus would
+        // apply the screen scale a second time and allocate an oversized bitmap.
+        let format = CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder16Little.rawValue
+            | CGImageAlphaInfo.premultipliedLast.rawValue
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.extendedSRGB),
+              let context = CGContext(data: nil, width: pixelSide, height: pixelSide,
+                                      bitsPerComponent: 16, bytesPerRow: 0,
+                                      space: colorSpace, bitmapInfo: format) else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
         NSGraphicsContext.current?.imageInterpolation = .high
         icon.draw(in: NSRect(x: 0, y: 0, width: pixelSide, height: pixelSide))
-        image.unlockFocus()
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
-
-        iconCacheLock.lock()
-        iconCache[key] = cgImage
-        iconCacheLock.unlock()
-        return cgImage
+        return context.makeImage()
     }
 
     private func updateLabelFonts() {
@@ -576,6 +598,7 @@ final class CAFolderGridView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        guard presentationState?.allowsInteraction != false else { return }
         guard hoverMagnificationEnabled, !isDraggingItem else {
             updateHoverIndex(nil)
             return
@@ -632,6 +655,7 @@ final class CAFolderGridView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        guard presentationState?.allowsInteraction != false else { return }
         guard !isContextMenuTracking else {
             super.scrollWheel(with: event)
             return
@@ -648,6 +672,7 @@ final class CAFolderGridView: NSView {
             onClose?()
             return
         }
+        guard presentationState?.allowsInteraction != false else { return }
         guard !apps.isEmpty else {
             super.keyDown(with: event)
             return
@@ -1020,11 +1045,14 @@ final class CAFolderGridView: NSView {
         iconLayer.contentsGravity = .resizeAspect
         iconLayer.contentsScale = backingScale
         iconLayer.frame = container.bounds
-        if let cached = cachedIcon(for: app.url.path) {
-            iconLayer.contents = cached
-        }
         container.addSublayer(iconLayer)
         setIcon(for: iconLayer, app: app)
+        // An active layer may still own an image evicted from the shared budget.
+        // Reuse it for dragging instead of briefly showing an empty preview.
+        if iconLayer.contents == nil,
+           let index = apps.firstIndex(where: { $0.url == app.url }), appLayers.indices.contains(index) {
+            iconLayer.contents = appLayers[index].sublayers?.first(where: { $0.name == "icon" })?.contents
+        }
         return container
     }
 
@@ -1349,6 +1377,111 @@ final class CAFolderGridView: NSView {
         if let icon = layer.sublayers?.first(where: { $0.name == "icon" }) {
             icon.transform = CATransform3DMakeScale(iconScale, iconScale, 1)
         }
+        CATransaction.commit()
+    }
+}
+
+extension CAFolderGridView {
+    /// Prime only missing thumbnails and wait for visible asynchronous icon loads.
+    /// The original folder remains visible while its open content is prepared.
+    func prepareFolderPresentation(from source: CAFolderOpeningSource?) -> Bool {
+        var ready = true
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (index, cell) in appLayers.enumerated() where apps.indices.contains(index) {
+            guard itemFrames.indices.contains(index), itemFrames[index].intersects(bounds),
+                  let icon = cell.sublayers?.first(where: { $0.name == "icon" }) else { continue }
+            if icon.contents == nil { icon.contents = source?.previewTile(for: apps[index].url.path) }
+            ready = ready && icon.contents != nil
+        }
+        CATransaction.commit()
+        return ready
+    }
+
+    /// Transient CA layers share existing bitmaps, outside SwiftUI's clipping
+    /// hierarchy. Only visible icons participate; closing drops all these layers.
+    func animateFolderPresentation(from source: CAFolderOpeningSource?, opening: Bool,
+                                   duration: TimeInterval, in stage: NSView, motion: FolderPresentationMotion? = nil) {
+        struct Visual {
+            let frame: CGRect
+            let opacity: Float
+        }
+        var visuals: [ObjectIdentifier: Visual] = [:]
+        for (id, icon) in presentationIcons {
+            let visual = icon.presentation() ?? icon
+            visuals[id] = Visual(frame: visual.frame, opacity: visual.opacity)
+        }
+        finishFolderPresentation()
+        guard let source, let motion, duration > 0, let root = layer, let stageLayer = stage.layer else { return }
+        let folderRect = stage.convert(source.plateRectInWindow, from: nil)
+        let gridRect = convert(bounds, to: stage)
+        let compactScale = min(folderRect.width / max(1, gridRect.width),
+                               folderRect.height / max(1, gridRect.height))
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (index, cell) in appLayers.enumerated() where apps.indices.contains(index) {
+            guard itemFrames.indices.contains(index), itemFrames[index].intersects(bounds),
+                  let icon = cell.sublayers?.first(where: { $0.name == "icon" }),
+                  icon.bounds.width > 0 else { continue }
+            let id = ObjectIdentifier(icon)
+            let destination = convert(icon.convert(icon.bounds, to: root), to: stage)
+            let tile = source.tileInWindow(for: apps[index].url.path).map { stage.convert($0, from: nil) }
+            // Items beyond the nine preview tiles unfold from inside the same
+            // folder, distributed by their final position instead of fading in place.
+            let compactSize = CGSize(width: destination.width * compactScale,
+                                     height: destination.height * compactScale)
+            let compact = CGRect(x: folderRect.midX + (destination.midX - gridRect.midX) * compactScale - compactSize.width / 2,
+                                 y: folderRect.midY + (destination.midY - gridRect.midY) * compactScale - compactSize.height / 2,
+                                 width: compactSize.width, height: compactSize.height)
+            let origin = tile ?? compact
+            let initial = visuals[id]?.frame ?? (opening ? origin : destination)
+            let final = opening ? destination : origin
+            let proxy = CALayer()
+            proxy.contents = icon.contents
+            proxy.contentsScale = icon.contentsScale
+            proxy.contentsGravity = .resizeAspect
+            proxy.bounds = CGRect(origin: .zero, size: destination.size)
+            stageLayer.addSublayer(proxy)
+            presentationIcons[id] = proxy
+            icon.opacity = 0
+            let fromScale = CATransform3DMakeScale(initial.width / destination.width, initial.height / destination.height, 1)
+            let toScale = CATransform3DMakeScale(final.width / destination.width, final.height / destination.height, 1)
+            func add(_ key: String, final: Any, value: (CGFloat) -> Any) {
+                proxy.setValue(final, forKeyPath: key)
+                proxy.add(motion.animation(keyPath: key, on: proxy, value: value), forKey: "folderPresentation.\(key)")
+            }
+            add("position", final: NSValue(point: CGPoint(x: final.midX, y: final.midY))) { t in
+                NSValue(point: CGPoint(x: initial.midX + (final.midX - initial.midX) * t,
+                                       y: initial.midY + (final.midY - initial.midY) * t))
+            }
+            add("transform", final: NSValue(caTransform3D: toScale)) { t in
+                NSValue(caTransform3D: FolderPresentationMotion.transform(from: fromScale, to: toScale, fraction: t))
+            }
+            let initialOpacity = visuals[id]?.opacity ?? (opening && tile == nil ? Float(0) : 1)
+            let finalOpacity: Float = opening || tile != nil ? 1 : 0
+            add("opacity", final: finalOpacity) { t in
+                min(1, max(0, initialOpacity + (finalOpacity - initialOpacity) * Float(t)))
+            }
+
+        }
+        CATransaction.commit()
+    }
+
+    func finishFolderPresentation() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for icon in presentationIcons.values { icon.removeFromSuperlayer() }
+        presentationIcons.removeAll(keepingCapacity: false)
+        for cell in appLayers {
+            let icon = cell.sublayers?.first(where: { $0.name == "icon" })
+            for child in cell.sublayers ?? [] {
+                for key in child.animationKeys() ?? [] where key.hasPrefix("folderPresentation.") {
+                    child.removeAnimation(forKey: key)
+                }
+                child.opacity = child === icon || icon?.contents != nil ? 1 : 0
+            }
+        }
+        updateLayout(animated: false)
         CATransaction.commit()
     }
 }

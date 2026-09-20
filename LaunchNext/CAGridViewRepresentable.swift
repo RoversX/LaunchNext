@@ -17,14 +17,18 @@ struct CAGridViewRepresentable: NSViewRepresentable {
     var externalDragSourceIndex: Int?
     var externalDragHoverIndex: Int?
     var selectedIndex: Int?
+    var folderPresentation: CAFolderPresentationController? = nil
 
     // 监听这些触发器来强制刷新
     var gridRefreshTrigger: UUID { appStore.gridRefreshTrigger }
     var folderUpdateTrigger: UUID { appStore.folderUpdateTrigger }
     var iconCacheRefreshTrigger: UUID { appStore.iconCacheRefreshTrigger }
 
-    func makeNSView(context: Context) -> CAGridView {
-        let view = CAGridView(frame: .zero)
+    func makeNSView(context: Context) -> CAFolderBackdropView {
+        let backdrop = CAFolderBackdropView()
+        let view = backdrop.grid
+        folderPresentation?.backdrop = backdrop
+        folderPresentation?.grid = view
 
         // Initialize configuration
         view.columns = appStore.gridColumnsPerPage
@@ -159,10 +163,13 @@ struct CAGridViewRepresentable: NSViewRepresentable {
             }
         }
 
-        return view
+        return backdrop
     }
 
-    func updateNSView(_ nsView: CAGridView, context: Context) {
+    func updateNSView(_ backdrop: CAFolderBackdropView, context: Context) {
+        let nsView = backdrop.grid
+        folderPresentation?.backdrop = backdrop
+        folderPresentation?.grid = nsView
         // print("🔄 [CAGrid #\(nsView.debugInstanceId)] updateNSView, window=\(nsView.window != nil), isVisible=\(nsView.window?.isVisible ?? false)")
         // 确保滚轮事件监听器已安装（窗口重新显示时需要）
         nsView.ensureScrollMonitorInstalled()

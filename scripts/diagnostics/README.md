@@ -30,6 +30,79 @@ types. Its model callbacks still use fixtures rather than AppStore.
 
 Nothing here runs in CI, and none of it ships in LaunchNext.
 
+## Folder opening and closing
+
+```sh
+python3 scripts/diagnostics/run_folder_presentation_integration.py
+```
+
+Requires an unlocked desktop and animation frames. Compiles the actual
+`CAFolderPresentationHost`, `FolderView`, main grid and folder grid in a
+temporary app with its own bundle identifier. Only AppStore's initializer is
+replaced with a fixture to avoid startup scanning, persistence and observers;
+this does not validate the full AppStore lifecycle. Update the fixture if its
+required stored properties or initializer shape change.
+
+Checks intermediate material geometry and rounded masking, prepared icon bitmaps,
+movement of icons beyond the nine preview tiles, delayed labels, final layout, source restoration and
+grid deallocation; compact/fullscreen-sized panels with folder glass on/off;
+large paged and vertical folders; rapid reversal; disabled animations; teardown;
+drag-out handoff; and resizing during opening. It requests no screen capture
+permission and does not load user layouts. These checks establish geometry and
+lifecycle behavior, not visual quality, frame rate, GPU cost or macOS 26 parity.
+Same-frame checks compare icon and material progress, including a SwiftUI parent
+with animated background dimming. A solid-color raster check applies the actual
+presentation transform and mask to catch misplaced or clipped-away backplates;
+it does not test the native material shading. Chrome uses a CA opacity group on the native
+host, so presentation visibility no longer publishes SwiftUI state during layout.
+Completion follows the CA transaction, with stale callbacks rejected on reversal.
+Opening waits for SwiftUI to acknowledge the page count and apply the indicator's
+layout before capturing icon destinations. This adds no fixed delay. The real-view
+probe checks proxy endpoints against laid-out icons throughout opening: before
+this guard, the fixture reproduced a 14-point grid-height change and a 10.5-point
+handoff jump; with it, endpoint drift stays below 0.01 points. This verifies that
+layout race, not every possible source of perceptual jitter.
+Folder timing is independent of paging: opening takes 0.24 seconds, closing
+0.28 seconds, both with ease-in/ease-out curves. Retargeting carries the current position and velocity into a bounded
+Hermite trajectory. It splits at the turning point into at most three keyframes
+with native Bezier timing functions; there is no per-frame Swift update. Icons,
+material, rounded masking and background depth share that trajectory and clock.
+Clicking the same folder during closing reverses the existing presentation;
+clicking a different folder finishes dismissal and forwards the new gesture.
+Actual `NSWindow.sendEvent` checks cover outside-click cancellation while opening,
+the first click during closing, and reopening when AppKit classifies the gesture
+as a double click. The SwiftUI fixture also checks the outgoing dimming overlay
+does not consume that click. These tests do not measure physical input latency.
+Transition layers borrow existing CGImages and are removed at completion; the
+checks do not measure the compositor's transient mask/material memory cost.
+
+Folder presentation does not install a background Gaussian blur; the integration
+probe asserts that the backdrop has no content filters while open or after close.
+
+Background depth uses one ancestor transform for the main grid and its native
+glass. The selected folder's center is the fixed pivot, including when it is
+off-center; closing restores identity. The probe checks that pivot through
+actual layer conversion, intermediate scale, and restoration. Bitmap checks
+verify 72-point folder icons render to 72/144 pixels at 1x/2x, without applying
+the screen scale twice.
+
+Rendered folder icons share a 4 MiB pixel-payload LRU cache. This limit excludes
+images retained by visible layers and allocator/compositor overhead. Cache
+tests compile the production implementation directly:
+
+```sh
+xcodebuild test -scheme LaunchNext -destination 'platform=macOS' \
+  -only-testing:LaunchNextTests/FolderIconBitmapCacheTests
+xcodebuild test -scheme LaunchNext -destination 'platform=macOS' \
+  -only-testing:LaunchNextTests/FolderPresentationMotionTests
+```
+
+They cover reuse, source/scale/appearance separation, byte-budget eviction,
+refresh invalidation of in-flight work, and weak ownership of source images.
+The cache does not preserve the folder view or native material between opens.
+Motion tests cover position/velocity continuity, stopping before reversal,
+settling, bounded progress through 200 reversals, and native timing controls.
+
 ## Reorder algorithm
 
 Now covered by a real unit test against the same production source, not a probe:

@@ -85,6 +85,7 @@ extension CAGridView {
                     icon.contents = previousImage
                 }
                 if items[i].id == dragLanding?.itemID || isFolderMergeDestination(items[i]) { layer.opacity = 0 }
+                if case let .folder(folder) = items[i], folder.id == presentedFolderID { layer.opacity = 0 }
                 pageContainerLayer.addSublayer(layer)
                 pageLayers.append(layer)
             }

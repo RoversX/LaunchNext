@@ -262,7 +262,11 @@ extension CAGridView {
 
         if let (item, index) = itemAt(location) {
             // print("🖱️ [CAGrid] Hit item: \(item.name) at index \(index)")
-            if event.clickCount == 1 {
+            // Reopening a folder immediately after dismissal may be classified
+            // as a double click by AppKit; it is still a complete open gesture.
+            let isFolder: Bool
+            if case .folder = item { isFolder = true } else { isFolder = false }
+            if event.clickCount == 1 || isFolder {
                 // 添加点击效果动画
                 setPressedIndex(index)
                 dragStartPoint = location
@@ -395,6 +399,10 @@ extension CAGridView {
                         toggleBatchSelection(forAppPath: app.url.path)
                     }
                 } else {
+                    if case .folder = item {
+                        onItemClicked?(item, index)
+                        return
+                    }
                     // 延迟一点点再触发，让动画效果更明显
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
                         self?.onItemClicked?(item, index)

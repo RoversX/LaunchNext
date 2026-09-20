@@ -180,6 +180,8 @@ struct LaunchpadView: View {
         _searchEngine = ObservedObject(wrappedValue: appStore.searchEngine)
     }
 
+    @StateObject private var folderPresentation = CAFolderPresentationController()
+
     private var isFolderOpen: Bool { appStore.openFolder != nil }
     private var currentScreenID: String? {
         let screen = NSApp.keyWindow?.screen ?? NSScreen.main
@@ -712,6 +714,8 @@ struct LaunchpadView: View {
                     .opacity(0.1)
                     .ignoresSafeArea()
                     .transition(.opacity)
+                    // Native folder presentation owns dismissal during CA transitions.
+                    .allowsHitTesting(!appStore.useCAGridRenderer)
                     .onTapGesture {
                         if !appStore.isFolderNameEditing {
                             let closingFolder = appStore.openFolder
@@ -728,7 +732,12 @@ struct LaunchpadView: View {
                     }
             }
 
-            if let openFolder = appStore.openFolder {
+            if appStore.useCAGridRenderer {
+                CAFolderPresentation(appStore: appStore, controller: folderPresentation,
+                    iconSize: currentIconSize * CGFloat(min(max(appStore.iconScale, 0.6), 1.15)),
+                    onClose: { closePresentedFolder() }, onLaunchApp: { launchApp($0) })
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let openFolder = appStore.openFolder {
                 GeometryReader { proxy in
                     let widthFactor: CGFloat = appStore.isFullscreenMode ? 0.7 : CGFloat(appStore.folderPopoverWidthFactor)
                     let heightFactor: CGFloat = appStore.isFullscreenMode ? 0.7 : CGFloat(appStore.folderPopoverHeightFactor)
@@ -951,7 +960,8 @@ struct LaunchpadView: View {
                         },
                         externalDragSourceIndex: externalDragSourceIndex,
                         externalDragHoverIndex: externalDragHoverIndex,
-                        selectedIndex: isKeyboardNavigationActive ? selectedIndex : nil
+                        selectedIndex: isKeyboardNavigationActive ? selectedIndex : nil,
+                        folderPresentation: folderPresentation
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .opacity(isFolderOpen ? 0.1 : 1)
@@ -1107,6 +1117,19 @@ struct LaunchpadView: View {
                 }
             }
         )
+    }
+
+    private func closePresentedFolder() {
+        let closingFolder = appStore.openFolder
+        withAnimation(LNAnimations.springFast) { appStore.openFolder = nil }
+        if let folder = closingFolder,
+           let index = filteredItems.firstIndex(where: { $0.id == "folder_\(folder.id)" }) {
+            isKeyboardNavigationActive = true
+            selectedIndex = index
+            let page = index / max(1, config.itemsPerPage)
+            if page != appStore.currentPage { appStore.currentPage = page }
+        }
+        isSearchFieldFocused = true
     }
 
     private func launchApp(_ app: AppInfo) {
@@ -2135,6 +2158,7 @@ extension LaunchpadView {
         windowHiddenObserver = NotificationCenter.default.addObserver(forName: .launchpadWindowHidden, object: nil, queue: .main) { _ in
             isWindowVisible = false
             MainActor.assumeIsolated {
+                folderPresentation.dismissImmediately()
                 backgroundImageController.windowDidHide()
             }
             selectedIndex = 0

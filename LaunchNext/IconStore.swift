@@ -29,6 +29,7 @@ final class IconStore {
 
     func clear() {
         cache.removeAllObjects()
+        FolderIconBitmapCache.shared.clear()
     }
 }
 

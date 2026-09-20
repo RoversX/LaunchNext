@@ -3572,6 +3572,7 @@ final class AppStore: ObservableObject {
         applicationReconciliationWorkItem = nil
 
         let reasons = applicationReconciliationReasons
+        FolderIconBitmapCache.shared.clear()
         applicationReconciliationReasons.removeAll()
         applicationReconciliationInProgress = true
 

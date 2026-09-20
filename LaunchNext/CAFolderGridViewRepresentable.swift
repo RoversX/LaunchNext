@@ -12,6 +12,7 @@ struct CAFolderGridViewRepresentable: NSViewRepresentable {
     var verticalHeaderHeight: CGFloat
     var onClose: () -> Void
     var onLaunchApp: (AppInfo) -> Void
+    var presentationState: CAFolderPresentationState? = nil
 
     func makeNSView(context: Context) -> CAFolderGridView {
         let view = CAFolderGridView(frame: .zero)
@@ -32,6 +33,9 @@ struct CAFolderGridViewRepresentable: NSViewRepresentable {
     }
 
     private func configure(_ view: CAFolderGridView) {
+        view.presentationState = presentationState
+        presentationState?.grid = view
+        view.representedPageCount = pageCount
         view.layoutMode = appStore.folderLayoutMode
         view.iconSize = iconSize
         view.labelFontSize = CGFloat(appStore.iconLabelFontSize)
