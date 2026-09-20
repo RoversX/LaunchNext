@@ -201,6 +201,9 @@ final class BackgroundImageController: ObservableObject {
     private var contextMonitor: WallpaperContextMonitor?
 
     private func desktopContextChanged(force: Bool) {
+        // Monitor notifications also arrive while hidden. Release disconnected
+        // displays before refresh takes its hidden-window early return.
+        pruneDisconnectedDesktopFrames()
         let displayID: CGDirectDisplayID
         let source: AppStore.BackgroundImageSource
         switch requestIdentity {
@@ -313,18 +316,7 @@ final class BackgroundImageController: ObservableObject {
             return
         }
 
-        // Drop warm frames for displays that are no longer connected, so an
-        // unplugged monitor's frame (and any stale reused display ID) does not
-        // sit in memory indefinitely.
-        if !lastDesktopFrameByDisplay.isEmpty || !cachedCaptures.isEmpty {
-            let connected = Set(NSScreen.screens.compactMap { Self.displayID(for: $0) })
-            lastDesktopFrameByDisplay = lastDesktopFrameByDisplay.filter { connected.contains($0.key) }
-            cachedCaptures = cachedCaptures.filter { connected.contains($0.key) }
-            desktopFrameBudgets = desktopFrameBudgets.filter { connected.contains($0.key) }
-            desktopFrameUseOrder.removeAll { !connected.contains($0) }
-            diagnosticContextComponents = diagnosticContextComponents.filter { connected.contains($0.key) }
-            captureQuietPeriods = captureQuietPeriods.filter { connected.contains($0.key) }
-        }
+        pruneDisconnectedDesktopFrames()
 
         let displayPixels = CGSize(width: screen.frame.width * screen.backingScaleFactor,
                                    height: screen.frame.height * screen.backingScaleFactor)
@@ -965,6 +957,33 @@ final class BackgroundImageController: ObservableObject {
                 capture: candidate) else { return }
             if settling.isSettled { return }
         }
+    }
+
+    private func pruneDisconnectedDesktopFrames() {
+        let connected = Set(NSScreen.screens.compactMap { Self.displayID(for: $0) })
+        let disconnected = Set(lastDesktopFrameByDisplay.keys)
+            .union(cachedCaptures.keys).subtracting(connected)
+        for displayID in disconnected {
+            WallpaperDiagnostics.record("cache.evict display=\(displayID) cause=displayDisconnected")
+        }
+        lastDesktopFrameByDisplay = lastDesktopFrameByDisplay.filter { connected.contains($0.key) }
+        cachedCaptures = cachedCaptures.filter { connected.contains($0.key) }
+        desktopFrameBudgets = desktopFrameBudgets.filter { connected.contains($0.key) }
+        desktopFrameUseOrder.removeAll { !connected.contains($0) }
+        diagnosticContextComponents = diagnosticContextComponents.filter { connected.contains($0.key) }
+        captureQuietPeriods = captureQuietPeriods.filter { connected.contains($0.key) }
+
+        let contentDisplayID: CGDirectDisplayID
+        switch requestIdentity {
+        case .desktop(let id), .preview(let id, _, _): contentDisplayID = id
+        default: return
+        }
+        guard !connected.contains(contentDisplayID) else { return }
+        // The published image can keep the same bitmap alive after its cache
+        // entries are gone. Release this final controller reference as well.
+        content = nil
+        activeWallpaperIdentity = nil
+        desktopContextIsDirty = true
     }
 
     private func rememberDesktopFrame(_ frame: Content, displayID: CGDirectDisplayID, capture: CachedCapture? = nil) {
