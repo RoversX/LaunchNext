@@ -61,6 +61,19 @@ import SwiftUI
         Task { @MainActor in
             do {
                 try await Task.sleep(for: .milliseconds(200))
+                if ProcessInfo.processInfo.environment["LAUNCHNEXT_REORDER_CHECK_ONLY"] == "1" {
+                    let folderGrid = CAFolderGridView(frame: root.bounds)
+                    root.addSubview(folderGrid)
+                    folderGrid.apps = apps
+                    try await Task.sleep(for: .milliseconds(500))
+                    folderGrid.probeCheckReorderReuse()
+                    try await Task.sleep(for: .milliseconds(600))
+                    folderGrid.probeCheckLandingCompleted()
+                    print("PASS folder reorder retains live bitmaps with an empty cache; moved, rejected and unchanged drops animate and clean up")
+                    folderGrid.removeFromSuperview()
+                    app.terminate(nil)
+                    return
+                }
                 let pivot = backdrop.convert(CGPoint(x: 140, y: 580), to: nil)
                 backdrop.setFolderDepth(true, duration: 0, pivotInWindow: pivot)
                 let rootLayer = backdrop.layer!

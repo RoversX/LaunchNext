@@ -36,6 +36,24 @@ Nothing here runs in CI, and none of it ships in LaunchNext.
 python3 scripts/diagnostics/run_folder_presentation_integration.py
 ```
 
+For the folder-internal reorder handoff alone:
+
+```sh
+LAUNCHNEXT_REORDER_CHECK_ONLY=1 python3 scripts/diagnostics/run_folder_presentation_integration.py
+```
+
+This mode clears the bitmap cache before each move and checks that paged and
+vertical reorders retain the same live layers, bitmaps and load tokens. It also
+checks that a rejected model update restores the source instead of leaving an
+invisible cell. It does not measure drag smoothness or frame rate.
+Moved, rejected and unchanged drops use the outer grid's 0.18-second cubic
+ease-out timing. The floating layer stays visible until landing; new input or
+folder teardown ends the handoff immediately, with a 0.5-second cleanup limit.
+The reorder probe checks the animation, destination visibility and cleanup.
+It moves the scaled preview before dropping and compares the actual icon child's
+final rectangle with the destination, catching bounds changes that cause a size
+jump when the floating layer is removed.
+
 Requires an unlocked desktop and animation frames. Compiles the actual
 `CAFolderPresentationHost`, `FolderView`, main grid and folder grid in a
 temporary app with its own bundle identifier. Only AppStore's initializer is

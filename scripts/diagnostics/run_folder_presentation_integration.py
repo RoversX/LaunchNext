@@ -113,6 +113,69 @@ extension CAFolderPresentationHost {
     grid = work / 'LaunchNext/CAFolderGridView.swift'
     grid.write_text(grid.read_text() + '''
 extension CAFolderGridView {
+    func probeCheckReorderReuse() {
+        precondition(apps.count > 2)
+        for mode: AppStore.FolderLayoutMode in [.paged, .vertical] {
+            layoutMode = mode
+            for target in [2, apps.count, 0] {
+                let before = Dictionary(uniqueKeysWithValues: zip(apps.map(\\.url), appLayers))
+                let tokens = appLayers.map { $0.sublayers!.first(where: { $0.name == "icon" })!.value(forKey: "iconLoadToken") as! String }
+                precondition(appLayers.allSatisfy { $0.sublayers!.first(where: { $0.name == "icon" })!.contents != nil })
+                FolderIconBitmapCache.shared.clear()
+                let source = target == 0 ? 2 : 0
+                startDragging(at: source, point: itemFrames[source].origin)
+                updateDragging(at: CGPoint(x: bounds.midX, y: bounds.midY))
+                precondition(abs(draggingLayer!.bounds.width - iconSize) < 0.001,
+                             "moving a scaled preview must not change its intrinsic size")
+                updateReorderPreview(targetIndex: target)
+                onReorderApps = { [unowned self] from, to in
+                    precondition(draggingLayer?.superlayer != nil, "preview must survive until the model accepts the move")
+                    var updated = apps
+                    let moving = updated.remove(at: from)
+                    updated.insert(moving, at: min(to, updated.count))
+                    return updated
+                }
+                finishDragging(at: .zero)
+                precondition(draggingLayer == nil && draggingIndex == nil)
+                precondition(landingLayer?.animation(forKey: "folderDropLanding")?.duration == DragLanding.duration)
+                let previewIcon = landingLayer!.sublayers!.first!
+                let finalIconRect = previewIcon.convert(previewIcon.bounds, to: layer!)
+                let cellIconRect = dropLandingRect()!
+                precondition(abs(finalIconRect.width - cellIconRect.width) < 0.001
+                             && abs(finalIconRect.height - cellIconRect.height) < 0.001
+                             && abs(finalIconRect.midX - cellIconRect.midX) < 0.001
+                             && abs(finalIconRect.midY - cellIconRect.midY) < 0.001,
+                             "landing must hand off the same visible icon geometry, not just the preview container")
+                for (app, cell) in zip(apps, appLayers) {
+                    precondition(cell === before[app.url], "reorder must preserve layer identity")
+                    let icon = cell.sublayers!.first(where: { $0.name == "icon" })!
+                    precondition(icon.contents != nil && cell.opacity == (app.url == landingAppURL ? 0 : 1))
+                    precondition(tokens.contains(icon.value(forKey: "iconLoadToken") as! String), "reorder must not restart bitmap loading")
+                }
+                finishDropLanding()
+                precondition(appLayers.allSatisfy { $0.opacity == 1 })
+            }
+            let order = apps.map(\\.url)
+            startDragging(at: 0, point: itemFrames[0].origin)
+            updateReorderPreview(targetIndex: 2)
+            onReorderApps = { _, _ in nil }
+            finishDragging(at: .zero)
+            precondition(landingLayer != nil, "a rejected move must animate back to its source")
+            finishDropLanding()
+            precondition(apps.map(\\.url) == order && appLayers.allSatisfy { $0.opacity == 1 }, "a rejected move must restore the original cells")
+        }
+        onReorderApps = nil
+        startDragging(at: 0, point: CGPoint(x: 200, y: 200))
+        currentHoverIndex = 0
+        finishDragging(at: .zero)
+        precondition(landingLayer != nil, "an unchanged drop must also animate home")
+    }
+
+    func probeCheckLandingCompleted() {
+        precondition(landingLayer == nil && landingAppURL == nil && landingTimeout == nil)
+        precondition(appLayers.allSatisfy { $0.opacity == 1 })
+    }
+
     func probeCheckPendingIconLabel() {
         for scale: CGFloat in [1, 2] {
             let image = Self.renderIcon(NSWorkspace.shared.icon(forFile: "/System/Applications/Notes.app"), side: 72, scale: scale)!

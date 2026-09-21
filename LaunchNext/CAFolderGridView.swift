@@ -7,7 +7,9 @@ final class CAFolderGridView: NSView {
     private var presentationIcons: [ObjectIdentifier: CALayer] = [:]
     private var renderedBackingScale: CGFloat?
     var apps: [AppInfo] = [] {
-        didSet { rebuildLayers() }
+        didSet {
+            if !reuseLayersForReorder(from: oldValue) { rebuildLayers() }
+        }
     }
     var layoutMode: AppStore.FolderLayoutMode = .paged {
         didSet {
@@ -74,7 +76,7 @@ final class CAFolderGridView: NSView {
     var isContextMenuTracking: Bool = false
 
     var onOpenApp: ((AppInfo) -> Void)?
-    var onReorderApps: ((Int, Int) -> Void)?
+    var onReorderApps: ((Int, Int) -> [AppInfo]?)?
     var onDragAppOut: ((AppInfo) -> Void)?
     var onContextMenuAction: ((AppContextMenuRoute) -> Void)?
     var onClose: (() -> Void)?
@@ -115,6 +117,10 @@ final class CAFolderGridView: NSView {
     private var draggingIndex: Int?
     private var draggingApp: AppInfo?
     private var draggingLayer: CALayer?
+    private var landingLayer: CALayer?
+    private var landingAppURL: URL?
+    private var landingTarget: CGRect?
+    private var landingTimeout: DispatchWorkItem?
     private var isDraggingItem = false
     private var dragCurrentPoint: CGPoint = .zero
     private var edgeDragTimer: Timer?
@@ -166,6 +172,7 @@ final class CAFolderGridView: NSView {
         displayLink?.invalidate()
         edgeDragTimer?.invalidate()
         pageScrollSnapWorkItem?.cancel()
+        landingTimeout?.cancel()
     }
 
     private func setup() {
@@ -212,6 +219,7 @@ final class CAFolderGridView: NSView {
             refreshBackingScaleIfNeeded()
             setupDisplayLinkIfNeeded()
         } else {
+            finishDropLanding()
             displayLink?.invalidate()
             displayLink = nil
         }
@@ -311,7 +319,36 @@ final class CAFolderGridView: NSView {
                        pageStride: width)
     }
 
+    private func reuseLayersForReorder(from previous: [AppInfo]) -> Bool {
+        guard window != nil, previous.count == apps.count, appLayers.count == previous.count,
+              renderedBackingScale == backingScale else { return false }
+        var indices: [URL: Int] = [:]
+        for (index, app) in previous.enumerated() {
+            guard indices.updateValue(index, forKey: app.url) == nil else { return false }
+        }
+        var order: [Int] = []
+        for app in apps {
+            guard let index = indices.removeValue(forKey: app.url),
+                  previous[index].name == app.name, previous[index].icon === app.icon else { return false }
+            order.append(index)
+        }
+        func remap(_ index: Int?) -> Int? {
+            index.flatMap { order.firstIndex(of: $0) }
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        appLayers = order.map { appLayers[$0] }
+        selectedIndex = remap(selectedIndex)
+        hoveredIndex = remap(hoveredIndex)
+        pressedIndex = remap(pressedIndex)
+        draggingIndex = remap(draggingIndex)
+        updateLayout(animated: false)
+        CATransaction.commit()
+        return true
+    }
+
     private func rebuildLayers() {
+        finishDropLanding()
         renderedBackingScale = window?.backingScaleFactor
         appLayers.forEach { $0.removeFromSuperlayer() }
         appLayers.removeAll()
@@ -416,8 +453,9 @@ final class CAFolderGridView: NSView {
             layer.transform = CATransform3DIdentity
             layer.frame = frame
             layoutSublayers(of: layer, metrics: metrics)
-            layer.opacity = draggingIndex == index ? 0 : 1
+            layer.opacity = draggingIndex == index || apps[index].url == landingAppURL ? 0 : 1
         }
+        if let target = landingTarget, dropLandingRect() != target { finishDropLanding() }
         CATransaction.commit()
         notifyPageStateChanged()
         notifyVerticalScrollOffsetChanged()
@@ -612,6 +650,7 @@ final class CAFolderGridView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        finishDropLanding()
         window?.makeFirstResponder(self)
         let point = convert(event.locationInWindow, from: nil)
         guard let index = itemIndex(at: point) else { return }
@@ -655,6 +694,7 @@ final class CAFolderGridView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        finishDropLanding()
         guard presentationState?.allowsInteraction != false else { return }
         guard !isContextMenuTracking else {
             super.scrollWheel(with: event)
@@ -668,6 +708,7 @@ final class CAFolderGridView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
+        finishDropLanding()
         if event.keyCode == 53 {
             onClose?()
             return
@@ -1022,6 +1063,7 @@ final class CAFolderGridView: NSView {
     }
 
     private func startDragging(at index: Int, point: CGPoint) {
+        finishDropLanding()
         guard apps.indices.contains(index) else { return }
         isDraggingItem = true
         draggingIndex = index
@@ -1060,7 +1102,10 @@ final class CAFolderGridView: NSView {
         dragCurrentPoint = point
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        draggingLayer?.frame = CGRect(x: point.x - iconSize / 2, y: point.y - iconSize / 2, width: iconSize, height: iconSize)
+        // The preview is scaled to 1.08. Setting frame under that transform
+        // shrinks its bounds without resizing the icon child, so landing ends
+        // oversized and snaps when the real cell is revealed.
+        draggingLayer?.position = point
         CATransaction.commit()
 
         if point.x < dragOutInset || point.y < dragOutInset || point.x > bounds.width - dragOutInset || point.y > bounds.height - dragOutInset {
@@ -1145,9 +1190,18 @@ final class CAFolderGridView: NSView {
         let target = currentHoverIndex ?? gridIndex(at: point) ?? source
         let clampedTarget = min(max(0, target), apps.count)
         let shouldReorder = source != clampedTarget
-        if shouldReorder {
+        if shouldReorder, let reordered = onReorderApps?(source, clampedTarget) {
+            // Keep the floating icon visible until the model accepts the move,
+            // then reveal the reused destination in the same CA transaction.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            let preview = draggingLayer
+            let movingURL = apps[source].url
+            draggingLayer = nil
             finishDraggingAfterReorder()
-            onReorderApps?(source, clampedTarget)
+            apps = reordered
+            beginDropLanding(preview: preview, appURL: movingURL)
+            CATransaction.commit()
         } else {
             cancelDragging(restoreSource: true, animated: true)
         }
@@ -1162,14 +1216,13 @@ final class CAFolderGridView: NSView {
         isDraggingItem = false
         currentHoverIndex = nil
 
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.draggingIndex = nil
-            self.draggingApp = nil
-        }
+        draggingIndex = nil
+        draggingApp = nil
     }
 
     private func cancelDragging(restoreSource: Bool = true, animated: Bool = true) {
+        let preview = draggingLayer
+        let movingURL = draggingApp?.url
         cancelEdgeFlipTimer()
         edgeDragRequiresReentry = false
         pendingDragUpdateAfterPageAnimation = false
@@ -1183,6 +1236,83 @@ final class CAFolderGridView: NSView {
         draggingApp = nil
         isDraggingItem = false
         currentHoverIndex = nil
+        if restoreSource, animated, let movingURL {
+            beginDropLanding(preview: preview, appURL: movingURL)
+        }
+    }
+
+    private func dropLandingRect() -> CGRect? {
+        guard let url = landingAppURL, let index = apps.firstIndex(where: { $0.url == url }),
+              appLayers.indices.contains(index), let root = layer,
+              let icon = appLayers[index].sublayers?.first(where: { $0.name == "icon" }) else { return nil }
+        return icon.convert(icon.bounds, to: root)
+    }
+
+    private func beginDropLanding(preview: CALayer?, appURL: URL) {
+        finishDropLanding()
+        guard let preview else { return }
+        guard animationsEnabled, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              window?.isVisible == true else { preview.removeFromSuperlayer(); return }
+        landingAppURL = appURL
+        guard let target = dropLandingRect(), target.width > 0, preview.bounds.width > 0,
+              let index = apps.firstIndex(where: { $0.url == appURL }) else {
+            landingAppURL = nil
+            preview.removeFromSuperlayer()
+            return
+        }
+        landingLayer = preview
+        landingTarget = target
+        let visual = preview.presentation() ?? preview
+        let fromPosition = visual.position
+        let fromTransform = visual.transform
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer?.addSublayer(preview)
+        appLayers[index].removeAnimation(forKey: "opacity")
+        appLayers[index].opacity = 0
+        let finish = { [weak self, weak preview] in
+            guard let self, let preview, self.landingLayer === preview else { return }
+            self.finishDropLanding()
+        }
+        CATransaction.setCompletionBlock { DispatchQueue.main.async(execute: finish) }
+        let destination = CGPoint(x: target.midX, y: target.midY)
+        let transform = CATransform3DMakeScale(target.width / preview.bounds.width,
+                                              target.height / preview.bounds.height, 1)
+        preview.position = destination
+        preview.transform = transform
+        let move = CABasicAnimation(keyPath: "position")
+        move.duration = DragLanding.duration
+        move.fromValue = NSValue(point: fromPosition)
+        move.toValue = NSValue(point: destination)
+        let scale = CABasicAnimation(keyPath: "transform")
+        scale.duration = DragLanding.duration
+        scale.fromValue = NSValue(caTransform3D: fromTransform)
+        scale.toValue = NSValue(caTransform3D: transform)
+        let animation = CAAnimationGroup()
+        animation.animations = [move, scale]
+        animation.duration = DragLanding.duration
+        // Exactly the outer grid's 1 - (1 - t)^3 ease-out, executed by CA.
+        animation.timingFunction = CAMediaTimingFunction(controlPoints: 1 / 3, 1, 2 / 3, 1)
+        preview.add(animation, forKey: "folderDropLanding")
+        CATransaction.commit()
+        let timeout = DispatchWorkItem(block: finish)
+        landingTimeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + DragLanding.maximumDuration, execute: timeout)
+    }
+
+    private func finishDropLanding() {
+        landingTimeout?.cancel(); landingTimeout = nil
+        guard landingLayer != nil else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if let index = apps.firstIndex(where: { $0.url == landingAppURL }), appLayers.indices.contains(index) {
+            appLayers[index].opacity = 1
+        }
+        landingLayer?.removeFromSuperlayer()
+        landingLayer = nil
+        landingAppURL = nil
+        landingTarget = nil
+        CATransaction.commit()
     }
 
     private func finishPageAnimationImmediatelyIfNeeded() {
@@ -1468,6 +1598,7 @@ extension CAFolderGridView {
     }
 
     func finishFolderPresentation() {
+        finishDropLanding()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for icon in presentationIcons.values { icon.removeFromSuperlayer() }

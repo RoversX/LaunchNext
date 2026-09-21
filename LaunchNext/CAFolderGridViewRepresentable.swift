@@ -99,9 +99,9 @@ struct CAFolderGridViewRepresentable: NSViewRepresentable {
             }
         }
         view.onReorderApps = { from, to in
-            DispatchQueue.main.async {
-                _ = appStore.reorderAppInFolder(folderID: folder.id, from: from, to: to)
-            }
+            // Called from mouseUp, outside SwiftUI's view-update transaction.
+            guard appStore.reorderAppInFolder(folderID: folder.id, from: from, to: to) else { return nil }
+            return appStore.folders.first(where: { $0.id == folder.id })?.apps
         }
         view.onDragAppOut = { app in
             DispatchQueue.main.async {
