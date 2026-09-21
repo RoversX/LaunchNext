@@ -535,14 +535,62 @@ final class CAFolderPresentationHost: NSView {
         glass?.alphaValue = 1
         glassContainer?.layer?.removeAnimation(forKey: "folderPresentation.glass")
         glassContainer?.layer?.sublayerTransform = CATransform3DIdentity
-        glassClipContainer?.layer?.mask = nil
-        glassMask = nil
         layoutGlass()
+        revealShadowAfterOpening()
         state?.allowsInteraction = true
         controller?.backdrop?.setFolderDepth(duration > 0 && source != nil, duration: 0)
         state?.grid?.finishFolderPresentation()
         animationStage?.removeFromSuperview(); animationStage = nil
         controller?.grid?.setPresentedFolderID(folderID)
+    }
+
+    /// Keep the material opaque while revealing only the area outside the card.
+    /// This preserves AppKit's shadow rather than drawing a second one.
+    private func revealShadowAfterOpening() {
+        guard let clipLayer = glassClipContainer?.layer else { return }
+        let shouldAnimate = motionEnabled && duration > 0 && glassMask != nil
+        glassMask = nil
+        guard shouldAnimate else {
+            clipLayer.mask = nil
+            return
+        }
+        let mask = CALayer()
+        mask.frame = bounds
+        let cardPath = CGPath(roundedRect: panelRect, cornerWidth: 30, cornerHeight: 30, transform: nil)
+        let card = CAShapeLayer()
+        card.path = cardPath
+        card.fillColor = NSColor.black.cgColor
+        mask.addSublayer(card)
+
+        let outside = CAShapeLayer()
+        let path = CGMutablePath()
+        path.addRect(bounds)
+        path.addPath(cardPath)
+        outside.path = path
+        outside.fillRule = .evenOdd
+        outside.fillColor = NSColor.black.cgColor
+        mask.addSublayer(outside)
+        clipLayer.mask = mask
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        CATransaction.setCompletionBlock { [weak clipLayer, weak mask] in
+            DispatchQueue.main.async {
+                // Closing or reopening may already have installed another mask.
+                guard let clipLayer, let mask, clipLayer.mask === mask else { return }
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                clipLayer.mask = nil
+                CATransaction.commit()
+            }
+        }
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = Float(0)
+        fade.toValue = Float(1)
+        fade.duration = 0.16
+        fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        outside.add(fade, forKey: "folderPresentation.shadowReveal")
+        CATransaction.commit()
     }
 
     private func close() {
