@@ -2,6 +2,7 @@
 // No user layout is loaded and no screen capture permission is requested.
 
 import AppKit
+import Combine
 import QuartzCore
 import SwiftUI
 
@@ -61,6 +62,107 @@ import SwiftUI
         Task { @MainActor in
             do {
                 try await Task.sleep(for: .milliseconds(200))
+                if ProcessInfo.processInfo.environment["LAUNCHNEXT_LABEL_CONTRAST_CHECK_ONLY"] == "1" {
+                    let context = CGContext(data: nil, width: 64, height: 64, bitsPerComponent: 8,
+                        bytesPerRow: 256, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                    context.setFillColor(NSColor.black.cgColor)
+                    context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+                    let background = context.makeImage()!
+                    let file = FileManager.default.temporaryDirectory.appendingPathComponent("contrast-\(UUID().uuidString).png")
+                    try NSBitmapImageRep(cgImage: background).representation(using: .png, properties: [:])!.write(to: file)
+                    defer { try? FileManager.default.removeItem(at: file) }
+                    let backgrounds = BackgroundImageController()
+                    var publishedSamples: [BackgroundLabelContrast] = []
+                    let observation = backgrounds.$content.sink { content in
+                        guard let content else { return }
+                        precondition(content.labelSample != nil, "Image published before its contrast sample")
+                        publishedSamples.append(content.labelSample!)
+                    }
+                    grid.appearance = NSAppearance(named: .aqua)
+                    for _ in 0..<3 {
+                        backgrounds.refresh(for: window.screen, enabled: true, source: .customImage,
+                            customImagePath: file.path, unfiltered: false, reason: .windowShown)
+                        for _ in 0..<100 where backgrounds.content == nil {
+                            try await Task.sleep(for: .milliseconds(10))
+                        }
+                        guard let restored = backgrounds.content else { preconditionFailure("Background did not load") }
+                        precondition(restored.labelSample === publishedSamples.first)
+                        grid.setBackgroundLabelContrast(restored.labelSample, tints: [])
+                        precondition(grid.currentLabelColor() == .white)
+                        precondition(restored.labelSample!.resolvedStyle(darkAppearance: false, tints: []).usesWhiteText)
+                        try await Task.sleep(for: .milliseconds(100))
+                        backgrounds.windowDidHide()
+                    }
+                    precondition(publishedSamples.count == 1, "Unchanged wallpaper resampled on reopening")
+                    observation.cancel()
+                    backgrounds.clear()
+                    print("PASS real background load publishes image and contrast together; three opens reuse one sample")
+                    func sample(_ color: CGColor, mixed: Bool = false) -> BackgroundLabelContrast {
+                        let context = CGContext(data: nil, width: 64, height: 64, bitsPerComponent: 8,
+                            bytesPerRow: 256, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                        context.setFillColor(color)
+                        context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+                        if mixed {
+                            context.setFillColor(NSColor.black.cgColor)
+                            context.fill(CGRect(x: 0, y: 0, width: 32, height: 64))
+                        }
+                        return BackgroundLabelContrast.make(image: context.makeImage()!)!
+                    }
+                    func checkLabels(_ expected: NSColor, shadow: BackgroundLabelContrast.Shadow = .none) {
+                        let labels = grid.iconLayers.flatMap { $0 }.compactMap {
+                            $0.sublayers?.first(where: { $0.name == "label" }) as? CATextLayer
+                        }
+                        precondition(!labels.isEmpty)
+                        precondition(grid.backgroundLabelShadow == shadow)
+                        precondition(labels.allSatisfy {
+                            $0.foregroundColor == expected.cgColor && $0.shadowOpacity == shadow.opacity
+                                && $0.shadowRadius == shadow.radius
+                                && $0.shadowOffset == CGSize(width: 0, height: -shadow.offset)
+                                && $0.shouldRasterize
+                        })
+                    }
+                    root.layoutSubtreeIfNeeded()
+                    grid.appearance = NSAppearance(named: .aqua)
+                    grid.setBackgroundLabelContrast(sample(NSColor.black.cgColor), tints: [])
+                    checkLabels(.white)
+                    grid.appearance = NSAppearance(named: .darkAqua)
+                    grid.setBackgroundLabelContrast(sample(NSColor.white.cgColor), tints: [])
+                    checkLabels(.black)
+                    grid.setBackgroundLabelContrast(sample(NSColor.white.cgColor, mixed: true), tints: [])
+                    checkLabels(.white, shadow: .init(opacity: 0.8, radius: 1.5, offset: 0.5))
+                    grid.setBackgroundLabelContrast(nil, tints: [])
+                    checkLabels(.white)
+                    grid.appearance = NSAppearance(named: .aqua)
+                    grid.updateLabelColors()
+                    checkLabels(.black)
+                    store.enableAnimations = false
+                    store.openFolder = folder
+                    for color: NSColor in [.white, .black] {
+                        let shadow: BackgroundLabelContrast.Shadow = color == .white
+                            ? .init(opacity: 0.8, radius: 1.5, offset: 0.5) : .none
+                        host.update(appStore: store, iconSize: 72, onClose: {}, onLaunchApp: { _ in },
+                                    labelColorOverride: color, labelShadow: shadow)
+                        root.layoutSubtreeIfNeeded()
+                        try await Task.sleep(for: .milliseconds(300))
+                        precondition(host.probeTitleColor == color && host.probeTitleShadow == shadow)
+                        host.probeGrid!.probeCheckLabelColor(color, shadow: shadow)
+                    }
+                    host.update(appStore: store, iconSize: 72, onClose: {}, onLaunchApp: { _ in })
+                    root.layoutSubtreeIfNeeded()
+                    try await Task.sleep(for: .milliseconds(100))
+                    precondition(host.probeTitleColor == nil && host.probeTitleShadow == BackgroundLabelContrast.Shadow.none)
+                    host.probeGrid!.appearance = NSAppearance(named: .aqua)
+                    host.probeGrid!.probeCheckLabelColor(.black)
+                    host.probeGrid!.appearance = NSAppearance(named: .darkAqua)
+                    host.probeGrid!.probeCheckLabelColor(.white)
+                    host.dismissImmediately()
+                    print("PASS folder title and labels share outer color, update while open, and restore appearance without an image")
+                    print("PASS real grid labels: uniform dark/light/mixed image contrast, image removal, appearance fallback and adaptive image-only white-label shadow")
+                    app.terminate(nil)
+                    return
+                }
                 if ProcessInfo.processInfo.environment["LAUNCHNEXT_REORDER_CHECK_ONLY"] == "1" {
                     let folderGrid = CAFolderGridView(frame: root.bounds)
                     root.addSubview(folderGrid)

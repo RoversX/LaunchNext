@@ -70,6 +70,8 @@ extension FolderGlassOverlay {
     host = work / 'LaunchNext/CAFolderPresentation.swift'
     host.write_text(host.read_text() + '''
 extension CAFolderPresentationHost {
+    var probeTitleShadow: BackgroundLabelContrast.Shadow? { hosting?.rootView.labelShadow }
+    var probeTitleColor: NSColor? { hosting?.rootView.labelColorOverride }
     var probePhase: String { String(describing: phase) }
     var probeDuration: TimeInterval { duration }
     var probeInitialVelocity: CGFloat { motion?.initialVelocity ?? 0 }
@@ -190,6 +192,17 @@ extension CAFolderGridView {
     func probeCheckLandingCompleted() {
         precondition(landingLayer == nil && landingAppURL == nil && landingTimeout == nil)
         precondition(appLayers.allSatisfy { $0.opacity == 1 })
+    }
+
+    func probeCheckLabelColor(_ expected: NSColor, shadow: BackgroundLabelContrast.Shadow = .none) {
+        let labels = appLayers.compactMap {
+            $0.sublayers?.first(where: { $0.name == "label" }) as? CATextLayer
+        }
+        precondition(labelShadow == shadow)
+        precondition(!labels.isEmpty && labels.allSatisfy {
+            $0.foregroundColor == expected.cgColor && $0.shadowOpacity == shadow.opacity
+                && $0.shadowRadius == shadow.radius && $0.shouldRasterize
+        })
     }
 
     func probeCheckPendingIconLabel() {
