@@ -8,11 +8,16 @@ public enum WallpaperFrameStability {
     public static let maximumConfirmations = 4
     public static let requiredStableComparisons = 2
 
-    public static func supportsReuse(for identity: WallpaperIdentity) -> Bool {
+    public static func supportsReuse(for identity: WallpaperIdentity, appearanceOnly: Bool = false) -> Bool {
         // Time-of-day desktops and arbitrary screen-saver extensions can change
         // without a Space, configuration or unlock event. Keep capturing those.
         identity.provider == "default" || identity.provider == "com.apple.wallpaper.choice.aerials"
             || (identity.provider == "com.apple.wallpaper.choice.image" && identity.kind == .staticImage)
+            || (identity.provider == "com.apple.wallpaper.choice.dynamic" && appearanceOnly)
+    }
+
+    public static func reuseContextVersion(_ version: String?, appearanceOnly: Bool, systemIsDark: Bool) -> String? {
+        version.map { appearanceOnly ? "\($0):appearance=\(systemIsDark ? "dark" : "light")" : $0 }
     }
 
     public struct Comparison: Sendable {

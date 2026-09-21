@@ -33,6 +33,42 @@ public enum WallpaperImageRenderer {
         return CGImageSourceGetCount(source) > 1
     }
 
+    /// Recognize only verified light/dark pairs, never solar or hourly desktops.
+    /// Read metadata without decoding the full-sized images.
+    public static func isAppearanceOnlyDesktop(configuredURL: URL, reportedURL: URL?) -> Bool {
+        guard let reportedURL, reportedURL.isFileURL, configuredURL.isFileURL else { return false }
+        if configuredURL.pathExtension.lowercased() == "madesktop" {
+            guard let data = try? Data(contentsOf: configuredURL),
+                  let descriptor = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+                  descriptor["isDynamic"] as? Bool == true,
+                  descriptor["isSolar"] as? Bool == false,
+                  let asset = descriptor["mobileAssetID"] as? String,
+                  reportedURL.deletingPathExtension().lastPathComponent == asset,
+                  reportedURL.pathExtension.lowercased() == "heic" else { return false }
+        } else if configuredURL.standardizedFileURL != reportedURL.standardizedFileURL {
+            return false
+        }
+        guard let source = CGImageSourceCreateWithURL(reportedURL as CFURL,
+                  [kCGImageSourceShouldCache: false] as CFDictionary),
+              CGImageSourceGetCount(source) == 2,
+              let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil),
+              let tags = CGImageMetadataCopyTags(metadata) as? [CGImageMetadataTag] else { return false }
+        var appearanceData: Data?
+        for tag in tags {
+            guard CGImageMetadataTagCopyNamespace(tag) as String? == "http://ns.apple.com/namespace/1.0/" else { continue }
+            // Unknown Apple scheduling metadata must not silently become cacheable.
+            guard CGImageMetadataTagCopyName(tag) as String? == "apr",
+                  let encoded = CGImageMetadataTagCopyValue(tag) as? String,
+                  let data = Data(base64Encoded: encoded) else { return false }
+            appearanceData = data
+        }
+        guard let appearanceData,
+              let mapping = try? PropertyListSerialization.propertyList(from: appearanceData, format: nil) as? [String: Any],
+              Set(mapping.keys) == ["l", "d"],
+              let light = mapping["l"] as? Int, let dark = mapping["d"] as? Int else { return false }
+        return Set([light, dark]) == [0, 1]
+    }
+
     public static func outputSize(for size: CGSize, maximumPixels: Int = maximumPixelCount) -> CGSize {
         guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0,
               maximumPixels > 0 else { return .zero }

@@ -140,6 +140,23 @@ final class WallpaperFrameStabilityTests: XCTestCase {
         XCTAssertTrue(WallpaperFrameStability.supportsReuse(for: identity("com.apple.wallpaper.choice.aerials")))
     }
 
+    func testOnlyVerifiedAppearanceDynamicProviderCanOptIntoReuse() {
+        XCTAssertTrue(WallpaperFrameStability.supportsReuse(for: identity("com.apple.wallpaper.choice.dynamic"), appearanceOnly: true))
+        XCTAssertFalse(WallpaperFrameStability.supportsReuse(for: identity("com.apple.wallpaper.choice.dynamic")))
+        XCTAssertFalse(WallpaperFrameStability.supportsReuse(for: identity("third.party"), appearanceOnly: true))
+        XCTAssertFalse(WallpaperFrameStability.supportsReuse(for: identity("com.apple.wallpaper.choice.screen-saver"), appearanceOnly: true))
+    }
+
+    func testAppearanceChangeInvalidatesOnlyAppearanceDependentContext() {
+        let light = WallpaperFrameStability.reuseContextVersion("configuration", appearanceOnly: true, systemIsDark: false)
+        let dark = WallpaperFrameStability.reuseContextVersion("configuration", appearanceOnly: true, systemIsDark: true)
+        XCTAssertNotEqual(light, dark)
+        XCTAssertEqual(light, WallpaperFrameStability.reuseContextVersion("configuration", appearanceOnly: true, systemIsDark: false))
+        XCTAssertNotEqual(light, WallpaperFrameStability.reuseContextVersion("changed", appearanceOnly: true, systemIsDark: false))
+        XCTAssertEqual(WallpaperFrameStability.reuseContextVersion("configuration", appearanceOnly: false, systemIsDark: true), "configuration")
+        XCTAssertNil(WallpaperFrameStability.reuseContextVersion(nil, appearanceOnly: true, systemIsDark: true))
+    }
+
     func testReuseRequiresBothIdentityMatchAndSettledCapture() {
         XCTAssertEqual(WallpaperRefreshPolicy.windowShown(kind: .unknown, hasMatchingContent: true, hasSettledCapture: true), .reuse)
         XCTAssertEqual(WallpaperRefreshPolicy.windowShown(kind: .animated, hasMatchingContent: true, hasSettledCapture: false), .capture)

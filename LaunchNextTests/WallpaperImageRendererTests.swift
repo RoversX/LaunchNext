@@ -5,6 +5,55 @@ import LaunchNextWallpaperCore
 import XCTest
 
 final class WallpaperImageRendererTests: XCTestCase {
+    func testAppearancePairRequiresValidMappingAndNoTimeMetadata() throws {
+        for (mapping, solar, expected) in [(["l": 0, "d": 1], false, true),
+                                          (["l": 1, "d": 0], false, true),
+                                          (["l": 0, "d": 0], false, false),
+                                          (["l": 0, "d": 2], false, false),
+                                          (["l": 0, "d": 1], true, false)] {
+            let url = try writeAppearancePair(mapping: mapping, solar: solar)
+            defer { try? FileManager.default.removeItem(at: url) }
+            XCTAssertEqual(WallpaperImageRenderer.isAppearanceOnlyDesktop(configuredURL: url, reportedURL: url), expected)
+            XCTAssertFalse(WallpaperImageRenderer.isAppearanceOnlyDesktop(configuredURL: url, reportedURL: nil))
+        }
+    }
+
+    func testDescriptorRequiresMatchingAssetAndExplicitNonSolarFlag() throws {
+        let image = try writeAppearancePair(mapping: ["l": 0, "d": 1], solar: false)
+        let descriptor = image.deletingPathExtension().appendingPathExtension("madesktop")
+        defer {
+            try? FileManager.default.removeItem(at: image)
+            try? FileManager.default.removeItem(at: descriptor)
+        }
+        for solar: Bool? in [false, true, nil] {
+            var fields: [String: Any] = ["isDynamic": true, "mobileAssetID": image.deletingPathExtension().lastPathComponent]
+            if let solar { fields["isSolar"] = solar }
+            try PropertyListSerialization.data(fromPropertyList: fields, format: .binary, options: 0).write(to: descriptor)
+            XCTAssertEqual(WallpaperImageRenderer.isAppearanceOnlyDesktop(configuredURL: descriptor, reportedURL: image), solar == false)
+            XCTAssertFalse(WallpaperImageRenderer.isAppearanceOnlyDesktop(configuredURL: descriptor,
+                reportedURL: URL(fileURLWithPath: "/System/Library/CoreServices/DefaultDesktop.heic")))
+        }
+    }
+
+    private func writeAppearancePair(mapping: [String: Int], solar: Bool) throws -> URL {
+        let context = try XCTUnwrap(CGContext(data: nil, width: 32, height: 32, bitsPerComponent: 8,
+            bytesPerRow: 128, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let image = try XCTUnwrap(context.makeImage())
+        let metadata = CGImageMetadataCreateMutable()
+        let namespace = "http://ns.apple.com/namespace/1.0/" as CFString
+        XCTAssertTrue(CGImageMetadataRegisterNamespaceForPrefix(metadata, namespace, "apple" as CFString, nil))
+        let encoded = try PropertyListSerialization.data(fromPropertyList: mapping, format: .binary, options: 0).base64EncodedString()
+        XCTAssertTrue(CGImageMetadataSetValueWithPath(metadata, nil, "apple:apr" as CFString, encoded as CFString))
+        if solar { XCTAssertTrue(CGImageMetadataSetValueWithPath(metadata, nil, "apple:solar" as CFString, "unknown schedule" as CFString)) }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("heic")
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.heic" as CFString, 2, nil))
+        CGImageDestinationAddImageAndMetadata(destination, image, metadata, nil)
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return url
+    }
+
     func testSharpBudgetAdaptsToWindowAndCapsLargeDisplays() {
         let compact = CGSize(width: 800, height: 600)
         XCTAssertEqual(WallpaperImageRenderer.pixelBudget(for: compact, unfiltered: true), 480_000)

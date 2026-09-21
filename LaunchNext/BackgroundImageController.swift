@@ -83,10 +83,19 @@ final class BackgroundImageController: ObservableObject {
         let contextVersion: String?
         let contextComponents: [String: String]
         let captureIdentity: WallpaperIdentity?
+        let appearanceOnly: Bool
+
+        var supportsCaptureReuse: Bool {
+            captureIdentity.map { WallpaperFrameStability.supportsReuse(for: $0, appearanceOnly: appearanceOnly) } ?? false
+        }
 
         nonisolated init(resolution: WallpaperIdentityResolution, verifiedStaticURL: URL?, contextVersion: String? = nil,
-                         contextComponents: [String: String] = [:], captureFallbackIdentity: WallpaperIdentity? = nil) {
-            self.contextVersion = contextVersion
+                         contextComponents: [String: String] = [:], captureFallbackIdentity: WallpaperIdentity? = nil,
+                         appearanceOnly: Bool = false, systemIsDark: Bool = false) {
+            self.appearanceOnly = appearanceOnly
+            // System appearance, not LaunchNext's independently selected theme.
+            self.contextVersion = WallpaperFrameStability.reuseContextVersion(contextVersion,
+                appearanceOnly: appearanceOnly, systemIsDark: systemIsDark)
             self.contextComponents = contextComponents
             guard let identity = resolution.exactIdentity else {
                 exactIdentity = nil
@@ -682,7 +691,7 @@ final class BackgroundImageController: ObservableObject {
                 WallpaperDiagnostics.record("cache.windowRebound display=\(displayID) oldWindow=\(previous.context.windowID) newWindow=\(current.windowID) comparisons=\(previous.settling.stableComparisons) settled=\(previous.settling.isSettled)")
             }
             let matchingCapture = captureContext != nil && cached?.context == captureContext
-            WallpaperDiagnostics.record("cache.check controller=\(self.diagnosticID) generation=\(generation) display=\(displayID) identityKnown=\(identity != nil) captureIdentityKnown=\(resolution.captureIdentity != nil) captureFallback=\(identity == nil && resolution.captureIdentity != nil) reuseSupported=\(resolution.captureIdentity.map { WallpaperFrameStability.supportsReuse(for: $0) } ?? false) contextKnown=\(captureContext != nil) cached=\(cached != nil) matches=\(matchingCapture) identitySame=\(cached?.context.identity == captureContext?.identity) versionSame=\(cached?.context.version == captureContext?.version) windowSame=\(cached?.context.windowID == captureContext?.windowID) geometrySame=\(cached?.context.frame == captureContext?.frame && cached?.context.scale == captureContext?.scale) window=\(captureContext?.windowID ?? 0)")
+            WallpaperDiagnostics.record("cache.check controller=\(self.diagnosticID) generation=\(generation) display=\(displayID) identityKnown=\(identity != nil) captureIdentityKnown=\(resolution.captureIdentity != nil) captureFallback=\(identity == nil && resolution.captureIdentity != nil) reuseSupported=\(resolution.supportsCaptureReuse) contextKnown=\(captureContext != nil) cached=\(cached != nil) matches=\(matchingCapture) identitySame=\(cached?.context.identity == captureContext?.identity) versionSame=\(cached?.context.version == captureContext?.version) windowSame=\(cached?.context.windowID == captureContext?.windowID) geometrySame=\(cached?.context.frame == captureContext?.frame && cached?.context.scale == captureContext?.scale) window=\(captureContext?.windowID ?? 0)")
             // Keep the old candidate through the quiet period for one-shot
             // revalidation; it cannot count as a hit unless the full context
             // matches. Missing permission/identity still discards it immediately.
@@ -915,7 +924,7 @@ final class BackgroundImageController: ObservableObject {
         }
         guard CGPreflightScreenCaptureAccess() else { return unavailable("permission") }
         guard let identity = resolution.captureIdentity else { return unavailable("unknownIdentity") }
-        guard WallpaperFrameStability.supportsReuse(for: identity) else { return unavailable("unsupportedProvider") }
+        guard resolution.supportsCaptureReuse else { return unavailable("unsupportedProvider") }
         guard let version = resolution.contextVersion else { return unavailable("unknownVersion") }
         guard let screen = NSScreen.screens.first(where: { Self.displayID(for: $0) == displayID }) else {
             return unavailable("missingDisplay")
@@ -1250,12 +1259,19 @@ final class BackgroundImageController: ObservableObject {
            case let .image(url) = identity.source, url == desktopImageURL?.standardizedFileURL {
             staticURL = url
         } else { staticURL = nil }
+        let appearanceOnly: Bool
+        if let identity = verified.exactIdentity, identity.provider == "com.apple.wallpaper.choice.dynamic",
+           case let .image(url) = identity.source {
+            appearanceOnly = WallpaperImageRenderer.isAppearanceOnlyDesktop(configuredURL: url, reportedURL: desktopImageURL)
+        } else { appearanceOnly = false }
         return ResolvedWallpaper(resolution: verified, verifiedStaticURL: staticURL, contextVersion: contextVersion,
             contextComponents: collectDiagnostics
                 ? WallpaperIdentityResolver.desktopContextComponents(displayUUID: displayUUID, store: store) : [:],
             captureFallbackIdentity: verified.exactIdentity == nil
                 ? WallpaperIdentityResolver.captureFallbackIdentity(displayUUID: displayUUID, store: store,
-                    currentDesktopImageURL: desktopImageURL) : nil)
+                    currentDesktopImageURL: desktopImageURL) : nil,
+            appearanceOnly: appearanceOnly,
+            systemIsDark: UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark")
     }
 
     nonisolated private static func snapshotDirectoryURL() -> URL? {
