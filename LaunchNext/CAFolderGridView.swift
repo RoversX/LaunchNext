@@ -3,6 +3,16 @@ import QuartzCore
 import LaunchNextContextMenuCore
 
 final class CAFolderGridView: NSView {
+    var labelColorOverride: NSColor? {
+        didSet {
+            if labelColorOverride != oldValue { updateLabelColors() }
+        }
+    }
+    var labelShadow: BackgroundLabelContrast.Shadow = .none {
+        didSet {
+            if labelShadow != oldValue { updateLabelColors() }
+        }
+    }
     var presentationState: CAFolderPresentationState?
     private var presentationIcons: [ObjectIdentifier: CALayer] = [:]
     private var renderedBackingScale: CGFloat?
@@ -384,6 +394,7 @@ final class CAFolderGridView: NSView {
         textLayer.fontSize = labelFontSize
         textLayer.font = NSFont.systemFont(ofSize: labelFontSize, weight: labelFontWeight)
         textLayer.foregroundColor = currentLabelColor().cgColor
+        BackgroundLabelContrast.applyLabelShadow(to: textLayer, style: labelShadow)
         textLayer.string = app.name
         textLayer.shouldRasterize = true
         textLayer.rasterizationScale = backingScale
@@ -620,12 +631,14 @@ final class CAFolderGridView: NSView {
         for layer in appLayers {
             if let text = layer.sublayers?.first(where: { $0.name == "label" }) as? CATextLayer {
                 text.foregroundColor = resolvedColor
+                BackgroundLabelContrast.applyLabelShadow(to: text, style: labelShadow)
             }
         }
         CATransaction.commit()
     }
 
     private func currentLabelColor() -> NSColor {
+        if let labelColorOverride { return labelColorOverride }
         let match = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
         return match == .darkAqua ? .white : .black
     }

@@ -171,6 +171,8 @@ struct CAFolderPresentation: NSViewRepresentable {
     let iconSize: CGFloat
     let onClose: () -> Void
     let onLaunchApp: (AppInfo) -> Void
+    var backgroundLabelSample: BackgroundLabelContrast? = nil
+    var backgroundLabelTints: [BackgroundLabelContrast.Tint] = []
 
     func makeNSView(context: Context) -> CAFolderPresentationHost {
         let host = CAFolderPresentationHost()
@@ -180,7 +182,12 @@ struct CAFolderPresentation: NSViewRepresentable {
     }
 
     func updateNSView(_ host: CAFolderPresentationHost, context: Context) {
-        host.update(appStore: appStore, iconSize: iconSize, onClose: onClose, onLaunchApp: onLaunchApp)
+        // SwiftUI may update the folder before the outer grid representable.
+        // Resolve through the same grid cache so both use exactly one decision.
+        controller.grid?.setBackgroundLabelContrast(backgroundLabelSample, tints: backgroundLabelTints)
+        host.update(appStore: appStore, iconSize: iconSize, onClose: onClose, onLaunchApp: onLaunchApp,
+                    labelColorOverride: controller.grid?.backgroundLabelColor,
+                    labelShadow: controller.grid?.backgroundLabelShadow ?? .none)
     }
 
     static func dismantleNSView(_ host: CAFolderPresentationHost, coordinator: ()) {
@@ -303,7 +310,8 @@ final class CAFolderPresentationHost: NSView {
     }
 
     func update(appStore: AppStore, iconSize: CGFloat, onClose: @escaping () -> Void,
-                onLaunchApp: @escaping (AppInfo) -> Void) {
+                onLaunchApp: @escaping (AppInfo) -> Void, labelColorOverride: NSColor? = nil,
+                labelShadow: BackgroundLabelContrast.Shadow = .none) {
         onRequestClose = {
             if !appStore.isFolderNameEditing { onClose() }
         }
@@ -343,7 +351,8 @@ final class CAFolderPresentationHost: NSView {
             }
         })
         let root = FolderView(appStore: appStore, folder: binding, preferredIconSize: iconSize,
-                              presentationState: state, onClose: onClose, onLaunchApp: onLaunchApp)
+                              presentationState: state, labelColorOverride: labelColorOverride, labelShadow: labelShadow,
+                              onClose: onClose, onLaunchApp: onLaunchApp)
         if let hosting { hosting.rootView = root }
         else {
             // Keep the clipping mask outside the transformed material subtree.

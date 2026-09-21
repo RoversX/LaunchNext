@@ -1,11 +1,12 @@
 import SwiftUI
 
-/// One hover material for the entire row; dot contrast does not require reading
-/// the wallpaper or adding a per-frame update to the grid.
+/// One hover material for the row. Reuse the resolved wallpaper style without
+/// reading another image or adding per-frame work to the grid.
 struct LaunchpadPageIndicator: View {
     let pageCount: Int
     let currentPage: Int
     let isActive: Bool
+    var backgroundStyle: BackgroundLabelContrast.Style? = nil
     let onSelect: (Int) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -13,6 +14,10 @@ struct LaunchpadPageIndicator: View {
     @State private var isHovered = false
 
     private var showsHover: Bool { isHovered && isActive }
+    // With reduced transparency the hover backing is an opaque system color.
+    private var dotStyle: BackgroundLabelContrast.Style? {
+        showsHover && reduceTransparency ? nil : backgroundStyle
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -21,7 +26,7 @@ struct LaunchpadPageIndicator: View {
                     onSelect(index)
                 } label: {
                     Circle()
-                        .fill(Color.primary
+                        .fill((dotStyle.map { $0.usesWhiteText ? Color.white : Color.black } ?? .primary)
                             .opacity(currentPage == index ? 1 : (showsHover ? 0.75 : 0.55)))
                         .frame(width: 8, height: 8)
                         .frame(width: 16, height: 28)

@@ -8,6 +8,8 @@ struct FolderView: View {
     // 若提供，将强制使用与外层一致的图标尺寸
     var preferredIconSize: CGFloat? = nil
     var presentationState: CAFolderPresentationState? = nil
+    var labelColorOverride: NSColor? = nil
+    var labelShadow: BackgroundLabelContrast.Shadow = .none
     @State private var folderName: String = ""
     @State private var isEditingName = false
     @State private var forceRefreshTrigger: UUID = UUID()
@@ -179,7 +181,9 @@ struct FolderView: View {
                         .textFieldStyle(.plain)
                         .multilineTextAlignment(.center)
                         .font(.title)
-                        .foregroundColor(.primary)
+                        .foregroundColor(labelColorOverride.map { Color(nsColor: $0) } ?? .primary)
+                        .shadow(color: .black.opacity(Double(labelShadow.opacity)),
+                            radius: labelShadow.radius, x: 0, y: labelShadow.offset)
                         .focused($isTextFieldFocused)
                         .padding()
                         .onSubmit {
@@ -200,7 +204,9 @@ struct FolderView: View {
                 } else {
                     Text(folder.name)
                         .font(.title)
-                        .foregroundColor(.primary)
+                        .foregroundColor(labelColorOverride.map { Color(nsColor: $0) } ?? .primary)
+                        .shadow(color: .black.opacity(Double(labelShadow.opacity)),
+                            radius: labelShadow.radius, x: 0, y: labelShadow.offset)
                         .padding()
                         .contentShape(Rectangle()) // 确保整个区域都可以点击
                         .onTapGesture(count: 2) {
@@ -241,7 +247,8 @@ struct FolderView: View {
         HStack(spacing: 8) {
             ForEach(0..<folderPageCount, id: \.self) { index in
                 Circle()
-                    .fill(safeFolderCurrentPage == index ? Color.gray : Color.gray.opacity(0.3))
+                    .fill((labelColorOverride.map { Color(nsColor: $0) } ?? .gray)
+                        .opacity(safeFolderCurrentPage == index ? 1 : (labelColorOverride == nil ? 0.3 : 0.55)))
                     .frame(width: 8, height: 8)
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -287,7 +294,9 @@ struct FolderView: View {
                 verticalHeaderHeight: shouldScrollFolderTitleWithContent ? folderTitleHeight : 0,
                 onClose: onClose,
                 onLaunchApp: onLaunchApp,
-                presentationState: presentationState
+                presentationState: presentationState,
+                labelColorOverride: labelColorOverride,
+                labelShadow: labelShadow
             )
             .id("ca_folder_grid_\(folder.id)_\(appStore.folderLayoutMode.rawValue)")
             .onAppear { columnsCount = desiredColumns }

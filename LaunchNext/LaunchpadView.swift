@@ -536,6 +536,34 @@ struct LaunchpadView: View {
         return backgroundImageController.content?.image
     }
 
+    private var resolvedBackgroundLabelSample: BackgroundLabelContrast? {
+        displayedBackgroundImage == nil ? nil : backgroundImageController.content?.labelSample
+    }
+
+    private var resolvedWallpaperControlStyle: BackgroundLabelContrast.Style? {
+        resolvedBackgroundLabelSample?.resolvedStyle(darkAppearance: colorScheme == .dark,
+                                                     tints: backgroundLabelTints)
+    }
+
+    private func toolbarSymbol(_ name: String) -> some View {
+        let style = resolvedWallpaperControlStyle
+        let foreground = style.map { AnyShapeStyle(($0.usesWhiteText ? Color.white : Color.black).opacity(0.75)) }
+            ?? AnyShapeStyle(.placeholder.opacity(0.5))
+        return Image(systemName: name)
+            .font(.title)
+            .foregroundStyle(foreground)
+    }
+
+    private var backgroundLabelTints: [BackgroundLabelContrast.Tint] {
+        var tints = [BackgroundLabelContrast.Tint(red: 0, green: 0, blue: 0, alpha: backdropOpacity),
+                     .init(red: 1, green: 1, blue: 1, alpha: onboardingLightFilterOpacity)]
+        if appStore.backgroundMaskEnabled {
+            let mask = colorScheme == .dark ? appStore.backgroundMaskDarkColor : appStore.backgroundMaskLightColor
+            tints.append(.init(red: mask.red, green: mask.green, blue: mask.blue, alpha: mask.alpha))
+        }
+        return tints.filter { $0.alpha > 0 }
+    }
+
     private var effectiveBackgroundStyle: AppStore.BackgroundStyle {
         // Preserve the saved choice, but keep a usable backdrop without an image.
         if appStore.launchpadBackgroundStyle == .unfiltered, displayedBackgroundImage == nil {
@@ -608,9 +636,7 @@ struct LaunchpadView: View {
                         Button {
                             appStore.refresh()
                         } label: {
-                            Image(systemName: "arrow.clockwise.circle")
-                                .font(.title)
-                                .foregroundStyle(.placeholder.opacity(0.5))
+                            toolbarSymbol("arrow.clockwise.circle")
                         }
                         .buttonStyle(.plain)
                         .help(appStore.localized(.refresh))
@@ -618,9 +644,7 @@ struct LaunchpadView: View {
                     Button {
                         appStore.isSetting = true
                     } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.title)
-                            .foregroundStyle(.placeholder.opacity(0.5))
+                        toolbarSymbol("ellipsis.circle")
                     }
                     .buttonStyle(.plain)
                 }
@@ -672,7 +696,8 @@ struct LaunchpadView: View {
             if !appStore.shouldShowOnboarding && pages.count > 1 {
                 LaunchpadPageIndicator(pageCount: pages.count,
                                       currentPage: appStore.currentPage,
-                                      isActive: !isFolderOpen && isWindowVisible) { index in
+                                      isActive: !isFolderOpen && isWindowVisible,
+                                      backgroundStyle: resolvedWallpaperControlStyle) { index in
                     navigateToPage(index)
                 }
                 .padding(.top, CGFloat(indicatorTopPadding))
@@ -735,7 +760,9 @@ struct LaunchpadView: View {
             if appStore.useCAGridRenderer {
                 CAFolderPresentation(appStore: appStore, controller: folderPresentation,
                     iconSize: currentIconSize * CGFloat(min(max(appStore.iconScale, 0.6), 1.15)),
-                    onClose: { closePresentedFolder() }, onLaunchApp: { launchApp($0) })
+                    onClose: { closePresentedFolder() }, onLaunchApp: { launchApp($0) },
+                    backgroundLabelSample: resolvedBackgroundLabelSample,
+                    backgroundLabelTints: backgroundLabelTints)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let openFolder = appStore.openFolder {
                 GeometryReader { proxy in
@@ -961,7 +988,9 @@ struct LaunchpadView: View {
                         externalDragSourceIndex: externalDragSourceIndex,
                         externalDragHoverIndex: externalDragHoverIndex,
                         selectedIndex: isKeyboardNavigationActive ? selectedIndex : nil,
-                        folderPresentation: folderPresentation
+                        folderPresentation: folderPresentation,
+                        backgroundLabelSample: resolvedBackgroundLabelSample,
+                        backgroundLabelTints: backgroundLabelTints
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .opacity(isFolderOpen ? 0.1 : 1)

@@ -13,6 +13,8 @@ struct CAFolderGridViewRepresentable: NSViewRepresentable {
     var onClose: () -> Void
     var onLaunchApp: (AppInfo) -> Void
     var presentationState: CAFolderPresentationState? = nil
+    var labelColorOverride: NSColor? = nil
+    var labelShadow: BackgroundLabelContrast.Shadow = .none
 
     func makeNSView(context: Context) -> CAFolderGridView {
         let view = CAFolderGridView(frame: .zero)
@@ -33,6 +35,8 @@ struct CAFolderGridViewRepresentable: NSViewRepresentable {
     }
 
     private func configure(_ view: CAFolderGridView) {
+        view.labelColorOverride = labelColorOverride
+        view.labelShadow = labelShadow
         view.presentationState = presentationState
         presentationState?.grid = view
         view.representedPageCount = pageCount

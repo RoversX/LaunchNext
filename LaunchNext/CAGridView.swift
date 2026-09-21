@@ -14,6 +14,11 @@ extension Array {
 // MARK: - Core Animation Grid View
 /// 使用 Core Animation 实现的高性能网格视图，支持 120Hz ProMotion
 final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
+    var backgroundLabelSample: BackgroundLabelContrast?
+    var backgroundLabelColor: NSColor?
+    var backgroundLabelShadow: BackgroundLabelContrast.Shadow = .none
+    var backgroundLabelDarkAppearance: Bool?
+    var backgroundLabelTints: [BackgroundLabelContrast.Tint] = []
     var presentedFolderID: String?
     var folderGlassHandoff: FolderGlassOverlay.PresentationHandoff?
 

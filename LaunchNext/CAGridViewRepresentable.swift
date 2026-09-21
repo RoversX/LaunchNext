@@ -18,6 +18,8 @@ struct CAGridViewRepresentable: NSViewRepresentable {
     var externalDragHoverIndex: Int?
     var selectedIndex: Int?
     var folderPresentation: CAFolderPresentationController? = nil
+    var backgroundLabelSample: BackgroundLabelContrast? = nil
+    var backgroundLabelTints: [BackgroundLabelContrast.Tint] = []
 
     // 监听这些触发器来强制刷新
     var gridRefreshTrigger: UUID { appStore.gridRefreshTrigger }
@@ -29,6 +31,8 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         let view = backdrop.grid
         folderPresentation?.backdrop = backdrop
         folderPresentation?.grid = view
+
+        view.setBackgroundLabelContrast(backgroundLabelSample, tints: backgroundLabelTints)
 
         // Initialize configuration
         view.columns = appStore.gridColumnsPerPage
@@ -168,6 +172,7 @@ struct CAGridViewRepresentable: NSViewRepresentable {
 
     func updateNSView(_ backdrop: CAFolderBackdropView, context: Context) {
         let nsView = backdrop.grid
+        nsView.setBackgroundLabelContrast(backgroundLabelSample, tints: backgroundLabelTints)
         folderPresentation?.backdrop = backdrop
         folderPresentation?.grid = nsView
         // print("🔄 [CAGrid #\(nsView.debugInstanceId)] updateNSView, window=\(nsView.window != nil), isVisible=\(nsView.window?.isVisible ?? false)")

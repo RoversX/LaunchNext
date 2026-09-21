@@ -164,7 +164,7 @@ extension CAGridView {
 
         // Match system label color for light/dark
         textLayer.foregroundColor = currentLabelColor().cgColor
-        textLayer.shadowOpacity = 0
+        BackgroundLabelContrast.applyLabelShadow(to: textLayer, style: backgroundLabelShadow)
 
         // 设置文字内容
         switch item {

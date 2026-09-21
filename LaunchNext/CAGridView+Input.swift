@@ -994,15 +994,30 @@ extension CAGridView {
         updateLayout()
     }
 
+    func setBackgroundLabelContrast(_ sample: BackgroundLabelContrast?, tints: [BackgroundLabelContrast.Tint]) {
+        guard backgroundLabelSample !== sample || backgroundLabelTints != tints else { return }
+        backgroundLabelSample = sample
+        backgroundLabelTints = tints
+        backgroundLabelDarkAppearance = nil
+        updateLabelColors()
+    }
+
     func updateLabelColors() {
-        let resolvedColor = currentLabelColor().cgColor
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        if backgroundLabelDarkAppearance != dark {
+            backgroundLabelDarkAppearance = dark
+            let style = backgroundLabelSample?.resolvedStyle(darkAppearance: dark, tints: backgroundLabelTints)
+            backgroundLabelColor = style.map { $0.usesWhiteText ? .white : .black }
+            backgroundLabelShadow = style?.shadow ?? .none
+        }
+        let color = currentLabelColor().cgColor
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for pageLayers in iconLayers {
-            for containerLayer in pageLayers {
-                if let textLayer = containerLayer.sublayers?.first(where: { $0.name == "label" }) as? CATextLayer {
-                    textLayer.foregroundColor = resolvedColor
-                }
+            for container in pageLayers {
+                guard let text = container.sublayers?.first(where: { $0.name == "label" }) as? CATextLayer else { continue }
+                if text.foregroundColor != color { text.foregroundColor = color }
+                BackgroundLabelContrast.applyLabelShadow(to: text, style: backgroundLabelShadow)
             }
         }
         CATransaction.commit()
@@ -1027,6 +1042,7 @@ extension CAGridView {
     }
 
     func currentLabelColor() -> NSColor {
+        if let backgroundLabelColor { return backgroundLabelColor }
         let match = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
         return match == .darkAqua ? .white : .black
     }

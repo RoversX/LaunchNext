@@ -49,10 +49,21 @@ final class BackgroundImageController: ObservableObject {
     struct Content {
         let image: CGImage
         let wallpaperIdentity: WallpaperIdentity?
+        let labelSample: BackgroundLabelContrast?
 
-        init(image: CGImage, wallpaperIdentity: WallpaperIdentity? = nil) {
+        private init(image: CGImage, wallpaperIdentity: WallpaperIdentity?, labelSample: BackgroundLabelContrast?) {
             self.image = image
             self.wallpaperIdentity = wallpaperIdentity
+            self.labelSample = labelSample
+        }
+
+        static func prepare(image: CGImage, wallpaperIdentity: WallpaperIdentity? = nil) async -> Content {
+            // Publish the image and its contrast sample together. Cached Content
+            // keeps both, so reopening never briefly falls back to appearance colors.
+            let sample = await Task.detached(priority: .userInitiated) {
+                BackgroundLabelContrast.make(image: image)
+            }.value
+            return Content(image: image, wallpaperIdentity: wallpaperIdentity, labelSample: sample)
         }
     }
 
@@ -584,7 +595,10 @@ final class BackgroundImageController: ObservableObject {
                 self.activeWallpaperIdentity = nil
                 return
             }
-            self.content = image.map { Content(image: $0, wallpaperIdentity: identity) }
+            var prepared: Content?
+            if let image { prepared = await Content.prepare(image: image, wallpaperIdentity: identity) }
+            guard !Task.isCancelled, generation == self.loadGeneration, self.isWindowVisible else { return }
+            self.content = prepared
             self.activeWallpaperIdentity = image == nil ? nil : identity
             self.desktopContextIsDirty = false
         }
@@ -825,7 +839,8 @@ final class BackgroundImageController: ObservableObject {
                         // is not a live capture, so hasMatchingContent stays false and
                         // the next window show retries the real capture instead of
                         // reusing this image.
-                        let published = Content(image: fallback, wallpaperIdentity: identity)
+                        let published = await Content.prepare(image: fallback, wallpaperIdentity: identity)
+                        guard !Task.isCancelled, generation == self.loadGeneration, self.isWindowVisible else { return }
                         self.content = published
                         self.rememberDesktopFrame(published, displayID: displayID)
                         self.desktopContextIsDirty = false
@@ -873,7 +888,8 @@ final class BackgroundImageController: ObservableObject {
         let confirmed = capture == nil ? confirmedResolution.exactIdentity : confirmedResolution.captureIdentity
         let stableIdentity = confirmed == identity ? identity : nil
         guard !requiresStableIdentity || stableIdentity != nil else { return false }
-        let published = Content(image: image, wallpaperIdentity: stableIdentity)
+        let published = await Content.prepare(image: image, wallpaperIdentity: stableIdentity)
+        guard !Task.isCancelled, generation == loadGeneration, isWindowVisible else { return false }
         // A fallback key only identifies a settled screenshot. It must not
         // enable the static-file fast path before confirmations have completed.
         activeWallpaperIdentity = confirmedResolution.exactIdentity == stableIdentity ? stableIdentity : nil
@@ -1076,8 +1092,10 @@ final class BackgroundImageController: ObservableObject {
                 return
             }
 
+            let prepared = await Content.prepare(image: image)
+            guard !Task.isCancelled, generation == self.loadGeneration, self.isWindowVisible else { return }
             self.activeCacheKey = cacheKey
-            self.content = Content(image: image)
+            self.content = prepared
         }
     }
 
