@@ -12,7 +12,8 @@ TEAM_ID="${LAUNCHNEXT_TEAM_ID:-}"
 NOTARY_PROFILE="${LAUNCHNEXT_NOTARY_PROFILE:-LaunchNext-notary}"
 POLL_INTERVAL_SECONDS="${LAUNCHNEXT_NOTARY_POLL_INTERVAL_SECONDS:-30}"
 RUN_ID="$(date '+%Y%m%d-%H%M%S')"
-RELEASE_ROOT="${LAUNCHNEXT_NOTARIZED_BUILD_DIR:-${ROOT_DIR}/build/notarized-release-${RUN_ID}}"
+RELEASE_ROOT="${LAUNCHNEXT_NOTARIZED_BUILD_DIR:-${ROOT_DIR}/build/.release-work/${RUN_ID}}"
+RELEASE_ASSETS_PATH="${ROOT_DIR}/build/release"
 RESUME_MODE="NO"
 MODE=""
 LOCAL_INPUT_PATH=""
@@ -32,6 +33,11 @@ Options:
   --output-dir PATH        generated archive, exported app, logs, and release assets
   --resume PATH            resume an existing submission without rebuilding or re-uploading
   -h, --help               show this help
+
+build/release contains only the newest ZIP and checksums.txt.
+The latest App, archive and logs are kept in build/release-build.
+Temporary builds use build/.release-work; failed runs remain resumable.
+Custom output directories are preserved.
 
 One-time local setup (credentials are stored in macOS Keychain, not this repo):
   xcrun notarytool store-credentials "LaunchNext-notary" \
@@ -243,6 +249,11 @@ if [[ "${MODE}" != "resume" ]]; then
   mkdir -p "${RELEASE_ROOT}" "${EXPORT_PATH}" "${DIST_PATH}"
 fi
 
+RELEASE_ROOT="$(cd "${RELEASE_ROOT}" && pwd -P)"
+touch "${RELEASE_ROOT}/.release-managed"
+printf '%s\n' "$$" > "${RELEASE_ROOT}/.release-active"
+trap 'rm -f "${RELEASE_ROOT}/.release-active"' EXIT
+
 if [[ "${MODE}" == "notarize" ]]; then
   echo "Building the universal SwiftUpdater..."
   swift build \
@@ -265,7 +276,7 @@ if [[ "${MODE}" == "notarize" ]]; then
     ONLY_ACTIVE_ARCH=NO \
     clean archive
 
-  plutil -create xml "${EXPORT_OPTIONS_PATH}"
+  plutil -create xml1 "${EXPORT_OPTIONS_PATH}"
   plutil -insert method -string developer-id "${EXPORT_OPTIONS_PATH}"
   plutil -insert destination -string export "${EXPORT_OPTIONS_PATH}"
   plutil -insert signingStyle -string automatic "${EXPORT_OPTIONS_PATH}"
@@ -532,8 +543,43 @@ fi
 
 SHA256="$(awk '{print $1}' "${CHECKSUMS_PATH}")"
 
+touch "${RELEASE_ROOT}/.release-success"
+rm -rf -- "${DERIVED_DATA_PATH}" "${LOCAL_EXTRACT_PATH}"
+rm -f -- "${NOTARY_SUBMISSION_PATH}"
+
+# Stage the two downloadable assets before replacing the previous release.
+mkdir -p "${ROOT_DIR}/build/.release-work"
+ASSETS_STAGE="$(mktemp -d "${ROOT_DIR}/build/.release-work/assets.XXXXXX")"
+cp -p "${ZIP_PATH}" "${CHECKSUMS_PATH}" "${ASSETS_STAGE}/"
+ASSETS_OLD="${ASSETS_STAGE}.previous"
+if [[ -e "${RELEASE_ASSETS_PATH}" || -L "${RELEASE_ASSETS_PATH}" ]]; then
+  mv "${RELEASE_ASSETS_PATH}" "${ASSETS_OLD}"
+fi
+if ! mv "${ASSETS_STAGE}" "${RELEASE_ASSETS_PATH}"; then
+  if [[ -e "${ASSETS_OLD}" || -L "${ASSETS_OLD}" ]]; then mv "${ASSETS_OLD}" "${RELEASE_ASSETS_PATH}"; fi
+  exit 1
+fi
+rm -rf -- "${ASSETS_OLD}"
+# Keep one successful build outside the downloadable release directory.
+WORK_PARENT="$(cd "${ROOT_DIR}/build/.release-work" && pwd -P)"
+if [[ "$(dirname "${RELEASE_ROOT}")" == "${WORK_PARENT}" ]]; then
+  BUILD_PATH="${ROOT_DIR}/build/release-build"
+  if [[ -e "${BUILD_PATH}" && ! -f "${BUILD_PATH}/.release-managed" ]]; then
+    echo "warning: preserving unmanaged build directory; App remains at ${APP_PATH}" >&2
+  else
+    rm -rf -- "${BUILD_PATH}"
+    rm -rf -- "${DIST_PATH}"
+    mv "${RELEASE_ROOT}" "${BUILD_PATH}"
+    RELEASE_ROOT="${BUILD_PATH}"
+    APP_PATH="${BUILD_PATH}/export/LaunchNext.app"
+  fi
+fi
+ZIP_PATH="${RELEASE_ASSETS_PATH}/${ZIP_NAME}"
+CHECKSUMS_PATH="${RELEASE_ASSETS_PATH}/checksums.txt"
+
 echo
 echo "Notarized release artifacts:"
+echo "  App: ${APP_PATH}"
 echo "  ${ZIP_PATH}"
 echo "  ${CHECKSUMS_PATH}"
 echo

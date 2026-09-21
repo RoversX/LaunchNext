@@ -58,6 +58,7 @@ ditto -c -k --sequesterRsrc --keepParent "${APP_PATH}" "${ZIP_PATH}"
 SHA256="$(awk '{print $1}' "${CHECKSUMS_PATH}")"
 
 echo "Release artifacts:"
+echo "  App: ${APP_PATH}"
 echo "  ${ZIP_PATH}"
 echo "  ${CHECKSUMS_PATH}"
 echo ""
