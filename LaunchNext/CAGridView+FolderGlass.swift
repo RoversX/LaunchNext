@@ -53,7 +53,12 @@ extension CAGridView {
             folderGlassOverlay = overlay
         }
         if overlay.frame != bounds { overlay.frame = bounds }
+        let handoffContainer = folderGlassHandoff == nil ? nil : items.firstIndex(where: {
+            if case let .folder(folder) = $0 { return folder.id == presentedFolderID }
+            return false
+        }).flatMap { presentationContainer(at: $0) }
         overlay.sync(containers: visible, root: root, page: pageContainerLayer, viewport: bounds,
+                     handoffContainer: handoffContainer, handoff: folderGlassHandoff,
                      geometryChanged: geometryChanged
                         || CACurrentMediaTime() < folderGlassAnimationDeadline)
     }

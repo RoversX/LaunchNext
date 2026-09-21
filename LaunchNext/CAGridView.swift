@@ -15,6 +15,7 @@ extension Array {
 /// 使用 Core Animation 实现的高性能网格视图，支持 120Hz ProMotion
 final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     var presentedFolderID: String?
+    var folderGlassHandoff: FolderGlassOverlay.PresentationHandoff?
 
     // MARK: - Properties
 

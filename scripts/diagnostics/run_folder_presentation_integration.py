@@ -50,6 +50,22 @@ with tempfile.TemporaryDirectory(prefix='launchnext-folder-presentation-') as te
     }'''
     store.write_text(source[:start] + fixture + source[end:])
 
+    overlay = work / 'LaunchNext/FolderGlassOverlay.swift'
+    overlay.write_text(overlay.read_text() + """
+extension FolderGlassOverlay {
+    var probeHandoffGlass: NSView? {
+        entries.values.first(where: { $0.handoff != nil && $0.preview.opacity == 0 })?.glass
+    }
+    func probeCompletedHandoff(_ view: NSView) -> Bool {
+        entries.values.contains {
+            $0.glass === view && $0.handoff == nil && $0.preview.opacity == 1
+                && $0.glass.alphaValue == 1
+                && $0.glass.layer?.animation(forKey: "folderPresentation.material") == nil
+        }
+    }
+}
+""")
+
     # Observe private state only in the temporary target; no shipped test hooks.
     host = work / 'LaunchNext/CAFolderPresentation.swift'
     host.write_text(host.read_text() + '''

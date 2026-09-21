@@ -115,7 +115,7 @@ struct CAFolderOpeningSource {
 }
 
 extension CAGridView {
-    private func presentationContainer(at index: Int) -> CALayer? {
+    func presentationContainer(at index: Int) -> CALayer? {
         guard itemsPerPage > 0, index >= 0 else { return nil }
         return iconLayers[safe: index / itemsPerPage]?[safe: index % itemsPerPage]
     }
@@ -149,7 +149,8 @@ extension CAGridView {
     }
 
     func setPresentedFolderID(_ id: String?) {
-        guard presentedFolderID != id else { return }
+        guard presentedFolderID != id || folderGlassHandoff != nil else { return }
+        folderGlassHandoff = nil
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for (index, item) in items.enumerated() {
@@ -429,14 +430,17 @@ final class CAFolderPresentationHost: NSView {
         hosting.clipsToBounds = true
         hosting.layer?.cornerRadius = 30
         hosting.layer?.masksToBounds = true
-        glass.alphaValue = 1
+        if controller?.grid?.folderGlassHandoff == nil { glass.alphaValue = 1 }
         let pivot = source.map { CGPoint(x: $0.plateRectInWindow.midX, y: $0.plateRectInWindow.midY) }
         controller?.backdrop?.setFolderDepth(animated, duration: duration, pivotInWindow: pivot, motion: nextMotion)
-        controller?.grid?.setPresentedFolderID(folderID)
+        if controller?.grid?.presentedFolderID != folderID {
+            controller?.grid?.setPresentedFolderID(folderID)
+        }
         grid.animateFolderPresentation(from: source, opening: true, duration: duration,
                                        in: ensureAnimationStage(), motion: nextMotion)
         if animated {
             animateGlass(from: start, to: panelRect)
+            animateMaterialHandoff(opening: true)
         } else { layoutGlass() }
         reopeningGlassFrame = nil
         if animated { animateChrome(opening: true) }
@@ -533,6 +537,7 @@ final class CAFolderPresentationHost: NSView {
         hosting?.layer?.cornerRadius = 30
         hosting?.layer?.masksToBounds = true
         glass?.alphaValue = 1
+        glass?.layer?.removeAnimation(forKey: "folderPresentation.material")
         glassContainer?.layer?.removeAnimation(forKey: "folderPresentation.glass")
         glassContainer?.layer?.sublayerTransform = CATransform3DIdentity
         layoutGlass()
@@ -615,7 +620,24 @@ final class CAFolderPresentationHost: NSView {
                                        in: ensureAnimationStage(), motion: nextMotion)
         animateChrome(opening: false)
         animateGlass(from: start, to: end)
+        animateMaterialHandoff(opening: false)
         CATransaction.commit()
+    }
+
+    /// Reveal the actual grid material, leaving its label and bitmap hidden
+    /// until the moving icon proxies arrive. No second material is allocated.
+    private func animateMaterialHandoff(opening: Bool) {
+        guard let grid = controller?.grid, grid.usesLiquidGlassFolders,
+              let layer = glass?.layer, let motion,
+              !opening || grid.folderGlassHandoff != nil else { return }
+        let current = layer.presentation()?.opacity ?? layer.opacity
+        let handoff = FolderGlassOverlay.PresentationHandoff(
+            startTime: motion.startTime, duration: duration, opening: opening)
+        grid.folderGlassHandoff = handoff
+        grid.syncFolderGlass()
+        let fade = handoff.animation(from: current, to: opening ? 1 : 0, on: layer)
+        glass?.alphaValue = opening ? 1 : 0
+        layer.add(fade, forKey: "folderPresentation.material")
     }
 
     private func makeMotion(from current: CGRect, opening: Bool) -> FolderPresentationMotion {

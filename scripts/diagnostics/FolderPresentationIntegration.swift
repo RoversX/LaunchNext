@@ -141,6 +141,10 @@ import SwiftUI
                         weak var releasedGrid = host.probeGrid
                         store.openFolder = nil
                         update()
+                        weak var handoffGlass = grid.folderGlassOverlay?.probeHandoffGlass
+                        if glass {
+                            precondition(handoffGlass != nil, "close must prepare the actual grid glass without its thumbnail")
+                        }
                         try await Task.sleep(for: .milliseconds(90))
                         precondition(host.probePhase == "closing")
                         checkSynchronizedProgress(host)
@@ -148,6 +152,12 @@ import SwiftUI
                         try await Task.sleep(for: .milliseconds(350))
                         precondition(
                             host.probePhase == "closed" && grid.presentedFolderID == nil && host.probeGrid == nil)
+                        precondition(grid.folderGlassHandoff == nil)
+                        if glass {
+                            precondition(handoffGlass != nil
+                                && grid.folderGlassOverlay?.probeCompletedHandoff(handoffGlass!) == true,
+                                "closing must retain the same grid glass and restore its thumbnail")
+                        }
                         // AppKit/SwiftUI may retire their view graph on a later run-loop turn.
                         for _ in 0..<30 where releasedGrid != nil {
                             try await Task.sleep(for: .milliseconds(10))
@@ -205,7 +215,7 @@ import SwiftUI
                 store.openFolder = folder
                 update()
                 try await Task.sleep(for: .milliseconds(450))
-                precondition(host.probePhase == "open")
+                precondition(host.probePhase == "open" && grid.folderGlassHandoff == nil)
                 store.openFolder = nil
                 update()
                 try await Task.sleep(for: .milliseconds(400))
@@ -229,13 +239,19 @@ import SwiftUI
                 store.openFolder = nil
                 update()
                 precondition(abs(host.probeDuration - 0.28) < 0.001)
-                try await Task.sleep(for: .milliseconds(30))
+                // Interrupt after the real grid material has begun fading in.
+                try await Task.sleep(for: .milliseconds(200))
+                weak var reversingGlass = grid.folderGlassOverlay?.probeHandoffGlass
+                precondition(reversingGlass != nil)
                 weak var existingGrid = host.probeGrid
                 let previousIcon = host.probeIcons.first!
                 let previousPosition = (previousIcon.presentation() ?? previousIcon).position
                 sendClick(window, at: targetPoint)
                 precondition(store.openFolder?.id == folder.id && host.probeGrid === existingGrid,
                              "reopening must retain the same content without completing dismissal")
+                precondition(grid.folderGlassHandoff?.opening == true
+                    && grid.folderGlassOverlay?.probeHandoffGlass === reversingGlass,
+                    "late reversal must fade the same grid material back out")
                 precondition(openedByClick == 0, "same-folder reversal must not dispatch a fresh grid open")
                 precondition(host.probeInitialVelocity < 0, "reopening must inherit closing velocity")
                 let retargeted = host.probeIcons.first!.animation(forKey: "folderPresentation.position") as! CAKeyframeAnimation
@@ -247,7 +263,7 @@ import SwiftUI
                              "icons and material must share the trajectory and clock")
                 update()
                 try await Task.sleep(for: .milliseconds(350))
-                precondition(host.probePhase == "open")
+                precondition(host.probePhase == "open" && grid.folderGlassHandoff == nil)
                 store.openFolder = nil
                 update()
                 try await Task.sleep(for: .milliseconds(350))
@@ -280,7 +296,7 @@ import SwiftUI
                 precondition(store.openFolder?.id == otherFolder.id, "a different folder must still receive the first click")
                 update()
                 try await Task.sleep(for: .milliseconds(350))
-                precondition(host.probePhase == "open")
+                precondition(host.probePhase == "open" && grid.folderGlassHandoff == nil)
                 store.openFolder = nil
                 update()
                 try await Task.sleep(for: .milliseconds(350))
@@ -292,7 +308,7 @@ import SwiftUI
                 store.openFolder = folder
                 update()
                 try await Task.sleep(for: .milliseconds(100))
-                precondition(host.probePhase == "open")
+                precondition(host.probePhase == "open" && grid.folderGlassHandoff == nil)
                 store.openFolder = nil
                 update()
                 precondition(host.probePhase == "closed")

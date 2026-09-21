@@ -6,6 +6,29 @@ import QuartzCore
 /// Preview bitmaps are shared with CA.
 @MainActor
 final class FolderGlassOverlay: NSView {
+    struct PresentationHandoff: Equatable {
+        let startTime: CFTimeInterval
+        let duration: TimeInterval
+        let opening: Bool
+
+        func animation(from: Float, to: Float, on layer: CALayer) -> CAAnimationGroup {
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = from
+            fade.toValue = to
+            fade.beginTime = opening ? 0 : duration * 0.65
+            fade.duration = duration * (opening ? 1 : 0.35)
+            fade.fillMode = .both
+            fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            let group = CAAnimationGroup()
+            group.animations = [fade]
+            group.duration = duration
+            group.beginTime = layer.convertTime(startTime, from: nil)
+            group.fillMode = .both
+            group.isRemovedOnCompletion = false
+            return group
+        }
+    }
+
     @MainActor
     private final class Entry {
         let source: CALayer
@@ -13,6 +36,7 @@ final class FolderGlassOverlay: NSView {
         let glass = NSGlassEffectView()
         let preview = CALayer()
         let previewHost: NSView?
+        var handoff: PresentationHandoff?
         var isCreation: Bool { previewHost != nil }
 
         init(source: CALayer, icon: CALayer) {
@@ -70,6 +94,8 @@ final class FolderGlassOverlay: NSView {
     private var lastViewport: CGRect = .null
     private var lastPageFrame: CGRect = .null
     private var lastBaseX: CGFloat = .nan
+    private weak var lastHandoffContainer: CALayer?
+    private var lastHandoff: PresentationHandoff?
     var activeGlassCount: Int { entries.values.filter { !$0.glass.isHidden }.count }
 
     override init(frame: NSRect) {
@@ -144,7 +170,9 @@ final class FolderGlassOverlay: NSView {
 
     /// Read presentation geometry only while CA is animating it. The page offset
     /// is supplied separately so a just-applied scroll never lags by one frame.
-    func sync(containers: [CALayer], root: CALayer, page: CALayer, viewport: CGRect, geometryChanged: Bool = true) {
+    func sync(containers: [CALayer], root: CALayer, page: CALayer, viewport: CGRect,
+              handoffContainer: CALayer? = nil, handoff: PresentationHandoff? = nil,
+              geometryChanged: Bool = true) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
@@ -183,10 +211,13 @@ final class FolderGlassOverlay: NSView {
         // Pure paging only translates the complete native material subtree. Rebuild
         // geometry on layout/animation changes, a new nearby batch, or rebasing.
         let reusePageGeometry = !geometryChanged && lastPage === page && lastRoot === root
+            && lastHandoffContainer === handoffContainer && lastHandoff == handoff
             && lastViewport == viewport && lastPageFrame == pageFrame && lastBaseX == baseX
             && lastContainers.count == containers.count
             && zip(lastContainers, containers).allSatisfy { $0 === $1 }
         lastContainers = containers
+        lastHandoffContainer = handoffContainer
+        lastHandoff = handoff
         lastPage = page
         lastRoot = root
         lastViewport = viewport
@@ -201,7 +232,8 @@ final class FolderGlassOverlay: NSView {
             ? Set(entries.compactMap { $0.value.source.superlayer?.superlayer === page ? $0.key : nil })
             : []
         for container in changedContainers {
-            guard container.opacity > 0, !container.isHidden,
+            let materialHandoff = container === handoffContainer ? handoff : nil
+            guard (container.opacity > 0 || materialHandoff != nil), !container.isHidden,
                   let children = container.sublayers,
                   let source = children.first(where: { $0.name == "glass" || $0.name == "creationGlass" }),
                   let icon = children.first(where: { $0.name == "icon" }) else { continue }
@@ -243,7 +275,6 @@ final class FolderGlassOverlay: NSView {
             if !icon.isHidden { icon.isHidden = true }
             let opacity = CGFloat((container.animationKeys()?.isEmpty == false
                 ? container.presentation()?.opacity : nil) ?? container.opacity)
-            if entry.glass.alphaValue != opacity { entry.glass.alphaValue = opacity }
             let parent = entry.isCreation && inPage
                 ? creationCanvas(frame: pageFrame, translation: translation)
                 : (inPage ? pageCanvas : canvas)
@@ -262,6 +293,29 @@ final class FolderGlassOverlay: NSView {
                 dy: entry.isCreation ? 0 : -glassRect.minY)
             if entry.preview.frame != iconRect { entry.preview.frame = iconRect }
             entry.updatePreviewContents()
+            if let materialHandoff {
+                // Request animation backing only after AppKit has attached and
+                // positioned this view. Doing it in Entry.init changes paging
+                // coordinate behavior for every ordinary glass view.
+                entry.glass.wantsLayer = true
+                if entry.handoff != materialHandoff, let layer = entry.glass.layer {
+                    let current = entry.handoff == nil ? Float(0)
+                        : (layer.presentation()?.opacity ?? Float(entry.glass.alphaValue))
+                    let target: Float = materialHandoff.opening ? 0 : 1
+                    let animation = materialHandoff.animation(from: current, to: target, on: layer)
+                    entry.glass.alphaValue = CGFloat(target)
+                    layer.add(animation, forKey: "folderPresentation.material")
+                    entry.handoff = materialHandoff
+                }
+                entry.preview.opacity = 0
+            } else {
+                if entry.handoff != nil {
+                    entry.glass.layer?.removeAnimation(forKey: "folderPresentation.material")
+                    entry.handoff = nil
+                }
+                if entry.glass.alphaValue != opacity { entry.glass.alphaValue = opacity }
+                entry.preview.opacity = entry.isCreation ? Float(opacity) : 1
+            }
         }
         for key in Array(entries.keys) where !retained.contains(key) {
             entries.removeValue(forKey: key)?.remove()
