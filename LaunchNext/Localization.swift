@@ -259,6 +259,11 @@ enum LocalizationKey: String {
     case launchAtLoginDescription
     case lockLayoutTitle
     case lockLayoutDescription
+    case appSortModeTitle
+    case appSortModeMyArrangement
+    case appSortModeAlphabetical
+    case appSortModeRecentlyUsed
+    case appSortModeDescription
     case scanSourcesIntroTitle
     case scanSourcesIntroDescription
     case scanSourcesPlaceholder
@@ -7598,6 +7603,110 @@ final class LocalizationManager {
             ],
         ]
         for (language, strings) in wallpaperDiagnosticTranslations {
+            builder[language, default: [:]].merge(strings) { _, new in new }
+        }
+
+        let appSortTranslations: [AppLanguage: [LocalizationKey: String]] = [
+            .english: [
+                .appSortModeTitle: "Sort apps",
+                .appSortModeMyArrangement: "My arrangement",
+                .appSortModeAlphabetical: "Alphabetically",
+                .appSortModeRecentlyUsed: "Recently used",
+                .appSortModeDescription: "Alphabetically and Recently used sort your apps automatically and pause rearranging. My arrangement shows the layout you set up, which is kept while sorting."
+            ],
+            .simplifiedChinese: [
+                .appSortModeTitle: "应用排序",
+                .appSortModeMyArrangement: "我的排列",
+                .appSortModeAlphabetical: "按字母顺序",
+                .appSortModeRecentlyUsed: "最近使用",
+                .appSortModeDescription: "“按字母顺序”和“最近使用”会自动排序 App，并暂停调整排列。“我的排列”显示你设置的布局，排序期间该布局会被保留。"
+            ],
+            .traditionalChinese: [
+                .appSortModeTitle: "App 排序",
+                .appSortModeMyArrangement: "我的排列",
+                .appSortModeAlphabetical: "依字母順序",
+                .appSortModeRecentlyUsed: "最近使用",
+                .appSortModeDescription: "「依字母順序」和「最近使用」會自動排序 App，並暫停調整排列。「我的排列」顯示你設定的佈局，排序期間該佈局會被保留。"
+            ],
+            .japanese: [
+                .appSortModeTitle: "アプリの並び順",
+                .appSortModeMyArrangement: "自分の配置",
+                .appSortModeAlphabetical: "アルファベット順",
+                .appSortModeRecentlyUsed: "最近使った順",
+                .appSortModeDescription: "「アルファベット順」と「最近使った順」はアプリを自動で並べ替え、並べ替え操作を一時停止します。「自分の配置」は設定した配置を表示し、自動並べ替え中も保持されます。"
+            ],
+            .korean: [
+                .appSortModeTitle: "앱 정렬",
+                .appSortModeMyArrangement: "내 배치",
+                .appSortModeAlphabetical: "알파벳순",
+                .appSortModeRecentlyUsed: "최근 사용",
+                .appSortModeDescription: "'알파벳순'과 '최근 사용'은 앱을 자동으로 정렬하고 재배치를 일시 중지합니다. '내 배치'는 직접 설정한 배치를 표시하며, 정렬 중에도 유지됩니다."
+            ],
+            .french: [
+                .appSortModeTitle: "Trier les apps",
+                .appSortModeMyArrangement: "Ma disposition",
+                .appSortModeAlphabetical: "Par ordre alphabétique",
+                .appSortModeRecentlyUsed: "Utilisées récemment",
+                .appSortModeDescription: "« Par ordre alphabétique » et « Utilisées récemment » trient vos apps automatiquement et suspendent la réorganisation. « Ma disposition » affiche la disposition que vous avez créée, conservée pendant le tri."
+            ],
+            .spanish: [
+                .appSortModeTitle: "Ordenar apps",
+                .appSortModeMyArrangement: "Mi disposición",
+                .appSortModeAlphabetical: "Alfabéticamente",
+                .appSortModeRecentlyUsed: "Usadas recientemente",
+                .appSortModeDescription: "«Alfabéticamente» y «Usadas recientemente» ordenan tus apps automáticamente y pausan la reorganización. «Mi disposición» muestra la disposición que creaste, que se conserva mientras se ordena."
+            ],
+            .italian: [
+                .appSortModeTitle: "Ordina app",
+                .appSortModeMyArrangement: "La mia disposizione",
+                .appSortModeAlphabetical: "In ordine alfabetico",
+                .appSortModeRecentlyUsed: "Usate di recente",
+                .appSortModeDescription: "«In ordine alfabetico» e «Usate di recente» ordinano le app automaticamente e sospendono il riordino. «La mia disposizione» mostra la disposizione che hai creato, che viene mantenuta durante l’ordinamento."
+            ],
+            .czech: [
+                .appSortModeTitle: "Řazení aplikací",
+                .appSortModeMyArrangement: "Moje rozložení",
+                .appSortModeAlphabetical: "Abecedně",
+                .appSortModeRecentlyUsed: "Nedávno použité",
+                .appSortModeDescription: "„Abecedně“ a „Nedávno použité“ řadí aplikace automaticky a pozastaví přeskupování. „Moje rozložení“ zobrazí rozložení, které jste vytvořili; při řazení zůstane zachováno."
+            ],
+            .german: [
+                .appSortModeTitle: "Apps sortieren",
+                .appSortModeMyArrangement: "Meine Anordnung",
+                .appSortModeAlphabetical: "Alphabetisch",
+                .appSortModeRecentlyUsed: "Zuletzt verwendet",
+                .appSortModeDescription: "„Alphabetisch“ und „Zuletzt verwendet“ sortieren deine Apps automatisch und pausieren das Umsortieren. „Meine Anordnung“ zeigt deine eigene Anordnung, die beim Sortieren erhalten bleibt."
+            ],
+            .russian: [
+                .appSortModeTitle: "Сортировка приложений",
+                .appSortModeMyArrangement: "Моя раскладка",
+                .appSortModeAlphabetical: "По алфавиту",
+                .appSortModeRecentlyUsed: "Недавно использованные",
+                .appSortModeDescription: "«По алфавиту» и «Недавно использованные» сортируют приложения автоматически и приостанавливают перестановку. «Моя раскладка» показывает вашу раскладку, которая сохраняется во время сортировки."
+            ],
+            .hindi: [
+                .appSortModeTitle: "ऐप्स क्रमबद्ध करें",
+                .appSortModeMyArrangement: "मेरी व्यवस्था",
+                .appSortModeAlphabetical: "वर्णानुक्रम में",
+                .appSortModeRecentlyUsed: "हाल ही में उपयोग किए गए",
+                .appSortModeDescription: "‘वर्णानुक्रम में’ और ‘हाल ही में उपयोग किए गए’ ऐप्स को अपने आप क्रमबद्ध करते हैं और पुनर्व्यवस्था रोक देते हैं। ‘मेरी व्यवस्था’ आपका बनाया लेआउट दिखाता है, जो क्रमबद्ध करते समय बना रहता है।"
+            ],
+            .vietnamese: [
+                .appSortModeTitle: "Sắp xếp ứng dụng",
+                .appSortModeMyArrangement: "Bố cục của tôi",
+                .appSortModeAlphabetical: "Theo bảng chữ cái",
+                .appSortModeRecentlyUsed: "Dùng gần đây",
+                .appSortModeDescription: "“Theo bảng chữ cái” và “Dùng gần đây” tự động sắp xếp ứng dụng và tạm dừng việc sắp xếp lại. “Bố cục của tôi” hiển thị bố cục bạn đã tạo, được giữ nguyên trong khi sắp xếp."
+            ],
+            .portugueseBrazil: [
+                .appSortModeTitle: "Ordenar apps",
+                .appSortModeMyArrangement: "Minha organização",
+                .appSortModeAlphabetical: "Em ordem alfabética",
+                .appSortModeRecentlyUsed: "Usados recentemente",
+                .appSortModeDescription: "“Em ordem alfabética” e “Usados recentemente” ordenam seus apps automaticamente e pausam a reorganização. “Minha organização” mostra o layout que você criou, que é mantido durante a ordenação."
+            ]
+        ]
+        for (language, strings) in appSortTranslations {
             builder[language, default: [:]].merge(strings) { _, new in new }
         }
 

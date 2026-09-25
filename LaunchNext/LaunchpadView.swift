@@ -211,7 +211,7 @@ struct LaunchpadView: View {
     }
 
     var filteredItems: [LaunchpadItem] {
-        searchEngine.filter(items: appStore.items,
+        searchEngine.filter(items: appStore.displayItems,
                             query: appStore.searchQuery,
                             fuzzyEnabled: appStore.fuzzySearchEnabled)
     }
@@ -464,7 +464,7 @@ struct LaunchpadView: View {
                 VoiceManager.shared.stop()
             }
         }
-        .onChange(of: appStore.isLayoutLocked) { _, locked in
+        .onChange(of: appStore.isArrangementLocked) { _, locked in
             guard locked else { return }
             if let monitor = handoffEventMonitor {
                 NSEvent.removeMonitor(monitor)
@@ -1124,7 +1124,7 @@ struct LaunchpadView: View {
 
                     // 智能预加载当前页面和相邻页面的图标
                     AppCacheManager.shared.smartPreloadIcons(
-                        for: appStore.items,
+                        for: filteredItems,
                         currentPage: appStore.currentPage,
                         itemsPerPage: config.itemsPerPage
                     )
@@ -1162,6 +1162,7 @@ struct LaunchpadView: View {
     }
 
     private func launchApp(_ app: AppInfo) {
+        appStore.recordLaunch(app)
         AppDelegate.shared?.hideWindow()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             if !NSWorkspace.shared.open(app.url) {
@@ -1191,7 +1192,7 @@ struct LaunchpadView: View {
     // MARK: - Handoff drag from folder
     private func startHandoffDragIfNeeded(geo: GeometryProxy, columnWidth: CGFloat, appHeight: CGFloat, iconSize: CGFloat) {
         guard draggingItem == nil, let app = appStore.handoffDraggingApp else { return }
-        if appStore.isLayoutLocked {
+        if appStore.isArrangementLocked {
             appStore.handoffDraggingApp = nil
             appStore.handoffDragScreenLocation = nil
             return
@@ -1262,7 +1263,7 @@ struct LaunchpadView: View {
     }
 
     private func handleHandoffDragMove(to localPoint: CGPoint) {
-        guard !appStore.isLayoutLocked else { return }
+        guard !appStore.isArrangementLocked else { return }
         // 复用与普通拖拽完全一致的更新逻辑
         applyDragUpdate(at: localPoint,
                         containerSize: currentContainerSize,
@@ -1294,7 +1295,7 @@ struct LaunchpadView: View {
                 appStore.triggerGridRefresh()
             }
         }
-        if appStore.isLayoutLocked {
+        if appStore.isArrangementLocked {
             appStore.triggerGridRefresh()
             return
         }
@@ -2523,7 +2524,7 @@ extension LaunchpadView {
                 .frame(height: appHeight)
                 // 保持稳定的视图身份，避免在文件夹更新后中断拖拽手势
                 .id(item.id)
-            if appStore.searchText.isEmpty && !isFolderOpen && !appStore.isLayoutLocked {
+            if appStore.searchText.isEmpty && !isFolderOpen && !appStore.isArrangementLocked {
                 let isDraggingThisTile = (draggingItem == item)
 
                 base
@@ -3333,7 +3334,7 @@ extension LaunchpadView {
     
     // MARK: - 简化的拖拽处理函数
     private func handleDragChange(_ value: DragGesture.Value, item: LaunchpadItem, in containerSize: CGSize, columnWidth: CGFloat, appHeight: CGFloat, iconSize: CGFloat) {
-        guard !appStore.isLayoutLocked else { return }
+        guard !appStore.isArrangementLocked else { return }
         // 初始化拖拽
         if draggingItem == nil {
             var tx = Transaction(); tx.disablesAnimations = true
@@ -3368,7 +3369,7 @@ extension LaunchpadView {
         guard let dragging = draggingItem else { return }
         defer { dragPointerOffset = .zero }
 
-        if appStore.isLayoutLocked {
+        if appStore.isArrangementLocked {
             appStore.isDragCreatingFolder = false
             appStore.folderCreationTarget = nil
             pendingDropIndex = nil
@@ -3497,7 +3498,7 @@ extension LaunchpadView {
                                  columnWidth: CGFloat,
                                  appHeight: CGFloat,
                                  iconSize: CGFloat) {
-        guard !appStore.isLayoutLocked else { return }
+        guard !appStore.isArrangementLocked else { return }
         let rawIconCenter = CGPoint(x: point.x - dragPointerOffset.x,
                                      y: point.y - dragPointerOffset.y)
         var iconCenter = rawIconCenter

@@ -376,6 +376,7 @@ final class AppStore: ObservableObject {
     static let iconLabelFontWeightKey = "iconLabelFontWeight"
     static let showQuickRefreshButtonKey = "showQuickRefreshButton"
     static let lockLayoutKey = "lockLayoutEnabled"
+    static let appSortModeKey = "appSortMode"
     static let rememberPageKey = "rememberLastPage"
     static let rememberedPageIndexKey = "rememberedPageIndex"
     static let globalHotKeyKey = "globalHotKeyConfiguration"
@@ -712,6 +713,7 @@ final class AppStore: ObservableObject {
     let searchEngine = LaunchpadSearchEngine()
     @Published var items: [LaunchpadItem] = [] {
         didSet {
+            itemsRevision &+= 1
             searchEngine.updateIndex(for: items)
         }
     }
@@ -1088,6 +1090,7 @@ final class AppStore: ObservableObject {
         gestureDeviceSelectionMode = GestureDeviceSelectionMode(rawValue: UserDefaults.standard.string(forKey: Self.gestureDeviceSelectionModeKey) ?? "") ?? .automatic
         gestureSelectedDeviceIDs = Array(Set(UserDefaults.standard.stringArray(forKey: Self.gestureSelectedDeviceIDsKey) ?? [])).sorted()
         gestureShowAllInputDevices = UserDefaults.standard.object(forKey: Self.gestureShowAllInputDevicesKey) as? Bool ?? false
+        appSortMode = Self.storedAppSortMode()
 
         // Apply hidden filtering immediately
         pruneHiddenAppsFromAppList()
@@ -1822,6 +1825,103 @@ final class AppStore: ObservableObject {
             UserDefaults.standard.set(isLayoutLocked, forKey: AppStore.lockLayoutKey)
             triggerGridRefresh()
         }
+    }
+
+    @Published var appSortMode: AppSortMode = AppStore.storedAppSortMode() {
+        didSet {
+            guard appSortMode != oldValue else { return }
+            UserDefaults.standard.set(appSortMode.rawValue, forKey: AppStore.appSortModeKey)
+            // The mode is changed from Settings, which covers the grid, so the
+            // visible reorder behind it cannot move a tile under the pointer.
+            applyUsageSnapshot()
+            refreshUsageDatesIfSorting(force: true)
+            currentPage = 0
+            triggerGridRefresh()
+        }
+    }
+
+    static func storedAppSortMode() -> AppSortMode {
+        AppSortMode(rawValue: UserDefaults.standard.string(forKey: appSortModeKey) ?? "") ?? .myArrangement
+    }
+
+    let usageTracker = AppUsageTracker()
+    /// The usage the grid is sorted by. It only changes while the grid cannot be
+    /// clicked (window hidden, or covered by Settings), so an app never moves
+    /// between being selected and being launched.
+    private var usageSnapshot: [String: Date] = [:]
+    private var usageSnapshotRevision = 0
+    private var isLauncherVisible = false
+    private var itemsRevision = 0
+    private var displayItemsCache: (itemsRevision: Int, mode: AppSortMode, usageRevision: Int, result: [LaunchpadItem])?
+
+    /// Drag-and-drop works on indices into `items`, so it is disabled whenever the
+    /// grid shows a different order than the persisted arrangement.
+    var isArrangementLocked: Bool {
+        isLayoutLocked || appSortMode != .myArrangement
+    }
+
+    /// The order the grid displays. Never assign this back to `items`: every change
+    /// to `items` is persisted as the user's custom arrangement.
+    var displayItems: [LaunchpadItem] {
+        guard appSortMode != .myArrangement else { return items }
+        if let cache = displayItemsCache, cache.itemsRevision == itemsRevision,
+           cache.mode == appSortMode, cache.usageRevision == usageSnapshotRevision {
+            return cache.result
+        }
+        // Alphabetical ignores usage, so every app and folder ranks as unused.
+        let usage = appSortMode == .recentlyUsed ? usageSnapshot : [:]
+        let tracker = usageTracker
+        func lastUse(of app: AppInfo) -> Date? {
+            usage.isEmpty ? nil : usage[tracker.usageKey(for: app.url)]
+        }
+        let result = AppSortOrder.sorted(items) { item -> AppSortRank in
+            switch item {
+            case .app(let app):
+                return AppSortOrder.rank(name: app.name, lastUses: [lastUse(of: app)])
+            case .folder(let folder):
+                return AppSortOrder.rank(name: folder.name, lastUses: folder.apps.map(lastUse(of:)))
+            case .missingApp:
+                return .trailing
+            case .empty:
+                return .omitted
+            }
+        }
+        displayItemsCache = (itemsRevision, appSortMode, usageSnapshotRevision, result)
+        return result
+    }
+
+    func recordLaunch(_ app: AppInfo) {
+        usageTracker.recordUse(of: app.url)
+    }
+
+    func launcherWillShow() {
+        isLauncherVisible = true
+    }
+
+    func launcherDidHide() {
+        isLauncherVisible = false
+        applyUsageSnapshot()
+        refreshUsageDatesIfSorting()
+    }
+
+    /// Picks up launches that happened while LaunchNext was not running.
+    func refreshUsageDatesIfSorting(force: Bool = false) {
+        guard appSortMode == .recentlyUsed else { return }
+        let urls = apps.map(\.url) + folders.flatMap { $0.apps.map(\.url) }
+        guard !urls.isEmpty else { return }
+        usageTracker.refreshSpotlightDates(for: urls, force: force) { [weak self] in
+            // Otherwise the next hide applies it.
+            guard let self, !self.isLauncherVisible || self.isSetting else { return }
+            self.applyUsageSnapshot()
+        }
+    }
+
+    private func applyUsageSnapshot() {
+        guard appSortMode == .recentlyUsed, usageSnapshot != usageTracker.lastUsed else { return }
+        objectWillChange.send()
+        usageSnapshot = usageTracker.lastUsed
+        usageSnapshotRevision &+= 1
+        triggerGridRefresh()
     }
 
     // 更新检查相关属性
@@ -3100,6 +3200,8 @@ final class AppStore: ObservableObject {
 
         searchQuery = searchText
 
+        usageSnapshot = usageTracker.lastUsed
+
         if developmentEnableCLICode {
             installCLICommandIfNeeded()
         } else {
@@ -3589,6 +3691,7 @@ final class AppStore: ObservableObject {
 
         if succeeded {
             lastSuccessfulApplicationReconciliationAt = Date()
+            refreshUsageDatesIfSorting()
             if reasons.contains(.externalUninstallerReturn) {
                 needsReconciliationAfterExternalUninstall = false
             }
@@ -5788,7 +5891,8 @@ final class AppStore: ObservableObject {
 
     private func clampCurrentPageWithinBounds() {
         let perPage = max(itemsPerPage, 1)
-        let maxPageIndex = items.isEmpty ? 0 : max(0, (items.count - 1) / perPage)
+        let displayedCount = displayItems.count
+        let maxPageIndex = displayedCount == 0 ? 0 : max(0, (displayedCount - 1) / perPage)
         if currentPage > maxPageIndex {
             currentPage = maxPageIndex
         }
@@ -7568,5 +7672,15 @@ extension NSEvent.ModifierFlags {
         if contains(.shift) { symbols.append("⇧") }
         if contains(.command) { symbols.append("⌘") }
         return symbols
+    }
+}
+
+extension AppSortMode {
+    var localizationKey: LocalizationKey {
+        switch self {
+        case .myArrangement: return .appSortModeMyArrangement
+        case .alphabetical: return .appSortModeAlphabetical
+        case .recentlyUsed: return .appSortModeRecentlyUsed
+        }
     }
 }
