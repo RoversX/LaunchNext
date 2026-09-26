@@ -45,7 +45,7 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         view.labelFontSize = CGFloat(appStore.iconLabelFontSize)
         view.labelFontWeight = nsFontWeight(for: appStore.iconLabelFontWeight)
         view.showLabels = appStore.showLabels
-        view.isLayoutLocked = appStore.isLayoutLocked
+        view.isLayoutLocked = appStore.isArrangementLocked
         view.folderDropZoneScale = CGFloat(appStore.folderDropZoneScale)
         let preferredScale = nsViewScale(for: view)
         view.folderPreviewScale = appStore.enableHighResFolderPreviews ? preferredScale : 1
@@ -72,6 +72,7 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         view.items = items
 
         let launchApp: (AppInfo) -> Void = { app in
+            appStore.recordLaunch(app)
             onOpenApp?(app)
             AppDelegate.shared?.hideWindow()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -193,7 +194,7 @@ struct CAGridViewRepresentable: NSViewRepresentable {
                             nsView.labelFontSize != CGFloat(appStore.iconLabelFontSize) ||
                             nsView.labelFontWeight != nsFontWeight(for: appStore.iconLabelFontWeight) ||
                             nsView.showLabels != appStore.showLabels ||
-                            nsView.isLayoutLocked != appStore.isLayoutLocked ||
+                            nsView.isLayoutLocked != appStore.isArrangementLocked ||
                             nsView.folderDropZoneScale != CGFloat(appStore.folderDropZoneScale) ||
                             nsView.folderPreviewScale != (appStore.enableHighResFolderPreviews ? nsViewScale(for: nsView) : 1)
 
@@ -208,7 +209,7 @@ struct CAGridViewRepresentable: NSViewRepresentable {
             nsView.labelFontSize = CGFloat(appStore.iconLabelFontSize)
             nsView.labelFontWeight = nsFontWeight(for: appStore.iconLabelFontWeight)
             nsView.showLabels = appStore.showLabels
-            nsView.isLayoutLocked = appStore.isLayoutLocked
+            nsView.isLayoutLocked = appStore.isArrangementLocked
             nsView.folderDropZoneScale = CGFloat(appStore.folderDropZoneScale)
             let preferredScale = nsViewScale(for: nsView)
             nsView.folderPreviewScale = appStore.enableHighResFolderPreviews ? preferredScale : 1

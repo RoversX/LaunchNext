@@ -448,7 +448,7 @@ extension FolderView {
 
         let isDraggingThisTile = (draggingApp == app)
 
-        if appStore.isLayoutLocked {
+        if appStore.isArrangementLocked {
             base
                 .launchNextHideAppContextMenu(app: app, appStore: appStore)
         } else {
@@ -459,7 +459,7 @@ extension FolderView {
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 2, coordinateSpace: .named("folderGrid"))
                         .onChanged { value in
-                            guard !appStore.isLayoutLocked else { return }
+                            guard !appStore.isArrangementLocked else { return }
                             // 在编辑状态下禁用拖拽
                             if isEditingName { return }
                         
@@ -521,7 +521,7 @@ extension FolderView {
                         }
                     }
                     .onEnded { _ in
-                        if appStore.isLayoutLocked { return }
+                        if appStore.isArrangementLocked { return }
                         // 在编辑状态下不处理拖拽结束
                         if isEditingName { return }
                         

@@ -3019,6 +3019,22 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            Divider()
+
+            HStack {
+                Text(appStore.localized(.appSortModeTitle))
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Picker("", selection: $appStore.appSortMode) {
+                    ForEach(AppSortMode.allCases) { mode in
+                        Text(appStore.localized(mode.localizationKey)).tag(mode)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .fixedSize()
+                .help(appStore.localized(.appSortModeDescription))
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -5814,6 +5830,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     keys.insert("isStartOnLogin")
                     keys.insert(AppStore.showQuickRefreshButtonKey)
                     keys.insert(AppStore.lockLayoutKey)
+                    keys.insert(AppStore.appSortModeKey)
                     keys.insert(AppStore.uninstallToolAppPathKey)
                     keys.insert(AppStore.dockDragSideKey)
                     keys.insert(AppStore.dockDragTriggerDistanceKey)

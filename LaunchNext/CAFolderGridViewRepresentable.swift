@@ -53,7 +53,7 @@ struct CAFolderGridViewRepresentable: NSViewRepresentable {
         view.activePressScale = CGFloat(appStore.activePressScale)
         view.animationsEnabled = appStore.enableAnimations
         view.animationDuration = appStore.animationDuration
-        view.isLayoutLocked = appStore.isLayoutLocked
+        view.isLayoutLocked = appStore.isArrangementLocked
         view.scrollSensitivity = appStore.scrollSensitivity
         view.reverseWheelPagingDirection = appStore.reverseWheelPagingDirection
         view.reverseWheelVerticalDirection = appStore.reverseWheelVerticalDirection
