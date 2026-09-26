@@ -128,6 +128,7 @@ struct LaunchpadView: View {
     @StateObject private var pageFlipManager = PageFlipManager()
     @State private var folderHoverCandidateIndex: Int? = nil
     @State private var folderHoverBeganAt: Date? = nil
+    @State private var folderAppToReveal: String? = nil
     @State private var selectedIndex: Int? = nil
     @State private var isKeyboardNavigationActive: Bool = false
     @FocusState private var isSearchFieldFocused: Bool
@@ -278,6 +279,24 @@ struct LaunchpadView: View {
     
     var body: some View {
         launchpadEventBoundView
+         .task(id: appStore.layoutRevealRequest?.id) {
+             guard let request = appStore.layoutRevealRequest else { return }
+             // Search observers must see the pending request before navigation
+             // completes; otherwise they can reset the destination selection.
+             await withCheckedContinuation { continuation in
+                 DispatchQueue.main.async { continuation.resume() }
+             }
+             await revealAppInLayout(request)
+         }
+         .onChange(of: appStore.searchText) { _, text in
+             if !text.isEmpty { appStore.layoutRevealRequest = nil }
+         }
+         .onChange(of: appStore.isSetting) { _, visible in
+             if visible { appStore.layoutRevealRequest = nil }
+         }
+         .onChange(of: appStore.openFolder?.id) { _, id in
+             if id == nil { folderAppToReveal = nil }
+         }
     }
 
     private var launchpadEventBoundView: some View {
@@ -322,6 +341,7 @@ struct LaunchpadView: View {
              if focused { isKeyboardNavigationActive = false }
          }
          .onReceive(ControllerInputManager.shared.commands) { command in
+             appStore.layoutRevealRequest = nil
              handleControllerCommand(command)
          }
          .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.activeSpaceDidChangeNotification)) { _ in
@@ -614,10 +634,12 @@ struct LaunchpadView: View {
                 .frame(maxWidth: 480)
                 .disabled(isFolderOpen)
                 .onChange(of: appStore.searchQuery) {
-                    guard !isFolderOpen else { return }
+                    guard !isFolderOpen, appStore.layoutRevealRequest == nil else { return }
+                    let query = appStore.searchQuery
                     // 避免在视图更新周期内直接发布变化，推迟到下一循环
                     let maxPageIndex = max(pages.count - 1, 0)
                     DispatchQueue.main.async {
+                        guard appStore.searchQuery == query, appStore.layoutRevealRequest == nil else { return }
                         appStore.currentPage = 0
                         if appStore.currentPage > maxPageIndex {
                             appStore.currentPage = maxPageIndex
@@ -762,7 +784,8 @@ struct LaunchpadView: View {
                     iconSize: currentIconSize * CGFloat(min(max(appStore.iconScale, 0.6), 1.15)),
                     onClose: { closePresentedFolder() }, onLaunchApp: { launchApp($0) },
                     backgroundLabelSample: resolvedBackgroundLabelSample,
-                    backgroundLabelTints: backgroundLabelTints)
+                    backgroundLabelTints: backgroundLabelTints,
+                    initialRevealAppPath: folderAppToReveal)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let openFolder = appStore.openFolder {
                 GeometryReader { proxy in
@@ -808,6 +831,7 @@ struct LaunchpadView: View {
                         appStore: appStore,
                         folder: folderBinding,
                         preferredIconSize: currentIconSize * CGFloat(min(max(appStore.iconScale, 0.6), 1.15)),
+                        initialRevealAppPath: folderAppToReveal,
                         onClose: {
                             let closingFolder = appStore.openFolder
                             withAnimation(LNAnimations.springFast) {
@@ -1146,6 +1170,126 @@ struct LaunchpadView: View {
                 }
             }
         )
+    }
+
+    @MainActor
+    private func revealAppInLayout(_ request: AppStore.LayoutRevealRequest) async {
+        guard !Task.isCancelled, appStore.layoutRevealRequest?.id == request.id else { return }
+        defer {
+            if appStore.layoutRevealRequest?.id == request.id {
+                appStore.layoutRevealRequest = nil
+            }
+        }
+        guard appStore.searchText.isEmpty, appStore.searchQuery.isEmpty,
+              let location = appStore.layoutLocation(ofAppAtPath: request.appPath) else { return }
+        isSearchFieldFocused = false
+        isKeyboardNavigationActive = false
+        selectedIndex = location.index
+        let destinationPage = location.index / max(1, config.itemsPerPage)
+        folderAppToReveal = nil
+
+        let cancelReveal = {
+            if appStore.layoutRevealRequest?.id == request.id {
+                appStore.layoutRevealRequest = nil
+            }
+        }
+        let inputMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown, .scrollWheel]
+        ) { event in
+            cancelReveal()
+            return event
+        }
+        let inactiveObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willResignActiveNotification, object: NSApp, queue: .main
+        ) { _ in cancelReveal() }
+        defer {
+            if let inputMonitor { NSEvent.removeMonitor(inputMonitor) }
+            NotificationCenter.default.removeObserver(inactiveObserver)
+        }
+
+        // Show the restored layout before moving. Waiting is bounded so a
+        // missing icon cannot leave navigation pending forever.
+        if appStore.useCAGridRenderer {
+            let itemID = appStore.items[location.index].id
+            var navigationGrid: CAGridView?
+            _ = await waitForLayoutReveal(request, timeout: 1.5) {
+                guard let grid = folderPresentation.grid, grid.window?.isVisible == true,
+                      grid.items.count == appStore.items.count,
+                      grid.items.indices.contains(location.index), grid.items[location.index].id == itemID,
+                      grid.bounds.width > 0, grid.bounds.height > 0 else { return false }
+                navigationGrid = grid
+                return grid.revealIconsAreReady(from: grid.currentPage, through: destinationPage)
+            }
+            guard !Task.isCancelled, appStore.layoutRevealRequest?.id == request.id,
+                  let grid = navigationGrid else { return }
+            let showsMotion = appStore.enableAnimations && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            let changesPage = grid.currentPage != destinationPage
+            if showsMotion && changesPage {
+                // Give the restored icons a few visible frames before the first movement.
+                do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
+            }
+            guard appStore.layoutRevealRequest?.id == request.id else { return }
+            let pageDuration = LayoutRevealFeedback.pageDuration(distance: abs(grid.currentPage - destinationPage))
+            grid.navigateToPage(destinationPage, animated: showsMotion, revealDuration: pageDuration)
+            let motionID = grid.layoutRevealPageMotion?.id
+            defer {
+                if let motionID, grid.layoutRevealPageMotion?.id == motionID {
+                    // A cancelled reveal leaves ordinary paging in charge.
+                    grid.layoutRevealPageMotion = nil
+                }
+            }
+            appStore.currentPage = destinationPage
+            let arrived = await waitForLayoutReveal(request, timeout: pageDuration + 0.6) {
+                !grid.isScrollAnimating
+            }
+            guard !Task.isCancelled, appStore.layoutRevealRequest?.id == request.id else { return }
+            if !arrived { grid.navigateToPage(destinationPage, animated: false) }
+            if showsMotion {
+                do { try await Task.sleep(for: .milliseconds(160)) } catch { return }
+            }
+            guard appStore.layoutRevealRequest?.id == request.id else { return }
+            let feedbackLayer = grid.presentationContainer(at: location.index)
+            if let feedbackLayer,
+               LayoutRevealFeedback.animate(on: feedbackLayer,
+                    pressScale: CGFloat(appStore.activePressScale), enabled: appStore.enableAnimations) {
+                let hasGlass = location.folder != nil && grid.usesLiquidGlassFolders
+                if hasGlass {
+                    grid.folderGlassAnimationDeadline = max(grid.folderGlassAnimationDeadline,
+                        CACurrentMediaTime() + LayoutRevealFeedback.duration)
+                    grid.syncFolderGlass()
+                }
+                defer {
+                    feedbackLayer.removeAnimation(forKey: LayoutRevealFeedback.animationKey)
+                    if hasGlass { grid.syncFolderGlass() }
+                }
+                do { try await Task.sleep(for: .seconds(LayoutRevealFeedback.duration)) } catch { return }
+            }
+        } else {
+            appStore.currentPage = destinationPage
+        }
+        guard let folder = location.folder else { return }
+        guard !Task.isCancelled, appStore.layoutRevealRequest?.id == request.id,
+              appStore.searchText.isEmpty, appStore.searchQuery.isEmpty,
+              appStore.openFolder == nil, !appStore.isSetting,
+              let currentLocation = appStore.layoutLocation(ofAppAtPath: request.appPath),
+              currentLocation.index == location.index, currentLocation.folder?.id == folder.id,
+              appStore.currentPage == location.index / max(1, config.itemsPerPage),
+              selectedIndex == location.index else { return }
+        folderAppToReveal = request.appPath
+        appStore.openFolderActivatedByKeyboard = false
+        appStore.openFolder = currentLocation.folder
+    }
+
+    @MainActor
+    private func waitForLayoutReveal(_ request: AppStore.LayoutRevealRequest,
+                                     timeout: TimeInterval, until ready: () -> Bool) async -> Bool {
+        let deadline = CACurrentMediaTime() + timeout
+        repeat {
+            guard !Task.isCancelled, appStore.layoutRevealRequest?.id == request.id else { return false }
+            if ready() { return true }
+            do { try await Task.sleep(for: .milliseconds(16)) } catch { return false }
+        } while CACurrentMediaTime() < deadline
+        return false
     }
 
     private func closePresentedFolder() {
@@ -2186,6 +2330,7 @@ extension LaunchpadView {
         }
         windowHiddenObserver = NotificationCenter.default.addObserver(forName: .launchpadWindowHidden, object: nil, queue: .main) { _ in
             isWindowVisible = false
+            appStore.layoutRevealRequest = nil
             MainActor.assumeIsolated {
                 folderPresentation.dismissImmediately()
                 backgroundImageController.windowDidHide()

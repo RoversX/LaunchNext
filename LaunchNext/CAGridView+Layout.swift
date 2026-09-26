@@ -484,9 +484,17 @@ extension CAGridView {
 
         // Reposition to current page without animation
         let pageStride = bounds.width + pageSpacing
-        scrollOffset = -CGFloat(currentPage) * pageStride
-        targetScrollOffset = scrollOffset
-        isScrollAnimating = false
+        let expectedOffset = -CGFloat(currentPage) * pageStride
+        // A SwiftUI layout pass during guided navigation must not skip the motion.
+        if let motion = layoutRevealPageMotion, isScrollAnimating,
+           motion.pageStride == pageStride, motion.to == expectedOffset {
+            targetScrollOffset = expectedOffset
+        } else {
+            layoutRevealPageMotion = nil
+            scrollOffset = expectedOffset
+            targetScrollOffset = scrollOffset
+            isScrollAnimating = false
+        }
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)

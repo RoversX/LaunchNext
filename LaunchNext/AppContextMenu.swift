@@ -8,6 +8,8 @@ typealias AppContextMenuInvocation = LaunchNextContextMenuCore.AppContextMenuInv
 extension AppContextMenuTitleKey {
     var localizationKey: LocalizationKey {
         switch self {
+        case .showInLayout:
+            return .contextMenuShowInLayout
         case .showInFinder:
             return .contextMenuShowInFinder
         case .copyAppPath:
@@ -36,6 +38,7 @@ extension AppContextMenuTitleKey {
 
 struct AppContextMenuConfiguration {
     var localize: (AppContextMenuTitleKey) -> String = { $0.localizationKey.rawValue }
+    var canShowInLayout = false
     var showQuarantineRemovalAction = false
     var canUseConfiguredUninstallTool = false
     var allowsBatchSelection = false
@@ -53,6 +56,7 @@ struct AppContextMenuConfiguration {
         isBatchSelectionActive: Bool = false
     ) -> AppContextMenuCapabilities {
         var capabilities = AppContextMenuCapabilities(
+            canShowInLayout: canShowInLayout,
             showQuarantineRemovalAction: showQuarantineRemovalAction,
             canUseConfiguredUninstallTool: canUseConfiguredUninstallTool,
             allowsBatchSelection: allowsBatchSelection,
@@ -91,6 +95,10 @@ private final class LaunchNextContextMenuRouteHandler: AppContextMenuRouteHandli
     init(appStore: AppStore, launchApp: ((AppInfo) -> Void)?) {
         self.appStore = appStore
         self.launchApp = launchApp
+    }
+
+    func showInLayout(_ app: AppInfo) {
+        if !appStore.requestShowInLayout(app) { NSSound.beep() }
     }
 
     func showInFinder(_ app: AppInfo) {

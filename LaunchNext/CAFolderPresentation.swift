@@ -173,6 +173,7 @@ struct CAFolderPresentation: NSViewRepresentable {
     let onLaunchApp: (AppInfo) -> Void
     var backgroundLabelSample: BackgroundLabelContrast? = nil
     var backgroundLabelTints: [BackgroundLabelContrast.Tint] = []
+    var initialRevealAppPath: String? = nil
 
     func makeNSView(context: Context) -> CAFolderPresentationHost {
         let host = CAFolderPresentationHost()
@@ -187,7 +188,8 @@ struct CAFolderPresentation: NSViewRepresentable {
         controller.grid?.setBackgroundLabelContrast(backgroundLabelSample, tints: backgroundLabelTints)
         host.update(appStore: appStore, iconSize: iconSize, onClose: onClose, onLaunchApp: onLaunchApp,
                     labelColorOverride: controller.grid?.backgroundLabelColor,
-                    labelShadow: controller.grid?.backgroundLabelShadow ?? .none)
+                    labelShadow: controller.grid?.backgroundLabelShadow ?? .none,
+                    initialRevealAppPath: initialRevealAppPath)
     }
 
     static func dismantleNSView(_ host: CAFolderPresentationHost, coordinator: ()) {
@@ -311,7 +313,7 @@ final class CAFolderPresentationHost: NSView {
 
     func update(appStore: AppStore, iconSize: CGFloat, onClose: @escaping () -> Void,
                 onLaunchApp: @escaping (AppInfo) -> Void, labelColorOverride: NSColor? = nil,
-                labelShadow: BackgroundLabelContrast.Shadow = .none) {
+                labelShadow: BackgroundLabelContrast.Shadow = .none, initialRevealAppPath: String? = nil) {
         onRequestClose = {
             if !appStore.isFolderNameEditing { onClose() }
         }
@@ -352,6 +354,7 @@ final class CAFolderPresentationHost: NSView {
         })
         let root = FolderView(appStore: appStore, folder: binding, preferredIconSize: iconSize,
                               presentationState: state, labelColorOverride: labelColorOverride, labelShadow: labelShadow,
+                              initialRevealAppPath: initialRevealAppPath,
                               onClose: onClose, onLaunchApp: onLaunchApp)
         if let hosting { hosting.rootView = root }
         else {
@@ -554,6 +557,7 @@ final class CAFolderPresentationHost: NSView {
         state?.allowsInteraction = true
         controller?.backdrop?.setFolderDepth(duration > 0 && source != nil, duration: 0)
         state?.grid?.finishFolderPresentation()
+        state?.grid?.playInitialRevealFeedbackIfReady()
         animationStage?.removeFromSuperview(); animationStage = nil
         controller?.grid?.setPresentedFolderID(folderID)
     }

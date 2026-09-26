@@ -30,6 +30,27 @@ types. Its model callbacks still use fixtures rather than AppStore.
 
 Nothing here runs in CI, and none of it ships in LaunchNext.
 
+## Reveal a search result in the layout
+
+```sh
+LAUNCHNEXT_LAYOUT_REVEAL_CHECK_ONLY=1 python3 scripts/diagnostics/run_folder_presentation_integration.py
+```
+
+Uses the real `LaunchpadView`, AppStore navigation/search methods and CA grids
+with an isolated initializer and synthetic layout. Checks cross-page navigation
+with empty slots, cancellation of a pending search, nested-app selection in
+paged and vertical folders, navigation without magnifying icons, image readiness
+before a timed page-one-to-four transition, preservation of that transition during
+a layout pass, and short press feedback on both the folder and target app.
+Also checks preservation of normal keyboard selection and cancellation
+by new input/search/navigation or window hiding, ordinary reopening without a
+stale reveal, and missing targets. Startup scanning and wallpaper refresh are disabled in this
+temporary target. Icon delivery is delayed by 350 ms in the temporary target,
+including cache hits, to exercise the restored-grid loading race. Requires a
+visible desktop; does not load the user's layout
+or capture the screen. This does not measure animation performance or verify
+the Classic renderer's scrolling visually.
+
 ## Folder opening and closing
 
 ```sh

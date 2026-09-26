@@ -296,6 +296,7 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         let store = appStore
         return AppContextMenuConfiguration(
             localize: { [weak store] key in store?.localized(key.localizationKey) ?? key.localizationKey.rawValue },
+            canShowInLayout: !allowsBatchSelection,
             showQuarantineRemovalAction: appStore.showQuarantineRemovalAction,
             canUseConfiguredUninstallTool: appStore.uninstallToolAppURL != nil,
             allowsBatchSelection: allowsBatchSelection,

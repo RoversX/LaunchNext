@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[2]
+reveal_check = os.environ.get('LAUNCHNEXT_LAYOUT_REVEAL_CHECK_ONLY') == '1'
 with tempfile.TemporaryDirectory(prefix='launchnext-folder-presentation-') as temporary:
     work = Path(temporary)
     for name in ['LaunchNext', 'LaunchNext.xcodeproj']:
@@ -48,7 +49,43 @@ with tempfile.TemporaryDirectory(prefix='launchnext-folder-presentation-') as te
         iconColumnSpacing = 0
         iconRowSpacing = 0
     }'''
+    if reveal_check:
+        fixture = fixture[:-1] + """
+        hasPerformedInitialScan = true
+        isInitialLoading = false
+        $searchText.removeDuplicates().sink { [weak self] value in
+            self?.scheduleSearchQueryUpdate(with: value)
+        }.store(in: &cancellables)
+    }"""
     store.write_text(source[:start] + fixture + source[end:])
+    if reveal_check:
+        view = work / 'LaunchNext/LaunchpadView.swift'
+        text = view.read_text()
+        begin = text.index('    private func refreshBackgroundImage(')
+        finish = text.index('    private func setupWindowShownObserver()', begin)
+        text = text[:begin] + '    private func refreshBackgroundImage(reason: BackgroundImageController.RefreshReason) {}\n\n' + text[finish:]
+        # Do not touch the user's wallpaper cache on test window teardown either.
+        view.write_text(text.replace('            backgroundImageController.clear()', '            // Background controller unused by this probe.'))
+
+        # Delay image delivery even on cache hits, to reproduce a cold restored
+        # grid without replacing the real renderer or image-loading implementation.
+        layout = work / 'LaunchNext/CAGridView+Layout.swift'
+        text = layout.read_text()
+        marker = '    func setIcon(for layer: CALayer, item: LaunchpadItem) {'
+        if text.count(marker) != 1:
+            raise RuntimeError('Icon delivery entry point changed; update this verifier.')
+        text = text.replace(marker, '    func setIconImmediately(for layer: CALayer, item: LaunchpadItem) {', 1)
+        layout.write_text(text + '''
+extension CAGridView {
+    func setIcon(for layer: CALayer, item: LaunchpadItem) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self, weak layer] in
+            guard let self, let layer, layer.superlayer?.superlayer === self.pageContainerLayer else { return }
+            self.setIconImmediately(for: layer, item: item)
+        }
+    }
+}
+''')
+
 
     overlay = work / 'LaunchNext/FolderGlassOverlay.swift'
     overlay.write_text(overlay.read_text() + """
@@ -241,7 +278,27 @@ extension CAFolderGridView {
     }
 }
 ''')
-    shutil.copy2(root / 'scripts/diagnostics/FolderPresentationIntegration.swift', work / 'LaunchNext/')
+    if reveal_check:
+        with grid.open('a') as output:
+            output.write("""
+extension CAFolderGridView {
+    var probeSelectedIndex: Int? { selectedIndex }
+    var probeRevealFeedback: CAKeyframeAnimation? {
+        revealFeedbackLayer?.animation(forKey: LayoutRevealFeedback.animationKey) as? CAKeyframeAnimation
+    }
+    var probeSelectedIconScale: CGFloat {
+        guard let index = selectedIndex, appLayers.indices.contains(index),
+              let icon = appLayers[index].sublayers?.first(where: { $0.name == "icon" }) else { return -1 }
+        return icon.transform.m11
+    }
+    var probeSelectionVisible: Bool {
+        guard let index = selectedIndex, itemFrames.indices.contains(index) else { return false }
+        return bounds.intersects(itemFrames[index])
+    }
+}
+""")
+    entry_name = 'LayoutRevealIntegration.swift' if reveal_check else 'FolderPresentationIntegration.swift'
+    shutil.copy2(root / 'scripts/diagnostics' / entry_name, work / 'LaunchNext/')
     derived = work / 'DerivedData'
     log = Path('/tmp/launchnext-folder-presentation-build.log')
     with log.open('w') as output:

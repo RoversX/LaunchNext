@@ -86,6 +86,19 @@ final class AppContextMenuTests: XCTestCase {
         )
     }
 
+    func testShowInLayoutAppearsOnlyWhenNavigationIsAvailable() {
+        for surface in [AppContextMenuSurface.swiftUIMainGrid, .coreAnimationMainGrid] {
+            let target = AppContextMenuTarget.app(container: .mainGrid)
+            XCTAssertFalse(tokens(for: entries(target: target, surface: surface)).contains(.action(.showInLayout)))
+            let menu = entries(target: target, surface: surface,
+                capabilities: AppContextMenuCapabilities(canShowInLayout: true))
+            XCTAssertEqual(menu.first?.item?.action, .showInLayout)
+            XCTAssertEqual(menu.first?.item?.title, .localized(.showInLayout))
+        }
+        XCTAssertNil(AppContextMenuRouter.route(action: .showInLayout,
+            target: AppContextMenuRuntimeTarget<String, String>.folder("Folder")))
+    }
+
     func testCAFolderGridShowsPinOrUnpinForCurrentState() {
         let capabilities = AppContextMenuCapabilities(
             showQuarantineRemovalAction: true,
@@ -264,6 +277,7 @@ final class AppContextMenuTests: XCTestCase {
         let appTarget = Target.app("Example", folderID: "folder-id")
         let folderTarget = Target.folder("Folder")
         let cases: [(AppContextMenuAction, Target, Route)] = [
+            (.showInLayout, appTarget, .showInLayout("Example")),
             (.showInFinder, appTarget, .showInFinder("Example")),
             (.copyPath, appTarget, .copyPath("Example")),
             (.removeQuarantine, appTarget, .removeQuarantine("Example")),
@@ -333,6 +347,10 @@ final class AppContextMenuTests: XCTestCase {
 
     private final class RouteHandlerSpy: AppContextMenuRouteHandling {
         var routes: [AppContextMenuRoute<String, String>] = []
+
+        func showInLayout(_ app: String) {
+            routes.append(.showInLayout(app))
+        }
 
         func showInFinder(_ app: String) {
             routes.append(.showInFinder(app))

@@ -15,6 +15,7 @@ struct CAFolderGridViewRepresentable: NSViewRepresentable {
     var presentationState: CAFolderPresentationState? = nil
     var labelColorOverride: NSColor? = nil
     var labelShadow: BackgroundLabelContrast.Shadow = .none
+    var initialRevealAppPath: String? = nil
 
     func makeNSView(context: Context) -> CAFolderGridView {
         let view = CAFolderGridView(frame: .zero)
@@ -35,6 +36,7 @@ struct CAFolderGridViewRepresentable: NSViewRepresentable {
     }
 
     private func configure(_ view: CAFolderGridView) {
+        view.initialRevealAppPath = initialRevealAppPath
         view.labelColorOverride = labelColorOverride
         view.labelShadow = labelShadow
         view.presentationState = presentationState

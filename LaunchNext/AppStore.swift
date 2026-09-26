@@ -1134,6 +1134,12 @@ final class AppStore: ObservableObject {
             }
         }
     }
+    struct LayoutRevealRequest: Equatable {
+        let id = UUID()
+        let appPath: String
+    }
+    @Published var layoutRevealRequest: LayoutRevealRequest?
+
     @Published var searchText: String = ""
     @Published private(set) var searchQuery: String = ""
     @Published var fuzzySearchEnabled: Bool = {
@@ -3118,6 +3124,34 @@ final class AppStore: ObservableObject {
 
     private static func clampedSearchDebounceMilliseconds(_ value: Double) -> Double {
         min(max(value, searchDebounceMillisecondsRange.lowerBound), searchDebounceMillisecondsRange.upperBound)
+    }
+
+    /// Resolve against the saved layout, not the flattened search results.
+    func layoutLocation(ofAppAtPath path: String) -> (index: Int, folder: FolderInfo?)? {
+        for (index, item) in items.enumerated() {
+            switch item {
+            case .app(let app) where app.url.standardizedFileURL.path == path:
+                return (index, nil)
+            case .folder(let folder) where folder.apps.contains(where: { $0.url.standardizedFileURL.path == path }):
+                return (index, folder)
+            default:
+                continue
+            }
+        }
+        return nil
+    }
+
+    @discardableResult
+    func requestShowInLayout(_ app: AppInfo) -> Bool {
+        let path = app.url.standardizedFileURL.path
+        guard layoutLocation(ofAppAtPath: path) != nil else { return false }
+        layoutRevealRequest = LayoutRevealRequest(appPath: path)
+        searchText = ""
+        // Do not wait for search debounce or allow an older query to arrive later.
+        searchQueryWorkItem?.cancel()
+        searchQueryWorkItem = nil
+        searchQuery = ""
+        return true
     }
 
     private func scheduleSearchQueryUpdate(with value: String) {

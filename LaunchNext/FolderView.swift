@@ -10,6 +10,7 @@ struct FolderView: View {
     var presentationState: CAFolderPresentationState? = nil
     var labelColorOverride: NSColor? = nil
     var labelShadow: BackgroundLabelContrast.Shadow = .none
+    var initialRevealAppPath: String? = nil
     @State private var folderName: String = ""
     @State private var isEditingName = false
     @State private var forceRefreshTrigger: UUID = UUID()
@@ -80,6 +81,11 @@ struct FolderView: View {
                 setSelectionToStart()
                 appStore.openFolderActivatedByKeyboard = false
             } else {
+                isKeyboardNavigationActive = false
+            }
+            if let path = initialRevealAppPath,
+               let index = folder.apps.firstIndex(where: { $0.url.standardizedFileURL.path == path }) {
+                selectedIndex = index
                 isKeyboardNavigationActive = false
             }
             consumeRenameRequestIfNeeded()
@@ -296,12 +302,14 @@ struct FolderView: View {
                 onLaunchApp: onLaunchApp,
                 presentationState: presentationState,
                 labelColorOverride: labelColorOverride,
-                labelShadow: labelShadow
+                labelShadow: labelShadow,
+                initialRevealAppPath: initialRevealAppPath
             )
             .id("ca_folder_grid_\(folder.id)_\(appStore.folderLayoutMode.rawValue)")
             .onAppear { columnsCount = desiredColumns }
         } else {
             ZStack(alignment: .topLeading) {
+            ScrollViewReader { reader in
             ScrollView {
                 ScrollOffsetReader { offsetY in
                     scrollOffsetY = offsetY
@@ -319,6 +327,7 @@ struct FolderView: View {
                             labelWidth: labelWidth,
                             isSelected: isKeyboardNavigationActive && selectedIndex == idx
                         )
+                        .id(app.url.standardizedFileURL.path)
                     }
                 }
                 .animation(LNAnimations.gridUpdate, value: pendingDropIndex)
@@ -329,6 +338,10 @@ struct FolderView: View {
             .disabled(isEditingName) // 编辑状态下禁用滚动
             .onAppear { columnsCount = desiredColumns }
             .onChange(of: geo.size) { _, _ in columnsCount = desiredColumns }
+            .onAppear {
+                if let path = initialRevealAppPath { reader.scrollTo(path, anchor: .center) }
+            }
+            }
 
             // 拖拽预览层
             if let draggingApp {

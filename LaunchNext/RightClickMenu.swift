@@ -91,6 +91,7 @@ extension View {
     func launchNextHideAppContextMenu(app: AppInfo?, folder: FolderInfo? = nil, appStore: AppStore) -> some View {
         let configuration = AppContextMenuConfiguration(
             localize: { appStore.localized($0.localizationKey) },
+            canShowInLayout: !appStore.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
             showQuarantineRemovalAction: appStore.showQuarantineRemovalAction,
             canUseConfiguredUninstallTool: appStore.uninstallToolAppURL != nil
         )

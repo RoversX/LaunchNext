@@ -15,6 +15,7 @@ public enum AppContextMenuTarget: Equatable {
 }
 
 public enum AppContextMenuAction: Hashable {
+    case showInLayout
     case showInFinder
     case copyPath
     case removeQuarantine
@@ -30,6 +31,7 @@ public enum AppContextMenuAction: Hashable {
 }
 
 public enum AppContextMenuTitleKey: Equatable {
+    case showInLayout
     case showInFinder
     case copyAppPath
     case removeQuarantineInTerminal
@@ -100,6 +102,7 @@ public struct AppContextMenuQuickLaunchApp: Equatable {
 }
 
 public struct AppContextMenuCapabilities: Equatable {
+    public var canShowInLayout: Bool
     public var showQuarantineRemovalAction: Bool
     public var canUseConfiguredUninstallTool: Bool
     public var allowsBatchSelection: Bool
@@ -109,6 +112,7 @@ public struct AppContextMenuCapabilities: Equatable {
     public var quickLaunchApps: [AppContextMenuQuickLaunchApp]
 
     public init(
+        canShowInLayout: Bool = false,
         showQuarantineRemovalAction: Bool = false,
         canUseConfiguredUninstallTool: Bool = false,
         allowsBatchSelection: Bool = false,
@@ -117,6 +121,7 @@ public struct AppContextMenuCapabilities: Equatable {
         folderQuickLaunchPinningEnabled: Bool = false,
         quickLaunchApps: [AppContextMenuQuickLaunchApp] = []
     ) {
+        self.canShowInLayout = canShowInLayout
         self.showQuarantineRemovalAction = showQuarantineRemovalAction
         self.canUseConfiguredUninstallTool = canUseConfiguredUninstallTool
         self.allowsBatchSelection = allowsBatchSelection
@@ -152,6 +157,10 @@ public enum AppContextMenuBuilder {
             item(.showInFinder, .showInFinder, symbol: "folder"),
             item(.copyPath, .copyAppPath, symbol: "doc.on.doc")
         ]
+
+        if capabilities.canShowInLayout {
+            entries.insert(item(.showInLayout, .showInLayout, symbol: "square.grid.3x3"), at: 0)
+        }
 
         if capabilities.showQuarantineRemovalAction {
             entries.append(item(.removeQuarantine, .removeQuarantineInTerminal, symbol: "terminal"))
@@ -276,6 +285,7 @@ public enum AppContextMenuRuntimeTarget<App, Folder> {
 extension AppContextMenuRuntimeTarget: Equatable where App: Equatable, Folder: Equatable {}
 
 public enum AppContextMenuRoute<App, Folder> {
+    case showInLayout(App)
     case showInFinder(App)
     case copyPath(App)
     case removeQuarantine(App)
@@ -297,6 +307,7 @@ public protocol AppContextMenuRouteHandling: AnyObject {
     associatedtype App
     associatedtype Folder
 
+    func showInLayout(_ app: App)
     func showInFinder(_ app: App)
     func copyPath(_ app: App)
     func removeQuarantine(_ app: App)
@@ -317,6 +328,8 @@ public enum AppContextMenuRouter {
         target: AppContextMenuRuntimeTarget<App, Folder>
     ) -> AppContextMenuRoute<App, Folder>? {
         switch (action, target) {
+        case (.showInLayout, .app(let app, _)):
+            return .showInLayout(app)
         case (.showInFinder, .app(let app, _)):
             return .showInFinder(app)
         case (.copyPath, .app(let app, _)):
@@ -366,6 +379,8 @@ public enum AppContextMenuRouter {
         to handler: Handler
     ) {
         switch route {
+        case .showInLayout(let app):
+            handler.showInLayout(app)
         case .showInFinder(let app):
             handler.showInFinder(app)
         case .copyPath(let app):

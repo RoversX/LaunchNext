@@ -120,7 +120,20 @@ final class CAFolderGridView: NSView {
         let metrics = makeMetrics()
         return max(1, (apps.count + metrics.itemsPerPage - 1) / metrics.itemsPerPage)
     }
+    var initialRevealAppPath: String? {
+        didSet {
+            guard initialRevealAppPath != oldValue else { return }
+            pendingRevealAppPath = initialRevealAppPath
+            pendingRevealFeedbackPath = initialRevealAppPath
+            needsLayout = true
+        }
+    }
+    private var pendingRevealAppPath: String?
+    private var pendingRevealFeedbackPath: String?
+    private weak var revealFeedbackLayer: CALayer?
+    private var revealLayoutSize: CGSize = .zero
     private var selectedIndex: Int?
+    private var highlightsSelection = true
     private var hoveredIndex: Int?
     private var pressedIndex: Int?
     private var dragStartPoint: CGPoint = .zero
@@ -202,13 +215,47 @@ final class CAFolderGridView: NSView {
 
     override func layout() {
         super.layout()
+        let revealGeometryChanged = revealLayoutSize != bounds.size
+        revealLayoutSize = bounds.size
         if layoutMode == .paged, !isPageScrollDragging, !isPageScrollAnimating, !isDraggingItem {
             let metrics = makeMetrics()
             horizontalOffset = pageOffset(for: currentPage, metrics: metrics)
             targetHorizontalOffset = horizontalOffset
         }
         updateLayout(animated: false)
+        if window != nil, bounds.width > 0, bounds.height > 0, isPresentationLayoutReady,
+           let path = pendingRevealAppPath,
+           let index = apps.firstIndex(where: { $0.url.standardizedFileURL.path == path }),
+           appLayers.indices.contains(index), itemFrames.indices.contains(index),
+           itemFrames[index].width > 0, itemFrames[index].height > 0 {
+            pendingRevealAppPath = nil
+            updateSelection(index, animated: false, highlight: false)
+        } else if initialRevealAppPath != nil, revealGeometryChanged {
+            // SwiftUI can resize the native grid after its first layout pass.
+            // Keep the revealed selection visible through that initial resize.
+            ensureSelectionVisible(animated: false)
+        }
+        playInitialRevealFeedbackIfReady()
         presentationState?.onLayout?()
+    }
+
+    func playInitialRevealFeedbackIfReady() {
+        guard pendingRevealAppPath == nil, let path = pendingRevealFeedbackPath,
+              window?.isVisible == true, presentationState?.allowsInteraction != false,
+              let index = apps.firstIndex(where: { $0.url.standardizedFileURL.path == path }),
+              appLayers.indices.contains(index), itemFrames.indices.contains(index),
+              itemFrames[index].intersects(bounds) else { return }
+        pendingRevealFeedbackPath = nil
+        let container = appLayers[index]
+        if LayoutRevealFeedback.animate(on: container, pressScale: activePressScale, enabled: animationsEnabled) {
+            revealFeedbackLayer = container
+        }
+    }
+
+    private func cancelRevealFeedback() {
+        pendingRevealFeedbackPath = nil
+        revealFeedbackLayer?.removeAnimation(forKey: LayoutRevealFeedback.animationKey)
+        revealFeedbackLayer = nil
     }
 
     override func updateTrackingAreas() {
@@ -228,7 +275,9 @@ final class CAFolderGridView: NSView {
         if window != nil {
             refreshBackingScaleIfNeeded()
             setupDisplayLinkIfNeeded()
+            if pendingRevealAppPath != nil { needsLayout = true }
         } else {
+            cancelRevealFeedback()
             finishDropLanding()
             displayLink?.invalidate()
             displayLink = nil
@@ -261,14 +310,16 @@ final class CAFolderGridView: NSView {
         updatePageScrollAnimation()
     }
 
-    func updateSelection(_ index: Int?, animated: Bool = true) {
+    func updateSelection(_ index: Int?, animated: Bool = true, highlight: Bool = true) {
+        if highlight { cancelRevealFeedback() }
         let clamped = index.flatMap { apps.indices.contains($0) ? $0 : nil }
-        guard selectedIndex != clamped else { return }
+        guard selectedIndex != clamped || highlightsSelection != highlight else { return }
         let old = selectedIndex
         selectedIndex = clamped
+        highlightsSelection = highlight
         if let old { applyScale(at: old, animated: animated) }
         if let clamped { applyScale(at: clamped, animated: animated) }
-        ensureSelectionVisible()
+        ensureSelectionVisible(animated: animated)
     }
 
     private struct Metrics {
@@ -663,6 +714,7 @@ final class CAFolderGridView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        cancelRevealFeedback()
         finishDropLanding()
         window?.makeFirstResponder(self)
         let point = convert(event.locationInWindow, from: nil)
@@ -707,6 +759,7 @@ final class CAFolderGridView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        cancelRevealFeedback()
         finishDropLanding()
         guard presentationState?.allowsInteraction != false else { return }
         guard !isContextMenuTracking else {
@@ -721,6 +774,7 @@ final class CAFolderGridView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
+        cancelRevealFeedback()
         finishDropLanding()
         if event.keyCode == 53 {
             onClose?()
@@ -1472,13 +1526,13 @@ final class CAFolderGridView: NSView {
         CATransaction.commit()
     }
 
-    private func ensureSelectionVisible() {
+    private func ensureSelectionVisible(animated: Bool = true) {
         guard let selectedIndex else { return }
         if layoutMode == .paged {
             let metrics = makeMetrics()
             let page = selectedIndex / metrics.itemsPerPage
             if page != currentPage {
-                navigateToPage(page, animated: true)
+                navigateToPage(page, animated: animated)
             }
             return
         }
@@ -1491,7 +1545,7 @@ final class CAFolderGridView: NSView {
             verticalOffset += frame.maxY - (bounds.height - contentInsets.top)
         }
         verticalOffset = clampVerticalOffset(verticalOffset, metrics: metrics)
-        updateLayout(animated: true)
+        updateLayout(animated: animated)
     }
 
     private func updateHoverIndex(_ index: Int?) {
@@ -1506,7 +1560,7 @@ final class CAFolderGridView: NSView {
         guard appLayers.indices.contains(index) else { return }
         let layer = appLayers[index]
         var iconScale: CGFloat = 1
-        if selectedIndex == index {
+        if highlightsSelection && selectedIndex == index {
             iconScale = 1.16
         } else if hoverMagnificationEnabled && hoveredIndex == index {
             iconScale = hoverMagnificationScale

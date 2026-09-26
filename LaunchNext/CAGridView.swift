@@ -82,6 +82,7 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     var targetScrollOffset: CGFloat = 0
     var scrollVelocity: CGFloat = 0
     var isScrollAnimating = false
+    var layoutRevealPageMotion: LayoutRevealFeedback.PageMotion?
     var scrollSensitivity: Double = AppStore.defaultScrollSensitivity
     var reverseWheelPagingDirection: Bool = false
     var trackpadVerticalDirection: AppStore.TrackpadVerticalDirection = .natural
@@ -517,6 +518,17 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
             scrollOffset = targetScrollOffset
             scrollVelocity = 0
             isScrollAnimating = false
+            layoutRevealPageMotion = nil
+        } else if let motion = layoutRevealPageMotion {
+            let progress = min(1, max(0, (CACurrentMediaTime() - motion.startedAt) / motion.duration))
+            let fraction = CGFloat(progress * progress * (3 - 2 * progress))
+            scrollOffset = motion.from + (motion.to - motion.from) * fraction
+            if progress >= 1 {
+                scrollOffset = targetScrollOffset
+                scrollVelocity = 0
+                isScrollAnimating = false
+                layoutRevealPageMotion = nil
+            }
         } else {
             let diff = targetScrollOffset - scrollOffset
             let snapThreshold: CGFloat = 0.5
@@ -622,7 +634,8 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
         currentPage = max(0, page)
     }
 
-    func navigateToPage(_ page: Int, animated: Bool = true) {
+    func navigateToPage(_ page: Int, animated: Bool = true, revealDuration: TimeInterval? = nil) {
+        layoutRevealPageMotion = nil
         let newPage = max(0, min(pageCount - 1, page))
         let pageChanged = newPage != currentPage
         if pageChanged, isDraggingItem, !isBatchDragging {
@@ -648,6 +661,10 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
         
         if needsAnimation && animationsEnabled {
             isScrollAnimating = true
+            if let duration = revealDuration, duration.isFinite, duration > 0 {
+                layoutRevealPageMotion = LayoutRevealFeedback.PageMotion(
+                    from: scrollOffset, to: targetScrollOffset, pageStride: pageStride, duration: duration)
+            }
         } else {
             // 立即跳转
             isScrollAnimating = false
