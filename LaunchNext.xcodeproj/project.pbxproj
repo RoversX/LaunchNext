@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		A1E2B5C02F4A8A1B00F12345 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = A1E2B5CB2F4A8A1B00F12345 /* Localizable.strings */; };
 		B10000222F70000100ABCDEF /* GridReorderPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000212F70000100ABCDEF /* GridReorderPlan.swift */; };
+		B10000622F70000100ABCDEF /* AppSortOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000612F70000100ABCDEF /* AppSortOrder.swift */; };
 		B10000242F70000100ABCDEF /* CompactWindowLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000232F70000100ABCDEF /* CompactWindowLayout.swift */; };
 		B10000322F70000100ABCDEF /* FolderIconBitmapCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000312F70000100ABCDEF /* FolderIconBitmapCache.swift */; };
 		B10000422F70000100ABCDEF /* FolderPresentationMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000412F70000100ABCDEF /* FolderPresentationMotion.swift */; };
@@ -69,6 +70,7 @@
 		A1E2B5CD2F4A8A1B00F12345 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		B10000012F70000100ABCDEF /* LaunchNextTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LaunchNextTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B10000212F70000100ABCDEF /* GridReorderPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GridReorderPlan.swift; path = LaunchNext/GridReorderPlan.swift; sourceTree = SOURCE_ROOT; };
+		B10000612F70000100ABCDEF /* AppSortOrder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppSortOrder.swift; path = LaunchNext/AppSortOrder.swift; sourceTree = SOURCE_ROOT; };
 		B10000232F70000100ABCDEF /* CompactWindowLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CompactWindowLayout.swift; path = LaunchNext/CompactWindowLayout.swift; sourceTree = SOURCE_ROOT; };
 		B10000312F70000100ABCDEF /* FolderIconBitmapCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FolderIconBitmapCache.swift; path = LaunchNext/FolderIconBitmapCache.swift; sourceTree = SOURCE_ROOT; };
 		B10000412F70000100ABCDEF /* FolderPresentationMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FolderPresentationMotion.swift; path = LaunchNext/FolderPresentationMotion.swift; sourceTree = SOURCE_ROOT; };
@@ -177,6 +179,7 @@
 				B10000412F70000100ABCDEF /* FolderPresentationMotion.swift */,
 				B10000512F70000100ABCDEF /* BackgroundLabelContrast.swift */,
 				B10000232F70000100ABCDEF /* CompactWindowLayout.swift */,
+				B10000612F70000100ABCDEF /* AppSortOrder.swift */,
 			);
 			name = "Recovered References";
 			sourceTree = "<group>";
@@ -402,6 +405,7 @@
 				B10000422F70000100ABCDEF /* FolderPresentationMotion.swift in Sources */,
 				B10000522F70000100ABCDEF /* BackgroundLabelContrast.swift in Sources */,
 				B10000242F70000100ABCDEF /* CompactWindowLayout.swift in Sources */,
+				B10000622F70000100ABCDEF /* AppSortOrder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
