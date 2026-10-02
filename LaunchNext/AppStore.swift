@@ -1866,7 +1866,11 @@ final class AppStore: ObservableObject {
 
     @Published var compactWindowMaxWidth = 0 {
         didSet {
-            compactWindowMaxWidth = CompactWindowLayout.normalizedMaximumWidth(compactWindowMaxWidth)
+            let normalized = CompactWindowLayout.normalizedMaximumWidth(compactWindowMaxWidth)
+            if compactWindowMaxWidth != normalized {
+                compactWindowMaxWidth = normalized
+                return
+            }
             guard compactWindowMaxWidth != oldValue else { return }
             UserDefaults.standard.set(compactWindowMaxWidth, forKey: Self.compactWindowMaxWidthKey)
             refreshCompactWindowSize()
@@ -1875,7 +1879,11 @@ final class AppStore: ObservableObject {
 
     @Published var compactWindowMaxHeight = 0 {
         didSet {
-            compactWindowMaxHeight = CompactWindowLayout.normalizedMaximumHeight(compactWindowMaxHeight)
+            let normalized = CompactWindowLayout.normalizedMaximumHeight(compactWindowMaxHeight)
+            if compactWindowMaxHeight != normalized {
+                compactWindowMaxHeight = normalized
+                return
+            }
             guard compactWindowMaxHeight != oldValue else { return }
             UserDefaults.standard.set(compactWindowMaxHeight, forKey: Self.compactWindowMaxHeightKey)
             refreshCompactWindowSize()
