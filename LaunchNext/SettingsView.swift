@@ -1171,7 +1171,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
         panel.prompt = appStore.localized(.chooseButton)
-        if panel.runModal() == .OK, let url = panel.url {
+        if AppDelegate.withModalDialog({ panel.runModal() }) == .OK, let url = panel.url {
             backupRootPath = url.path
             UserDefaults.standard.set(backupRootPath, forKey: "backupRootDirectory")
             backupRefreshToken = UUID()
@@ -1228,7 +1228,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         if let window = NSApp.keyWindow ?? NSApp.mainWindow {
             alert.beginSheetModal(for: window, completionHandler: handler)
         } else {
-            handler(alert.runModal())
+            handler(AppDelegate.withModalDialog({ alert.runModal() }))
         }
     }
 
@@ -1256,7 +1256,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         if let window = NSApp.keyWindow ?? NSApp.mainWindow {
             alert.beginSheetModal(for: window, completionHandler: handler)
         } else {
-            handler(alert.runModal())
+            handler(AppDelegate.withModalDialog({ alert.runModal() }))
         }
     }
 
@@ -2208,7 +2208,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         panel.prompt = appStore.localized(.hiddenAppsAddButton)
         panel.title = appStore.localized(.hiddenAppsAddButton)
 
-        if panel.runModal() == .OK {
+        if AppDelegate.withModalDialog({ panel.runModal() }) == .OK {
             if !appStore.hideApps(at: panel.urls) {
                 NSSound.beep()
             }
@@ -2224,7 +2224,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         panel.title = appStore.localized(.uninstallToolPanelTitle)
         panel.prompt = appStore.localized(.uninstallToolChooseButton)
 
-        if panel.runModal() == .OK, let url = panel.url {
+        if AppDelegate.withModalDialog({ panel.runModal() }) == .OK, let url = panel.url {
             if !appStore.setUninstallToolApplication(url: url) {
                 NSSound.beep()
             }
@@ -2241,7 +2241,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         panel.message = appStore.localized(.customTitlePickerMessage)
         panel.prompt = appStore.localized(.chooseButton)
 
-        if panel.runModal() == .OK, let url = panel.url, let info = appStore.ensureCustomTitleEntry(for: url) {
+        if AppDelegate.withModalDialog({ panel.runModal() }) == .OK, let url = panel.url, let info = appStore.ensureCustomTitleEntry(for: url) {
             let path = info.url.path
             editingEntries.insert(path)
             editingDrafts[path] = appStore.customTitles[path] ?? info.name
@@ -2261,7 +2261,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         panel.prompt = appStore.localized(.customIconChoose)
         panel.title = appStore.localized(.customIconTitle)
 
-        if panel.runModal() == .OK, let url = panel.url {
+        if AppDelegate.withModalDialog({ panel.runModal() }) == .OK, let url = panel.url {
             if !appStore.setCustomAppIcon(from: url) {
                 iconImportError = appStore.localized(.customIconError)
             }
@@ -2275,7 +2275,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         panel.allowsMultipleSelection = true
         panel.prompt = appStore.localized(.chooseButton)
 
-        if panel.runModal() == .OK {
+        if AppDelegate.withModalDialog({ panel.runModal() }) == .OK {
             var addedAny = false
             for url in panel.urls {
                 if appStore.addCustomAppSource(path: url.path) {
@@ -5175,7 +5175,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         panel.allowedContentTypes = [.image]
         panel.prompt = appStore.localized(.chooseBackgroundImage)
 
-        guard panel.runModal() == .OK, let url = panel.url else { return false }
+        guard AppDelegate.withModalDialog({ panel.runModal() }) == .OK, let url = panel.url else { return false }
         appStore.customBackgroundImagePath = url.standardizedFileURL.path
         appStore.backgroundImageSource = .customImage
         backgroundImageSourceSelection = .customImage
@@ -5670,7 +5670,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             panel.allowsMultipleSelection = false
             panel.prompt = appStore.localized(.chooseButton)
             panel.message = appStore.localized(.exportPanelMessage)
-            if panel.runModal() == .OK, let destParent = panel.url {
+            if AppDelegate.withModalDialog({ panel.runModal() }) == .OK, let destParent = panel.url {
                 try exportDataFolder(to: destParent)
             }
         } catch {
@@ -5723,7 +5723,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         panel.allowsMultipleSelection = false
         panel.prompt = appStore.localized(.importPrompt)
         panel.message = appStore.localized(.importPanelMessage)
-        if panel.runModal() == .OK, let srcDir = panel.url {
+        if AppDelegate.withModalDialog({ panel.runModal() }) == .OK, let srcDir = panel.url {
             importDataFolder(from: srcDir)
         }
     }
@@ -5861,7 +5861,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     }
                 }
             } else {
-                let response = alert.runModal()
+                let response = AppDelegate.withModalDialog({ alert.runModal() })
                 guard response == .alertFirstButtonReturn else { return }
                 let importData = dataCheckbox.state == .on
                 let keys = selectedPrefKeys()
@@ -6084,7 +6084,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         if let window = NSApp.keyWindow ?? NSApp.mainWindow {
             alert.beginSheetModal(for: window)
         } else {
-            alert.runModal()
+            AppDelegate.withModalDialog({ alert.runModal() })
         }
     }
 
@@ -6122,7 +6122,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                     alert.alertStyle = .warning
                 }
                 alert.addButton(withTitle: appStore.localized(.okButton))
-                alert.runModal()
+                AppDelegate.withModalDialog({ alert.runModal() })
             }
         }
     }
@@ -6141,7 +6141,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             alert.alertStyle = .warning
         }
         alert.addButton(withTitle: appStore.localized(.okButton))
-        alert.runModal()
+        AppDelegate.withModalDialog({ alert.runModal() })
     }
 
     private func importLegacyArchive() {
@@ -6154,7 +6154,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         panel.prompt = appStore.localized(.importPrompt)
         panel.message = appStore.localized(.legacyArchivePanelMessage)
 
-        if panel.runModal() == .OK, let url = panel.url {
+        if AppDelegate.withModalDialog({ panel.runModal() }) == .OK, let url = panel.url {
             Task {
                 let result = await appStore.importFromLegacyLaunchpadArchive(url: url)
                 DispatchQueue.main.async {
@@ -6169,7 +6169,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                         alert.alertStyle = .warning
                     }
                     alert.addButton(withTitle: appStore.localized(.okButton))
-                    alert.runModal()
+                    AppDelegate.withModalDialog({ alert.runModal() })
                 }
             }
         }

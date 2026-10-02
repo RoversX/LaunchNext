@@ -50,6 +50,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     private var isHeadlessCLIRuntime = false
     private var isHeadlessTUIRuntime = false
     private var isPerformingExternalSystemDrag = false
+    private var activeModalDialogCount = 0
     private var cliEndpointSocketPath: String?
     private var cliEndpointMonitorTimer: DispatchSourceTimer?
     private var hotCornerMonitor: HotCornerMonitor?
@@ -1478,12 +1479,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     private func updateWindowLevelForSystemUI() {
         guard let window else { return }
         let shouldCoverMenuBar = appStore.hideMenuBar && appStore.isFullscreenMode && windowIsVisible
+            && activeModalDialogCount == 0
         let targetLevel: NSWindow.Level = shouldCoverMenuBar
             ? NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 1)
             : .floating
         if window.level != targetLevel {
             window.level = targetLevel
         }
+    }
+
+    /// AppKit resets standalone modal panels to its modal level. Keep the
+    /// launcher and its settings sheet below them without changing system UI
+    /// visibility, then restore the level required by the current preferences.
+    @discardableResult
+    static func withModalDialog<Result>(_ present: () -> Result) -> Result {
+        guard let delegate = shared else { return present() }
+        delegate.activeModalDialogCount += 1
+        delegate.updateWindowLevelForSystemUI()
+        defer {
+            delegate.activeModalDialogCount -= 1
+            delegate.updateWindowLevelForSystemUI()
+        }
+        return present()
     }
 
     private func wasLaunchedAsLoginItem() -> Bool {

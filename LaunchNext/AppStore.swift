@@ -6042,7 +6042,7 @@ final class AppStore: ObservableObject {
             savePanel.directoryURL = desktopURL
         }
         
-        let response = savePanel.runModal()
+        let response = AppDelegate.withModalDialog({ savePanel.runModal() })
         if response == .OK, let url = savePanel.url {
             do {
                 try content.write(to: url, atomically: true, encoding: .utf8)
