@@ -32,6 +32,24 @@ private class PageFlipManager: ObservableObject {
     }
 }
 
+// Outlives the tile that started a Legacy drag, which can disappear during reordering.
+private final class LegacyItemDragSession {
+    weak var window: NSWindow?
+    var eventMonitor: Any?
+    var lastGestureUpdate = ProcessInfo.processInfo.systemUptime
+    var usesMouseMonitor = false
+    var isEnding = false
+
+    init(window: NSWindow?) {
+        self.window = window
+    }
+
+    func stopMonitoring() {
+        if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
+        eventMonitor = nil
+    }
+}
+
 private final class FPSMonitor {
     private var displayLink: CVDisplayLink?
     private var lastTimestamp: Double = 0
@@ -122,6 +140,8 @@ struct LaunchpadView: View {
     @State private var windowObserver: NSObjectProtocol?
     @State private var windowHiddenObserver: NSObjectProtocol?
     @State private var draggingItem: LaunchpadItem?
+    @State private var legacyItemDragSession: LegacyItemDragSession?
+    @State private var displayedGridRefreshID: UUID
     @State private var dragPreviewPosition: CGPoint = .zero
     @State private var dragPreviewScale: CGFloat = 1.2
     @State private var pendingDropIndex: Int? = nil
@@ -179,6 +199,7 @@ struct LaunchpadView: View {
     init(appStore: AppStore) {
         _appStore = ObservedObject(wrappedValue: appStore)
         _searchEngine = ObservedObject(wrappedValue: appStore.searchEngine)
+        _displayedGridRefreshID = State(initialValue: appStore.gridRefreshTrigger)
     }
 
     @StateObject private var folderPresentation = CAFolderPresentationController()
@@ -289,13 +310,26 @@ struct LaunchpadView: View {
              await revealAppInLayout(request)
          }
          .onChange(of: appStore.searchText) { _, text in
-             if !text.isEmpty { appStore.layoutRevealRequest = nil }
+             if !text.isEmpty {
+                 appStore.layoutRevealRequest = nil
+                 cancelLegacyItemDrag()
+             }
          }
          .onChange(of: appStore.isSetting) { _, visible in
-             if visible { appStore.layoutRevealRequest = nil }
+             if visible {
+                 appStore.layoutRevealRequest = nil
+                 cancelLegacyItemDrag()
+             }
          }
          .onChange(of: appStore.openFolder?.id) { _, id in
              if id == nil { folderAppToReveal = nil }
+             else { cancelLegacyItemDrag() }
+         }
+         .onChange(of: appStore.useCAGridRenderer) { _, _ in
+             cancelLegacyItemDrag()
+         }
+         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+             cancelLegacyItemDrag()
          }
     }
 
@@ -411,6 +445,10 @@ struct LaunchpadView: View {
               // 监听全局鼠标抬起，确保拖拽状态被正确清理（窗口外释放时）
                if let existing = globalMouseUpMonitor { NSEvent.removeMonitor(existing) }
                globalMouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { _ in
+                   if legacyItemDragSession != nil {
+                       endLegacyItemDrag()
+                       return
+                   }
                    if handoffEventMonitor != nil || draggingItem != nil {
                        finalizeHandoffDrag()
                    }
@@ -433,6 +471,7 @@ struct LaunchpadView: View {
               }
            }
          .onDisappear {
+             cancelLegacyItemDrag()
              [keyMonitor, handoffEventMonitor].forEach { monitor in
                  if let monitor = monitor { NSEvent.removeMonitor(monitor) }
              }
@@ -486,6 +525,7 @@ struct LaunchpadView: View {
         }
         .onChange(of: appStore.isLayoutLocked) { _, locked in
             guard locked else { return }
+            cancelLegacyItemDrag()
             if let monitor = handoffEventMonitor {
                 NSEvent.removeMonitor(monitor)
                 handoffEventMonitor = nil
@@ -1090,7 +1130,7 @@ struct LaunchpadView: View {
                                 }
                             }
                             .animation(LNAnimations.gridUpdate, value: pendingDropIndex)
-                            .id("grid_\(index)_\(appStore.gridRefreshTrigger.uuidString)")
+                            .id("grid_\(index)_\(displayedGridRefreshID.uuidString)")
                             // 避免非必要的全局刷新动画，降低拖拽重绘
                             .frame(maxHeight: .infinity, alignment: .top)
                         }
@@ -1131,7 +1171,12 @@ struct LaunchpadView: View {
                                           appHeight: appHeight,
                                           iconSize: iconSize)
             }
-            .onAppear { }
+            .onAppear {
+                if draggingItem == nil { displayedGridRefreshID = appStore.gridRefreshTrigger }
+            }
+            .onChange(of: draggingItem?.id) { _, id in
+                if id == nil { displayedGridRefreshID = appStore.gridRefreshTrigger }
+            }
             .onChange(of: appStore.handoffDraggingApp) {
                 if appStore.openFolder == nil, appStore.handoffDraggingApp != nil {
                     startHandoffDragIfNeeded(geo: geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
@@ -1155,6 +1200,7 @@ struct LaunchpadView: View {
                 }
             }
             .onChange(of: appStore.gridRefreshTrigger) { _, _ in
+                if draggingItem == nil { displayedGridRefreshID = appStore.gridRefreshTrigger }
                 DispatchQueue.main.async {
                     captureGridGeometry(geo, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
                 }
@@ -2329,6 +2375,7 @@ extension LaunchpadView {
             windowHiddenObserver = nil
         }
         windowHiddenObserver = NotificationCenter.default.addObserver(forName: .launchpadWindowHidden, object: nil, queue: .main) { _ in
+            cancelLegacyItemDrag()
             isWindowVisible = false
             appStore.layoutRevealRequest = nil
             MainActor.assumeIsolated {
@@ -2679,22 +2726,9 @@ extension LaunchpadView {
                             .onChanged { value in
                                 handleDragChange(value, item: item, in: containerSize, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
                             }
-                            .onEnded { _ in
-                                guard draggingItem != nil else { return }
-                                
-                                // 使用统一的拖拽结束处理逻辑
-                                finalizeDragOperation(containerSize: containerSize, columnWidth: columnWidth, appHeight: appHeight, iconSize: iconSize)
-
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
-                                    draggingItem = nil
-                                    pendingDropIndex = nil
-                                    clampSelection()
-                                    appStore.cleanupUnusedNewPage()
-                                    appStore.removeEmptyPages()
-                                    
-                                    // 确保拖拽操作完成后立即保存
-                                    appStore.saveAllOrder()
-                                }
+                            .onEnded { value in
+                                guard draggingItem == item else { return }
+                                endLegacyItemDrag(at: value.location)
                             }
                     )
                     .launchNextHideAppContextMenu(app: item.contextMenuApp, folder: item.contextMenuFolder, appStore: appStore)
@@ -3478,7 +3512,9 @@ extension LaunchpadView {
     
     // MARK: - 简化的拖拽处理函数
     private func handleDragChange(_ value: DragGesture.Value, item: LaunchpadItem, in containerSize: CGSize, columnWidth: CGFloat, appHeight: CGFloat, iconSize: CGFloat) {
-        guard !appStore.isLayoutLocked else { return }
+        guard !appStore.useCAGridRenderer, !appStore.isLayoutLocked,
+              appStore.searchText.isEmpty, !isFolderOpen,
+              legacyItemDragSession?.isEnding != true else { return }
         // 初始化拖拽
         if draggingItem == nil {
             var tx = Transaction(); tx.disablesAnimations = true
@@ -3500,12 +3536,96 @@ extension LaunchpadView {
                 dragPointerOffset = .zero
                 dragPreviewPosition = value.location
             }
+            startLegacyItemDragMonitoring()
         }
+        guard draggingItem == item, let session = legacyItemDragSession,
+              !session.usesMouseMonitor else { return }
+        session.lastGestureUpdate = ProcessInfo.processInfo.systemUptime
         applyDragUpdate(at: value.location,
                         containerSize: containerSize,
                         columnWidth: columnWidth,
                         appHeight: appHeight,
                         iconSize: iconSize)
+    }
+
+    private func startLegacyItemDragMonitoring() {
+        let session = LegacyItemDragSession(window: NSApp.currentEvent?.window ?? NSApp.keyWindow)
+        legacyItemDragSession = session
+        session.eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak session] event in
+            guard let session, legacyItemDragSession === session, !session.isEnding else { return event }
+            guard !appStore.useCAGridRenderer, !appStore.isLayoutLocked else {
+                cancelLegacyItemDrag()
+                return event
+            }
+            guard let window = session.window else {
+                cancelLegacyItemDrag()
+                return event
+            }
+            // Local monitors see events for every app window. Only this window owns the drag.
+            guard event.window === window else { return event }
+            let point = CGPoint(x: event.locationInWindow.x - gridOriginInWindow.x,
+                                y: (window.contentView?.bounds.height ?? window.frame.height)
+                                    - event.locationInWindow.y - gridOriginInWindow.y)
+            if event.type == .leftMouseUp {
+                endLegacyItemDrag(at: point)
+            } else if session.usesMouseMonitor
+                        || ProcessInfo.processInfo.systemUptime - session.lastGestureUpdate > 0.1 {
+                session.usesMouseMonitor = true
+                handleHandoffDragMove(to: point)
+            }
+            // Keep AppKit/SwiftUI's mouse sequence balanced, including its normal onEnded.
+            return event
+        }
+    }
+
+    private func endLegacyItemDrag(at point: CGPoint? = nil) {
+        guard let session = legacyItemDragSession, !session.isEnding, draggingItem != nil else { return }
+        guard !appStore.useCAGridRenderer, !appStore.isLayoutLocked else {
+            cancelLegacyItemDrag()
+            return
+        }
+        // The monitor runs before onEnded; claim completion before changing the layout.
+        session.isEnding = true
+        session.stopMonitoring()
+        if let point {
+            applyDragUpdate(at: point, containerSize: currentContainerSize,
+                            columnWidth: currentColumnWidth, appHeight: currentAppHeight,
+                            iconSize: currentIconSize, isFinalUpdate: true)
+        }
+        finalizeDragOperation(containerSize: currentContainerSize, columnWidth: currentColumnWidth,
+                              appHeight: currentAppHeight, iconSize: currentIconSize)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+            // A cancelled drag's delayed cleanup must not clear a subsequent drag.
+            guard legacyItemDragSession === session else { return }
+            clearLegacyItemDrag(session)
+            appStore.cleanupUnusedNewPage()
+            appStore.removeEmptyPages()
+            appStore.saveAllOrder()
+        }
+    }
+
+    private func cancelLegacyItemDrag() {
+        guard let session = legacyItemDragSession else { return }
+        clearLegacyItemDrag(session)
+        appStore.cleanupUnusedNewPage()
+        appStore.removeEmptyPages()
+    }
+
+    private func clearLegacyItemDrag(_ session: LegacyItemDragSession) {
+        session.isEnding = true
+        session.stopMonitoring()
+        legacyItemDragSession = nil
+        draggingItem = nil
+        pendingDropIndex = nil
+        dragPointerOffset = .zero
+        dragPreviewScale = 1.2
+        clearHoveringState()
+        pageFlipManager.isCooldown = false
+        blankDragStartPoint = nil
+        blankDragShouldIgnore = false
+        blankDragConsumed = false
+        displayedGridRefreshID = appStore.gridRefreshTrigger
+        clampSelection()
     }
 
     // 统一的拖拽结束处理逻辑（普通拖拽与接力拖拽共用）
@@ -3641,7 +3761,8 @@ extension LaunchpadView {
                                  containerSize: CGSize,
                                  columnWidth: CGFloat,
                                  appHeight: CGFloat,
-                                 iconSize: CGFloat) {
+                                 iconSize: CGFloat,
+                                 isFinalUpdate: Bool = false) {
         guard !appStore.isLayoutLocked else { return }
         let rawIconCenter = CGPoint(x: point.x - dragPointerOffset.x,
                                      y: point.y - dragPointerOffset.y)
@@ -3654,13 +3775,13 @@ extension LaunchpadView {
         }
         // 性能优化：减少频繁的位置更新
         let distance = sqrt(pow(dragPreviewPosition.x - iconCenter.x, 2) + pow(dragPreviewPosition.y - iconCenter.y, 2))
-        if distance < 2.0 { return } // 如果移动距离小于2像素，跳过更新
+        if !isFinalUpdate && distance < 2.0 { return } // 如果移动距离小于2像素，跳过更新
 
         dragPreviewPosition = iconCenter
         
         // 性能优化：使用节流机制减少计算频率
         let now = Date()
-        if now.timeIntervalSince(Self.lastGeometryUpdate) < 0.016 { // 约60fps
+        if !isFinalUpdate && now.timeIntervalSince(Self.lastGeometryUpdate) < 0.016 { // 约60fps
             return
         }
         
@@ -3677,7 +3798,7 @@ extension LaunchpadView {
             clearHoveringState()
         }
 
-        if flipPageIfNeeded(iconCenter: iconCenter,
+        if !isFinalUpdate && flipPageIfNeeded(iconCenter: iconCenter,
                             pointer: point,
                             iconSize: iconSize,
                             in: containerSize) {

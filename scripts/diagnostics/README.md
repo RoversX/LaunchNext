@@ -30,6 +30,32 @@ types. Its model callbacks still use fixtures rather than AppStore.
 
 Nothing here runs in CI, and none of it ships in LaunchNext.
 
+## Legacy drag completion
+
+```sh
+python3 scripts/diagnostics/run_legacy_drag_integration.py
+```
+
+Builds an isolated app with the real `LaunchpadView`, both grid renderers and
+AppStore layout operations. Posts synthetic mouse events through the AppKit
+event queue, so Legacy drags start through the real SwiftUI gesture and finish
+through the installed event monitors. Checks refresh deferral, replacement of
+the source tile, final pointer position, duplicate completion, same-page and
+cross-page placement, folder creation/insertion, cancellation and stale cleanup,
+outside-grid release, isolation from other windows, folder handoff on both
+renderers, and Next's native drag path. Membership checks detect lost or
+duplicated apps.
+
+To reproduce #263 before the fix, pass `--baseline-ref <commit>` pointing to an
+older `LaunchpadView.swift`; that mode expects the first drag to remain stuck.
+The optional `--work-dir` retains build artifacts outside the repository.
+
+Requires a visible macOS desktop and Xcode. Uses a separate bundle identifier,
+synthetic apps and an in-memory database. Startup scanning, input-device setup
+and wallpaper work are disabled in the temporary target. This verifies event
+handling and layout outcomes, not physical mouse/trackpad input, animation
+quality, or delivery of global events from other applications.
+
 ## Reveal a search result in the layout
 
 ```sh
