@@ -4242,7 +4242,7 @@ final class AppStore: ObservableObject {
                         id: fid,
                         name: row.folderName ?? "Untitled",
                         apps: folderApps,
-                        pinnedAppPaths: row.pinnedAppPaths,
+                        pinnedAppPaths: row.pinnedAppPaths ?? [],
                         createdAt: row.createdAt
                     ))
                     folderMap[fid] = folder
@@ -5402,7 +5402,7 @@ final class AppStore: ObservableObject {
                     id: fid,
                     name: row.folderName ?? "Untitled",
                     apps: folderApps,
-                    pinnedAppPaths: row.pinnedAppPaths,
+                    pinnedAppPaths: row.pinnedAppPaths ?? [],
                     createdAt: row.createdAt
                 ))
                 folderMap[fid] = folder

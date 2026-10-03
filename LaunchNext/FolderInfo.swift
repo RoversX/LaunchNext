@@ -251,7 +251,8 @@ final class PageEntryData {
     var folderId: String?
     var folderName: String?
     var appPaths: [String]
-    var pinnedAppPaths: [String] = []
+    // Older stores can contain NULL for this field; treat it as no pins when loading.
+    var pinnedAppPaths: [String]?
     // removable source 记录该缺失应用来自哪个可移除目录，便于清理
     var removableSource: String?
     // 时间戳
