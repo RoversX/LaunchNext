@@ -15,6 +15,7 @@ struct Localization {
         "9": "hi",
         "10": "vi",
         "11": "zh-Hant",
+        "12": "pl",
     ]
 
     static let languageMenu: [String] = [
@@ -29,6 +30,7 @@ struct Localization {
         "hi",
         "vi",
         "zh-Hant",
+        "pl",
     ]
 
     static let languageDisplayNames: [String: String] = [
@@ -43,6 +45,7 @@ struct Localization {
         "hi": "हिन्दी",
         "vi": "Tiếng Việt",
         "zh-Hant": "繁體中文",
+        "pl": "Polski",
     ]
 
     static let languageHints: [String: String] = [
@@ -57,6 +60,7 @@ struct Localization {
         "hi": "↑/↓ से चुनें, Enter से पुष्टि करें, Q से रद्द करें",
         "vi": "Dùng ↑/↓ để chọn, Enter xác nhận, Q huỷ",
         "zh-Hant": "使用 ↑/↓ 選擇，Enter 確認，Q 取消",
+        "pl": "↑/↓ — wybór, Enter — potwierdź, Q — anuluj",
     ]
 
     static let yesNoLabelTable: [String: (String, String)] = [
@@ -70,6 +74,7 @@ struct Localization {
         "hi": ("हाँ", "नहीं"),
         "vi": ("Có", "Không"),
         "zh-Hant": ("是", "否"),
+        "pl": ("Tak", "Nie"),
     ]
 
     static let yesNoHints: [String: String] = [
@@ -84,11 +89,12 @@ struct Localization {
         "hi": "←→ से चुनें, Enter से पुष्टि करें",
         "vi": "Dùng ←→ chọn, Enter xác nhận",
         "zh-Hant": "使用 ←/→ 切換，Enter 確認",
+        "pl": "←/→ — wybór, Enter — potwierdź",
     ]
 
     static let dictionary: [String: [String: String]] = [
         "en": [
-            "language_prompt": "Select language:\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\nEnter choice [1]: ",
+            "language_prompt": "Select language:\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\n 12) Polski\nEnter choice [1]: ",
             "language_saved": "Language preference saved.",
             "fetching": "Fetching release metadata from {url}",
             "latest_tag": "Latest release tag: {tag}",
@@ -125,7 +131,7 @@ struct Localization {
             "sudo_password_retry": "Incorrect password, please try again.",
         ],
         "zh": [
-            "language_prompt": "选择语言：\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\n请输入序号 [1]：",
+            "language_prompt": "选择语言：\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\n 12) Polski\n请输入序号 [1]：",
             "language_saved": "语言偏好已保存。",
             "fetching": "正在获取发布信息：{url}",
             "latest_tag": "最新版本标签：{tag}",
@@ -162,7 +168,7 @@ struct Localization {
             "sudo_password_retry": "密码错误，请重试。",
         ],
         "zh-Hant": [
-            "language_prompt": "選擇語言：\n  1) English\n  2) 簡體中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\n請輸入序號 [1]：",
+            "language_prompt": "選擇語言：\n  1) English\n  2) 簡體中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\n 12) Polski\n請輸入序號 [1]：",
             "language_saved": "語言偏好已儲存。",
             "fetching": "正在取得發佈資訊：{url}",
             "latest_tag": "最新版本標籤：{tag}",
@@ -199,7 +205,7 @@ struct Localization {
             "sudo_password_retry": "密碼錯誤，請重試。",
         ],
         "ja": [
-            "language_prompt": "言語を選択してください:\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\n選択 [1]: ",
+            "language_prompt": "言語を選択してください:\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\n 12) Polski\n選択 [1]: ",
             "language_saved": "言語設定を保存しました。",
             "fetching": "{url} からリリース情報を取得中",
             "latest_tag": "最新リリースタグ: {tag}",
@@ -236,7 +242,7 @@ struct Localization {
             "sudo_password_retry": "パスワードが違います。もう一度入力してください。",
         ],
         "ko": [
-            "language_prompt": "언어를 선택하세요:\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\n선택 [1]: ",
+            "language_prompt": "언어를 선택하세요:\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\n 12) Polski\n선택 [1]: ",
             "language_saved": "언어 설정이 저장되었습니다.",
             "fetching": "릴리스 정보를 가져오는 중: {url}",
             "latest_tag": "최신 릴리스 태그: {tag}",
@@ -273,7 +279,7 @@ struct Localization {
             "sudo_password_retry": "암호가 올바르지 않습니다. 다시 시도하세요.",
         ],
         "fr": [
-            "language_prompt": "Sélectionnez la langue :\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\nEntrez votre choix [1] : ",
+            "language_prompt": "Sélectionnez la langue :\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\n 12) Polski\nEntrez votre choix [1] : ",
             "language_saved": "Préférence linguistique enregistrée.",
             "fetching": "Récupération des métadonnées de la version depuis {url}",
             "latest_tag": "Dernier tag de version : {tag}",
@@ -310,7 +316,7 @@ struct Localization {
             "sudo_password_retry": "Mot de passe incorrect, réessayez.",
         ],
         "es": [
-            "language_prompt": "Seleccione el idioma:\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\nOpción [1]: ",
+            "language_prompt": "Seleccione el idioma:\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\n 12) Polski\nOpción [1]: ",
             "language_saved": "Preferencia de idioma guardada.",
             "fetching": "Obteniendo metadatos de la versión desde {url}",
             "latest_tag": "Etiqueta de la última versión: {tag}",
@@ -347,7 +353,7 @@ struct Localization {
             "sudo_password_retry": "Contraseña incorrecta, inténtalo de nuevo.",
         ],
         "de": [
-            "language_prompt": "Sprache wählen:\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\nAuswahl [1]: ",
+            "language_prompt": "Sprache wählen:\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\n 12) Polski\nAuswahl [1]: ",
             "language_saved": "Spracheinstellung gespeichert.",
             "fetching": "Rufe Release-Metadaten von {url} ab",
             "latest_tag": "Neuester Release-Tag: {tag}",
@@ -384,7 +390,7 @@ struct Localization {
             "sudo_password_retry": "Falsches Passwort, bitte erneut versuchen.",
         ],
         "ru": [
-            "language_prompt": "Выберите язык:\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\nВыбор [1]: ",
+            "language_prompt": "Выберите язык:\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\n 12) Polski\nВыбор [1]: ",
             "language_saved": "Настройки языка сохранены.",
             "fetching": "Получение данных релиза: {url}",
             "latest_tag": "Последний тег релиза: {tag}",
@@ -421,7 +427,7 @@ struct Localization {
             "sudo_password_retry": "Неверный пароль, попробуйте ещё раз.",
         ],
         "hi": [
-            "language_prompt": "भाषा चुनें:\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\nचयन करें [1]: ",
+            "language_prompt": "भाषा चुनें:\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\n 12) Polski\nचयन करें [1]: ",
             "language_saved": "भाषा वरीयता सहेजी गई।",
             "fetching": "{url} से रिलीज़ मेटाडाटा प्राप्त किया जा रहा है",
             "latest_tag": "नवीनतम रिलीज़ टैग: {tag}",
@@ -458,7 +464,7 @@ struct Localization {
             "sudo_password_retry": "गलत पासवर्ड, कृपया पुनः प्रयास करें।",
         ],
         "vi": [
-            "language_prompt": "Chọn ngôn ngữ:\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\nNhập lựa chọn [1]: ",
+            "language_prompt": "Chọn ngôn ngữ:\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\n 12) Polski\nNhập lựa chọn [1]: ",
             "language_saved": "Đã lưu tùy chọn ngôn ngữ.",
             "fetching": "Đang lấy thông tin phát hành từ {url}",
             "latest_tag": "Tag phát hành mới nhất: {tag}",
@@ -493,6 +499,43 @@ struct Localization {
             "press_enter": "Nhấn Enter để đóng cửa sổ này…",
             "sudo_password_prompt": "Nhập mật khẩu:",
             "sudo_password_retry": "Mật khẩu không đúng, vui lòng thử lại.",
+        ],
+        "pl": [
+            "language_prompt": "Wybierz język:\n  1) English\n  2) 简体中文\n  3) 日本語\n  4) 한국어\n  5) Français\n  6) Español\n  7) Deutsch\n  8) Русский\n  9) हिन्दी\n 10) Tiếng Việt\n 11) 繁體中文\n 12) Polski\nPodaj numer [1]: ",
+            "language_saved": "Zapisano preferencję języka.",
+            "fetching": "Pobieranie informacji o wydaniu z {url}",
+            "latest_tag": "Najnowszy tag wydania: {tag}",
+            "asset_selected": "Wybrany plik: {name} ({size} bajtów)",
+            "no_asset": "Żaden plik wydania nie pasuje do wzorca {pattern}",
+            "no_asset_auto": "Żaden plik nie pasuje do wzorca {pattern}. Dostępne pliki: {assets}",
+            "no_assets_available": "Wydanie nie zawiera plików do pobrania.",
+            "asset_fallback": "Żaden plik nie pasuje do wzorca {pattern}. Wybierz spośród dostępnych plików:",
+            "prompt_asset_choice": "Wybierz plik [1-{count}] (domyślnie 1): ",
+            "downloading": "Pobieranie pliku...",
+            "download_complete": "Pobrano do {path} ({size} bajtów)",
+            "extracting": "Rozpakowywanie archiwum...",
+            "found_bundle": "Znaleziono pakiet: {path}",
+            "remove_quarantine_ok": "Usunięto atrybuty kwarantanny",
+            "remove_quarantine_warn": "Ostrzeżenie: nie udało się usunąć atrybutów kwarantanny",
+            "download_only_path": "Tylko pobieranie: pakiet jest dostępny w {path}",
+            "install_prepare": "Przygotowanie do instalacji w {path}",
+            "requires_admin": "Wymagane są uprawnienia administratora. W razie prośby wpisz hasło.",
+            "install_complete": "Instalacja zakończona",
+            "relaunch_warn": "Ostrzeżenie: nie udało się automatycznie uruchomić ponownie LaunchNext",
+            "release_notes": "Informacje o wydaniu: {url}",
+            "update_complete": "Aktualizacja zakończona: {tag}",
+            "update_elapsed": "Aktualizacja zakończona w {seconds} s",
+            "cancelled": "Aktualizacja anulowana przez użytkownika.",
+            "prompt_continue": "Kontynuować instalację w {path}?",
+            "prompt_download_only": "Pobrać bez instalowania?",
+            "invalid_choice": "Nieprawidłowy wybór.",
+            "download_only_selected": "Wybrano tryb tylko pobierania.",
+            "download_and_install": "Wybrano pobieranie i instalację.",
+            "about_to_install": "Za chwilę zostanie pobrana i zainstalowana wersja {tag}.",
+            "prompt_language_change": "Zmienić język (obecnie: {lang})?",
+            "press_enter": "Naciśnij Enter, aby zamknąć to okno...",
+            "sudo_password_prompt": "Wpisz hasło: ",
+            "sudo_password_retry": "Nieprawidłowe hasło, spróbuj ponownie.",
         ],
     ]
 
