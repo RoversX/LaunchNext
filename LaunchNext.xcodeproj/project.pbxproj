@@ -67,6 +67,7 @@
 		A1E2B5CA2F4A8A1B00F12345 /* vi */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = vi; path = vi.lproj/Localizable.strings; sourceTree = "<group>"; };
 		A1E2B5CC2F4A8A1B00F12345 /* pt-BR */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "pt-BR"; path = "pt-BR.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		A1E2B5CD2F4A8A1B00F12345 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		A1E2B5CE2F4A8A1B00F12345 /* pl */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = pl; path = pl.lproj/Localizable.strings; sourceTree = "<group>"; };
 		B10000012F70000100ABCDEF /* LaunchNextTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LaunchNextTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B10000212F70000100ABCDEF /* GridReorderPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GridReorderPlan.swift; path = LaunchNext/GridReorderPlan.swift; sourceTree = SOURCE_ROOT; };
 		B10000232F70000100ABCDEF /* CompactWindowLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CompactWindowLayout.swift; path = LaunchNext/CompactWindowLayout.swift; sourceTree = SOURCE_ROOT; };
@@ -319,6 +320,7 @@
 				vi,
 				it,
 				"pt-BR",
+				pl,
 			);
 			mainGroup = 0D1B0B372E4CDE460083EEF9;
 			minimizedProjectReferenceProxies = 1;
@@ -462,6 +464,7 @@
 				A1E2B5C92F4A8A1B00F12345 /* hi */,
 				A1E2B5CA2F4A8A1B00F12345 /* vi */,
 				A1E2B5CC2F4A8A1B00F12345 /* pt-BR */,
+				A1E2B5CE2F4A8A1B00F12345 /* pl */,
 			);
 			name = Localizable.strings;
 			sourceTree = "<group>";
