@@ -11,6 +11,8 @@
 
 ⭐ Zvažte označení hvězdičkou [LaunchNext](https://github.com/RoversX/LaunchNext) a zejména [LaunchNow](https://github.com/ggkevinnnn/LaunchNow)!
 
+🖥️ Vyzkoušejte prosím i můj nový open-source terminálový multiplexer pro agenty [ThinkTerm](https://github.com/RoversX/ThinkTerm) – pracoval jsem na něm přes půl roku 🥺
+
 | | |
 |:---:|:---:|
 | ![](../public/banner.webp) | ![](../public/setting1.webp) |

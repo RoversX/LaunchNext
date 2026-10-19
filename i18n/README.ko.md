@@ -11,6 +11,8 @@
 
 ⭐ [LaunchNext](https://github.com/RoversX/LaunchNext)와 원본 프로젝트 [LaunchNow](https://github.com/ggkevinnnn/LaunchNow)에 star를 달아주세요!
 
+🖥️ 제가 새로 만든 오픈소스 에이전트 터미널 멀티플렉서 [ThinkTerm](https://github.com/RoversX/ThinkTerm)도 꼭 써 봐 주세요. 반년 넘게 공들였어요 🥺
+
 | | |
 |:---:|:---:|
 | ![](../public/banner.webp) | ![](../public/setting1.webp) |

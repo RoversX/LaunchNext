@@ -11,6 +11,8 @@
 
 ⭐ 请考虑为 [LaunchNext](https://github.com/RoversX/LaunchNext) 和原项目 [LaunchNow](https://github.com/ggkevinnnn/LaunchNow) 点 star！
 
+🖥️ 也请试试我新做的开源 Agent 终端复用器 [ThinkTerm](https://github.com/RoversX/ThinkTerm)，花了半年多心血 🥺
+
 | | |
 |:---:|:---:|
 | ![](../public/banner.webp) | ![](../public/setting1.webp) |

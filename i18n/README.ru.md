@@ -11,6 +11,8 @@
 
 ⭐ Рассмотрите возможность поставить звезду [LaunchNext](https://github.com/RoversX/LaunchNext) и особенно оригинальному проекту [LaunchNow](https://github.com/ggkevinnnn/LaunchNow)!
 
+🖥️ Попробуйте также мой новый терминальный мультиплексор для агентов с открытым исходным кодом [ThinkTerm](https://github.com/RoversX/ThinkTerm) — я работал над ним больше полугода 🥺
+
 | | |
 |:---:|:---:|
 | ![](../public/banner.webp) | ![](../public/setting1.webp) |

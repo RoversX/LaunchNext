@@ -11,6 +11,8 @@
 
 ⭐ Hãy xem xét gắn sao cho [LaunchNext](https://github.com/RoversX/LaunchNext) và đặc biệt là dự án gốc [LaunchNow](https://github.com/ggkevinnnn/LaunchNow)!
 
+🖥️ Hãy thử cả [ThinkTerm](https://github.com/RoversX/ThinkTerm), bộ ghép kênh terminal mã nguồn mở dành cho agent mà mình mới làm — mình đã dành hơn nửa năm cho nó 🥺
+
 | | |
 |:---:|:---:|
 | ![](../public/banner.webp) | ![](../public/setting1.webp) |

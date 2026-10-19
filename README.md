@@ -11,6 +11,8 @@
 
 ⭐ Consider starring [LaunchNext](https://github.com/RoversX/LaunchNext) and especially [LaunchNow](https://github.com/ggkevinnnn/LaunchNow)!
 
+🖥️ Please also try my new open-source agent terminal multiplexer [ThinkTerm](https://github.com/RoversX/ThinkTerm), I've spent over half a year on it 🥺
+
 | | |
 |:---:|:---:|
 | ![](./public/banner.webp) | ![](./public/setting1.webp) |

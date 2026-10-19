@@ -11,6 +11,8 @@
 
 ⭐ Bitte geben Sie [LaunchNext](https://github.com/RoversX/LaunchNext) und besonders dem ursprünglichen Projekt [LaunchNow](https://github.com/ggkevinnnn/LaunchNow) einen Stern!
 
+🖥️ Probieren Sie auch meinen neuen Open-Source-Terminal-Multiplexer für Agents aus: [ThinkTerm](https://github.com/RoversX/ThinkTerm) – ich habe über ein halbes Jahr daran gearbeitet 🥺
+
 | | |
 |:---:|:---:|
 | ![](../public/banner.webp) | ![](../public/setting1.webp) |

@@ -11,6 +11,8 @@
 
 ⭐ कृपया [LaunchNext](https://github.com/RoversX/LaunchNext) और विशेष रूप से मूल प्रोजेक्ट [LaunchNow](https://github.com/ggkevinnnn/LaunchNow) को स्टार दें!
 
+🖥️ कृपया मेरा नया ओपन-सोर्स एजेंट टर्मिनल मल्टीप्लेक्सर [ThinkTerm](https://github.com/RoversX/ThinkTerm) भी आज़माएँ, इस पर मैंने आधे साल से ज़्यादा मेहनत की है 🥺
+
 | | |
 |:---:|:---:|
 | ![](../public/banner.webp) | ![](../public/setting1.webp) |

@@ -11,6 +11,8 @@
 
 ⭐ 請考慮為 [LaunchNext](https://github.com/RoversX/LaunchNext) 和原專案 [LaunchNow](https://github.com/ggkevinnnn/LaunchNow) 給 star！
 
+🖥️ 也請試試我新做的開源 Agent 終端多工器 [ThinkTerm](https://github.com/RoversX/ThinkTerm)，花了半年多心血 🥺
+
 | | |
 |:---:|:---:|
 | ![](../public/banner.webp) | ![](../public/setting1.webp) |

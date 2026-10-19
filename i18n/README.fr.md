@@ -11,6 +11,8 @@
 
 ⭐ Pensez à donner une étoile à [LaunchNext](https://github.com/RoversX/LaunchNext) et au projet original [LaunchNow](https://github.com/ggkevinnnn/LaunchNow) !
 
+🖥️ Essayez aussi mon nouveau multiplexeur de terminal open source pour agents, [ThinkTerm](https://github.com/RoversX/ThinkTerm) — j'y ai consacré plus de six mois 🥺
+
 | | |
 |:---:|:---:|
 | ![](../public/banner.webp) | ![](../public/setting1.webp) |

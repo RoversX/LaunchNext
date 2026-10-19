@@ -11,6 +11,8 @@
 
 ⭐ [LaunchNext](https://github.com/RoversX/LaunchNext) と元プロジェクト [LaunchNow](https://github.com/ggkevinnnn/LaunchNow) へのスターをお願いします！
 
+🖥️ 新しく作ったオープンソースのエージェント向けターミナルマルチプレクサ [ThinkTerm](https://github.com/RoversX/ThinkTerm) もぜひ試してみてください。半年以上かけて作りました 🥺
+
 | | |
 |:---:|:---:|
 | ![](../public/banner.webp) | ![](../public/setting1.webp) |
