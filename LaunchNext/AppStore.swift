@@ -2444,6 +2444,7 @@ final class AppStore: ObservableObject {
     private var lastSuccessfulApplicationReconciliationAt: Date?
     private var needsReconciliationAfterExternalUninstall = false
     private var unavailableApplicationDirectories = Set<String>()
+    private var retainedUnscannedApplicationPaths = Set<String>()
 
     // 状态标记
     private var hasPerformedInitialScan: Bool = false
@@ -2508,6 +2509,7 @@ final class AppStore: ObservableObject {
 
     private func isApplicationPathUnavailable(_ rawPath: String) -> Bool {
         let path = canonicalApplicationPath(rawPath)
+        if retainedUnscannedApplicationPaths.contains(path) { return true }
         func containsPath(_ directory: String) -> Bool {
             path == directory || path.hasPrefix(directory.hasSuffix("/") ? directory : directory + "/")
         }
@@ -2515,12 +2517,17 @@ final class AppStore: ObservableObject {
         let configuredSources = (systemApplicationSearchPaths + customAppSourcePaths)
             .compactMap(normalizeApplicationPath)
             .map(canonicalApplicationPath)
-        guard configuredSources.contains(where: containsPath) else { return false }
-        if unavailableApplicationDirectories.contains(where: containsPath) { return true }
+        if configuredSources.contains(where: containsPath),
+           unavailableApplicationDirectories.contains(where: containsPath) { return true }
 
         // Persisted layouts load before the initial scan. A failed stat caused
         // by permissions must not discard saved entries before that scan can
-        // report the unreadable subtree.
+        // report the unreadable subtree. Symlink targets may be outside every
+        // configured source, so permission failures need no source-prefix match.
+        return isApplicationPathInaccessible(rawPath)
+    }
+
+    private func isApplicationPathInaccessible(_ rawPath: String) -> Bool {
         do {
             _ = try FileManager.default.attributesOfItem(atPath: rawPath)
             return false
@@ -3883,13 +3890,42 @@ final class AppStore: ObservableObject {
             
             DispatchQueue.main.async {
                 let unavailableDirectories = Set(unavailableSources.map(self.canonicalApplicationPath))
+                let observedPaths = Set(newApps.map { self.canonicalApplicationPath($0.url.path) })
+                var retainedPaths = Set<String>()
+                if !unavailableDirectories.isEmpty {
+                    // A skipped directory may contain a link to any saved app.
+                    // Its resolved target does not identify the link's source.
+                    // Defer removal of existing or permission-denied targets
+                    // until a complete scan; deleted bundles can still be removed.
+                    let itemPaths = self.items.compactMap { item -> String? in
+                        switch item {
+                        case .app(let app): return app.url.path
+                        case .missingApp(let placeholder): return placeholder.bundlePath
+                        default: return nil
+                        }
+                    }
+                    let savedPaths = self.apps.map { $0.url.path }
+                        + self.folders.flatMap { $0.apps.map { $0.url.path } }
+                        + itemPaths
+                        + Array(self.missingPlaceholders.keys)
+                    for rawPath in savedPaths {
+                        let path = self.canonicalApplicationPath(rawPath)
+                        if !observedPaths.contains(path),
+                           self.isValidApp(at: URL(fileURLWithPath: path))
+                            || self.isApplicationPathInaccessible(rawPath) {
+                            retainedPaths.insert(path)
+                        }
+                    }
+                }
                 var reconciliationReasons = reasons
-                if self.unavailableApplicationDirectories != unavailableDirectories {
+                if self.unavailableApplicationDirectories != unavailableDirectories
+                    || self.retainedUnscannedApplicationPaths != retainedPaths {
                     // Availability can change without changing the inventory's
                     // paths. Refresh placeholders and metadata on recovery too.
                     reconciliationReasons.insert(.sourceChange)
                 }
                 self.unavailableApplicationDirectories = unavailableDirectories
+                self.retainedUnscannedApplicationPaths = retainedPaths
                 let didApplyChanges = self.processScannedApplications(
                     newApps,
                     unavailableCustomSources: Array(unavailableDirectories),
@@ -3921,6 +3957,7 @@ final class AppStore: ObservableObject {
 
         func isUnderUnavailableCustomSource(_ rawPath: String) -> Bool {
             let path = canonicalApplicationPath(rawPath)
+            if retainedUnscannedApplicationPaths.contains(path) { return true }
             return unavailableCustomSources.contains { source in
                 path == source || path.hasPrefix(source.hasSuffix("/") ? source : source + "/")
             }
@@ -3993,6 +4030,13 @@ final class AppStore: ObservableObject {
         self.apps = updatedApps
         pruneHiddenAppsFromAppList()
         self.folders = sanitizedFolders(reconciledFolders)
+
+        // A surviving target alone does not prove its discovery link still
+        // exists. Do not let old placeholders resurrect unobserved targets.
+        let observedPaths = Set(newApps.map { canonicalApplicationPath($0.url.path) })
+        missingPlaceholders = missingPlaceholders.filter { path, _ in
+            observedPaths.contains(canonicalApplicationPath(path)) || isUnderUnavailableCustomSource(path)
+        }
         
         // 第四步：智能重建项目列表，保持用户排序
         self.smartRebuildItemsWithOrderPreservation(currentItems: currentItems, newApps: newAppsToAdd)
@@ -4126,20 +4170,9 @@ final class AppStore: ObservableObject {
     
     /// 智能重建项目列表，保持用户排序
     private func smartRebuildItemsWithOrderPreservation(currentItems: [LaunchpadItem], newApps: [AppInfo]) {
-        
-        // 保存当前的持久化数据，但不立即加载（避免覆盖现有顺序）
-        let hasPersistedData = self.hasPersistedOrderData()
-        
-        if hasPersistedData {
-            
-            // 智能合并现有顺序和持久化数据
-            self.mergeCurrentOrderWithPersistedData(currentItems: currentItems, newApps: newApps, loadPersistedFolders: true)
-        } else {
-            
-            // 没有持久化数据时，直接基于当前顺序合并
-            self.mergeCurrentOrderWithPersistedData(currentItems: currentItems, newApps: newApps, loadPersistedFolders: false)
-        }
-        
+        // Reconciliation has already updated folder membership and pins. Reloading
+        // saved rows here would resurrect removed links whose targets still exist.
+        self.mergeCurrentOrderWithPersistedData(currentItems: currentItems, newApps: newApps, loadPersistedFolders: false)
     }
     
     /// 检查是否有持久化数据

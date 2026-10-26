@@ -68,6 +68,7 @@ DECLARATIONS = [
 AVAILABILITY_DECLARATIONS = [
     "    private func canonicalApplicationPath(",
     "    private func isApplicationPathUnavailable(",
+    "    private func isApplicationPathInaccessible(",
 ]
 
 
