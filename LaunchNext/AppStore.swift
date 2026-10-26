@@ -2443,6 +2443,7 @@ final class AppStore: ObservableObject {
     private var applicationReconciliationWorkItem: DispatchWorkItem?
     private var lastSuccessfulApplicationReconciliationAt: Date?
     private var needsReconciliationAfterExternalUninstall = false
+    private var unavailableApplicationDirectories = Set<String>()
 
     // 状态标记
     private var hasPerformedInitialScan: Bool = false
@@ -2499,6 +2500,47 @@ final class AppStore: ObservableObject {
         URL(fileURLWithPath: path).standardized.path
     }
 
+    /// Use resolved paths only for availability comparisons; persisted paths keep
+    /// their existing spelling and identity.
+    private func canonicalApplicationPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
+    private func isApplicationPathUnavailable(_ rawPath: String) -> Bool {
+        let path = canonicalApplicationPath(rawPath)
+        func containsPath(_ directory: String) -> Bool {
+            path == directory || path.hasPrefix(directory.hasSuffix("/") ? directory : directory + "/")
+        }
+
+        let configuredSources = (systemApplicationSearchPaths + customAppSourcePaths)
+            .compactMap(normalizeApplicationPath)
+            .map(canonicalApplicationPath)
+        guard configuredSources.contains(where: containsPath) else { return false }
+        if unavailableApplicationDirectories.contains(where: containsPath) { return true }
+
+        // Persisted layouts load before the initial scan. A failed stat caused
+        // by permissions must not discard saved entries before that scan can
+        // report the unreadable subtree.
+        do {
+            _ = try FileManager.default.attributesOfItem(atPath: rawPath)
+            return false
+        } catch {
+            var underlying: NSError? = error as NSError
+            while let current = underlying {
+                if current.domain == NSCocoaErrorDomain && current.code == NSFileReadNoPermissionError {
+                    return true
+                }
+                if current.domain == NSPOSIXErrorDomain,
+                   current.code == Int(POSIXErrorCode.EACCES.rawValue)
+                    || current.code == Int(POSIXErrorCode.EPERM.rawValue) {
+                    return true
+                }
+                underlying = current.userInfo[NSUnderlyingErrorKey] as? NSError
+            }
+            return false
+        }
+    }
+
     private func removableSourcePath(forAppPath path: String) -> String? {
         let standardizedApp = standardizedFilePath(path)
         for source in customAppSourcePaths {
@@ -2553,15 +2595,16 @@ final class AppStore: ObservableObject {
 
     private func shouldTrackMissingPlaceholder(at normalizedPath: String,
                                                removableSource: String?) -> Bool {
+        if isApplicationPathUnavailable(normalizedPath) { return true }
         guard let removableSource else { return false }
 
         let normalizedSource = normalizeApplicationPath(removableSource) ?? standardizedFilePath(removableSource)
         let customSources = customAppSourcePaths.map { normalizeApplicationPath($0) ?? standardizedFilePath($0) }
         guard customSources.contains(normalizedSource) else { return false }
 
-        // A missing app is retained only while its configured source itself is
-        // unavailable (for example, an unmounted external volume). If the source
-        // is reachable, the missing bundle represents a real removal.
+        // Outside a skipped or permission-denied subtree, retain missing apps
+        // only while their configured source itself is unavailable (for example,
+        // an unmounted external volume).
         var isDirectory: ObjCBool = false
         return !FileManager.default.fileExists(atPath: normalizedSource, isDirectory: &isDirectory)
             || !isDirectory.boolValue
@@ -2579,6 +2622,16 @@ final class AppStore: ObservableObject {
     }
 
     private func placeholderAppInfo(forMissingPath path: String, preferredName: String? = nil) -> AppInfo? {
+        // Folder reloads must retain the metadata already held for apps in a
+        // skipped subtree, including when those apps are not in the top-level list.
+        if isApplicationPathUnavailable(path) {
+            let canonicalPath = canonicalApplicationPath(path)
+            if let existing = folders.lazy.flatMap({ $0.apps }).first(where: {
+                canonicalApplicationPath($0.url.path) == canonicalPath
+            }) {
+                return existing
+            }
+        }
         guard let placeholder = updateMissingPlaceholder(path: path, displayName: preferredName) else {
             return nil
         }
@@ -3742,11 +3795,11 @@ final class AppStore: ObservableObject {
                         options: [.skipsHiddenFiles, .skipsPackageDescendants],
                         errorHandler: { errorURL, error in
                             NSLog("LaunchNext: Skipping unavailable application directory %@: %@", errorURL.path, error.localizedDescription)
-                            if errorURL.standardizedFileURL == url.standardizedFileURL {
+                            if self.canonicalApplicationPath(errorURL.path) == self.canonicalApplicationPath(url.path) {
                                 localScanFailed = true
                                 return false
                             }
-                            localUnavailableSources.append(errorURL.path)
+                            localUnavailableSources.append(self.canonicalApplicationPath(errorURL.path))
                             return true
                         }
                     ) else {
@@ -3829,10 +3882,18 @@ final class AppStore: ObservableObject {
             newApps.append(contentsOf: sortedNewApps)
             
             DispatchQueue.main.async {
+                let unavailableDirectories = Set(unavailableSources.map(self.canonicalApplicationPath))
+                var reconciliationReasons = reasons
+                if self.unavailableApplicationDirectories != unavailableDirectories {
+                    // Availability can change without changing the inventory's
+                    // paths. Refresh placeholders and metadata on recovery too.
+                    reconciliationReasons.insert(.sourceChange)
+                }
+                self.unavailableApplicationDirectories = unavailableDirectories
                 let didApplyChanges = self.processScannedApplications(
                     newApps,
-                    unavailableCustomSources: unavailableSources,
-                    reasons: reasons
+                    unavailableCustomSources: Array(unavailableDirectories),
+                    reasons: reconciliationReasons
                 )
                 if didApplyChanges {
                     self.generateCacheAfterScan()
@@ -3859,7 +3920,7 @@ final class AppStore: ObservableObject {
         let currentItems = self.items
 
         func isUnderUnavailableCustomSource(_ rawPath: String) -> Bool {
-            let path = standardizedFilePath(rawPath)
+            let path = canonicalApplicationPath(rawPath)
             return unavailableCustomSources.contains { source in
                 path == source || path.hasPrefix(source.hasSuffix("/") ? source : source + "/")
             }
@@ -3915,7 +3976,9 @@ final class AppStore: ObservableObject {
 
         let nextInventoryPaths = inventoryPaths(apps: updatedApps, folders: reconciledFolders)
         let inventoryChanged = previousInventoryPaths != nextInventoryPaths
-        let requiresMetadataRefresh = !reasons.isDisjoint(with: [
+        // The first successful scan must replace any placeholders loaded before
+        // an initial scan failed, even when every inventory path is unchanged.
+        let requiresMetadataRefresh = lastSuccessfulApplicationReconciliationAt == nil || !reasons.isDisjoint(with: [
             .initial,
             .fileSystemEvent,
             .manual,
