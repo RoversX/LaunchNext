@@ -3636,6 +3636,7 @@ final class AppStore: ObservableObject {
             }
         }
         applicationReconciliationInProgress = false
+        isInitialLoading = false
 
         if !applicationReconciliationReasons.isEmpty {
             if applicationReconciliationReasons == [.fileSystemEvent] {
@@ -3717,6 +3718,7 @@ final class AppStore: ObservableObject {
             var seenPaths = Set<String>()
             var scanFailed = false
             var sourceBecameUnavailable = false
+            var unavailableSources = unavailableCustomSources
 
             // 使用并发队列加速扫描
             let scanQueue = DispatchQueue(label: "app.scan", attributes: .concurrent)
@@ -3730,6 +3732,7 @@ final class AppStore: ObservableObject {
                     defer { group.leave() }
                     let url = URL(fileURLWithPath: path)
                     var localScanFailed = false
+                    var localUnavailableSources: [String] = []
                     var localFound: [AppInfo] = []
                     var localSeenPaths = Set<String>()
 
@@ -3737,9 +3740,14 @@ final class AppStore: ObservableObject {
                         at: url,
                         includingPropertiesForKeys: [.isDirectoryKey],
                         options: [.skipsHiddenFiles, .skipsPackageDescendants],
-                        errorHandler: { _, _ in
-                            localScanFailed = true
-                            return false
+                        errorHandler: { errorURL, error in
+                            NSLog("LaunchNext: Skipping unavailable application directory %@: %@", errorURL.path, error.localizedDescription)
+                            if errorURL.standardizedFileURL == url.standardizedFileURL {
+                                localScanFailed = true
+                                return false
+                            }
+                            localUnavailableSources.append(errorURL.path)
+                            return true
                         }
                     ) else {
                         lock.withLock {
@@ -3772,11 +3780,11 @@ final class AppStore: ObservableObject {
                                 sourceBecameUnavailable = true
                             }
                         } else {
-                            // Only complete source results are allowed into the
-                            // aggregate. Partial enumeration must never authorize
-                            // removals from the persisted layout.
+                            // Preserve apps under skipped subdirectories while
+                            // reconciling the accessible part of the source.
                             found.append(contentsOf: localFound)
                             seenPaths.formUnion(localSeenPaths)
+                            unavailableSources.append(contentsOf: localUnavailableSources)
                         }
                     }
                 }
@@ -3823,7 +3831,7 @@ final class AppStore: ObservableObject {
             DispatchQueue.main.async {
                 let didApplyChanges = self.processScannedApplications(
                     newApps,
-                    unavailableCustomSources: unavailableCustomSources,
+                    unavailableCustomSources: unavailableSources,
                     reasons: reasons
                 )
                 if didApplyChanges {
