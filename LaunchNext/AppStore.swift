@@ -2701,35 +2701,34 @@ final class AppStore: ObservableObject {
             let oldPending = previousIndex.unresolvedLegacySources[target] ?? []
             let origins = oldOrigins.filter { !sourceSet.contains($0.sourcePath) }
             let pending = oldPending.subtracting(sourceSet)
-            applicationDiscoveryIndex.originsByTarget[target] = origins.isEmpty ? nil : origins
-            applicationDiscoveryIndex.unresolvedLegacySources[target] = pending.isEmpty ? nil : pending
-            if origins.isEmpty && pending.isEmpty,
-               origins != oldOrigins || pending != oldPending {
-                removedTargets.insert(target)
-                applicationDiscoveryIndex.displayNames.removeValue(forKey: target)
+            // Keep known identities, including empty entries, from becoming
+            // legacy unknowns again after their sources have been removed.
+            if !origins.isEmpty || previousIndex.originsByTarget[target] != nil || pending.isEmpty {
+                applicationDiscoveryIndex.originsByTarget[target] = origins
             }
-        }
-        if applicationDiscoveryIndex != previousIndex {
-            applicationDiscoveryIndex.save(to: applicationDiscoveryDefaults)
+            applicationDiscoveryIndex.unresolvedLegacySources[target] = pending.isEmpty ? nil : pending
+            if origins.isEmpty && !oldOrigins.isEmpty {
+                // An explicit removal takes precedence over hypothetical legacy
+                // origins, but never over another recorded discovery source.
+                removedTargets.insert(target)
+            }
         }
 
         var removalSet = Set<String>()
         var removalRawPaths = Set<String>()
+        var rawPathsByTarget: [String: Set<String>] = [:]
         func considerRemoval(path raw: String, savedSource: String? = nil) {
             let normalized = standardizedFilePath(raw)
             let target = applicationTargetPath(for: normalized)
-            let remove: Bool
-            if indexedTargets.contains(target) {
-                // Removing one source must not remove an app still discovered
-                // through another source, even when its target lies in this one.
-                remove = removedTargets.contains(target)
-            } else {
-                remove = savedSource.flatMap(normalizeApplicationPath).map(sourceSet.contains) == true
-                    || sourceSet.contains { ApplicationPath.isPath(normalized, within: $0) }
-            }
-            if remove {
-                removalSet.insert(normalized)
-                removalRawPaths.insert(raw)
+            rawPathsByTarget[target, default: []].insert(raw)
+            let hasOtherKnownSource = previousIndex.originsByTarget[target]?.contains {
+                !sourceSet.contains($0.sourcePath)
+            } == true
+            let belongsToRemovedSource = removedTargets.contains(target)
+                || savedSource.flatMap(normalizeApplicationPath).map(sourceSet.contains) == true
+                || sourceSet.contains { ApplicationPath.isPath(normalized, within: $0) }
+            if belongsToRemovedSource && !hasOtherKnownSource {
+                removedTargets.insert(target)
             }
         }
         for (path, placeholder) in missingPlaceholders {
@@ -2748,6 +2747,19 @@ final class AppStore: ObservableObject {
                 for app in folder.apps { considerRemoval(path: app.url.path) }
             case .empty: break
             }
+        }
+
+        for target in removedTargets {
+            for raw in rawPathsByTarget[target] ?? [] {
+                removalSet.insert(standardizedFilePath(raw))
+                removalRawPaths.insert(raw)
+            }
+            applicationDiscoveryIndex.originsByTarget[target] = []
+            applicationDiscoveryIndex.unresolvedLegacySources.removeValue(forKey: target)
+            applicationDiscoveryIndex.displayNames.removeValue(forKey: target)
+        }
+        if applicationDiscoveryIndex != previousIndex {
+            applicationDiscoveryIndex.save(to: applicationDiscoveryDefaults)
         }
 
         guard !removalSet.isEmpty else { return }

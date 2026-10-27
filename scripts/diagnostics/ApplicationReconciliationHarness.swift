@@ -1066,7 +1066,7 @@ func testLegacyLayoutWithoutDiscoveryIndex(_ root: URL, inaccessibleTarget: Bool
                "legacy recovery did not persist newly learned discovery origins")
 }
 
-func testLegacyUnknownSourceSurvivesOtherSourceRemoval(_ root: URL) throws {
+func testExplicitRemovalOverridesLegacyPendingSource(_ root: URL) throws {
     let fixture = try Fixture(root: root, name: "legacy-partial-source-migration")
     defer { fixture.restorePermissions() }
     let sourceB = fixture.directory.appendingPathComponent("SourceB")
@@ -1081,7 +1081,6 @@ func testLegacyUnknownSourceSurvivesOtherSourceRemoval(_ root: URL) throws {
     original.performInitialScanIfNeeded()
     try finishScan(original)
     try expect(original.apps.contains { $0.name == "SharedLegacy" }, "legacy shared-target control did not discover the app")
-    let originalLayout = try savedLayout(original)
     fixture.discoveryDefaults.removeObject(forKey: ApplicationDiscoveryIndex.defaultsKey)
     try fixture.denySubdirectory()
     let restarted = fixture.store(restarting: true)
@@ -1089,20 +1088,121 @@ func testLegacyUnknownSourceSurvivesOtherSourceRemoval(_ root: URL) throws {
     restarted.performInitialScanIfNeeded()
     try finishScan(restarted)
     restarted.removeCustomAppSource(path: sourceB.path)
+    let immediate = try savedLayout(restarted)
+    try expect(!restarted.apps.contains { $0.name == "SharedLegacy" }
+               && !persistedApplicationPaths(immediate).contains { $0.hasSuffix("/SharedLegacy.app") },
+               "an unresolved legacy candidate overrode explicit removal of the last confirmed source")
     restarted.rescan()
     try finishScan(restarted)
     let stillPartial = try savedLayout(restarted)
-    try expect(stillPartial == originalLayout,
-               "learning one legacy source discarded the unresolved source when the known source was removed")
+    try expect(!persistedApplicationPaths(stillPartial).contains { $0.hasSuffix("/SharedLegacy.app") },
+               "a partial scan restored an app explicitly removed with its confirmed source")
     fixture.restorePermissions()
     restarted.rescan()
     try finishScan(restarted)
+    let rediscovered = try savedLayout(restarted)
+    try expect(restarted.apps.contains { $0.name == "SharedLegacy" }
+               && persistedApplicationPaths(rediscovered).contains { $0.hasSuffix("/SharedLegacy.app") },
+               "recovering the other source did not rediscover its actual surviving link")
     try fixture.fileManager.removeItem(at: linkA)
     restarted.rescan()
     try finishScan(restarted)
     let removed = try savedLayout(restarted)
     try expect(!persistedApplicationPaths(removed).contains { $0.hasSuffix("/SharedLegacy.app") },
                "completed legacy migration continued retaining a deleted discovery link")
+}
+
+func testLegacySourceRemovalDuringPermanentPartialScan(_ root: URL, linked: Bool) throws {
+    let fixture = try Fixture(root: root, name: linked ? "legacy-remove-linked-source-partial" : "legacy-remove-ordinary-source-partial")
+    defer { fixture.restorePermissions() }
+    let sourceB = fixture.directory.appendingPathComponent("SourceB")
+    try fixture.fileManager.createDirectory(at: sourceB, withIntermediateDirectories: true)
+    let target = linked ? fixture.directory.appendingPathComponent("ExternalTargets/FromB.app")
+        : sourceB.appendingPathComponent("FromB.app")
+    try fixture.createApp(target)
+    if linked {
+        try fixture.fileManager.createSymbolicLink(at: sourceB.appendingPathComponent("FromB.app"), withDestinationURL: target)
+    }
+    // Use a consistent source spelling so this control isolates pending legacy
+    // candidates from /private versus non-/private path aliases.
+    let sourcePath = sourceB.resolvingSymlinksInPath().path
+    let original = fixture.store()
+    original.customAppSourcePaths = [sourcePath]
+    original.performInitialScanIfNeeded()
+    try finishScan(original)
+    try expect(original.apps.contains { $0.name == "FromB" }, "legacy source-removal control did not discover FromB")
+    fixture.discoveryDefaults.removeObject(forKey: ApplicationDiscoveryIndex.defaultsKey)
+    try fixture.denySubdirectory()
+    let upgraded = fixture.store(restarting: true)
+    upgraded.customAppSourcePaths = [sourcePath]
+    upgraded.performInitialScanIfNeeded()
+    try finishScan(upgraded)
+    let index = ApplicationDiscoveryIndex.load(from: fixture.discoveryDefaults)
+    guard let indexedTarget = index.originsByTarget.keys.first(where: { $0.hasSuffix("/FromB.app") }) else {
+        throw TestFailure(description: "partial upgrade did not learn the readable source's origin")
+    }
+    try expect(index.originsByTarget[indexedTarget]?.contains { $0.sourcePath == sourcePath } == true
+               && index.unresolvedLegacySources[indexedTarget]?.isEmpty == false,
+               "fixture must combine a confirmed SourceB origin with unresolved legacy candidates")
+    func expectRemoved(_ store: ProbeStore, phase: String) throws {
+        let rows = try savedLayout(store)
+        try expect(!store.apps.contains { $0.name == "FromB" }
+                   && !persistedApplicationPaths(rows).contains { $0.hasSuffix("/FromB.app") },
+                   "explicit source removal did not stay effective \(phase)")
+    }
+    upgraded.removeCustomAppSource(path: sourcePath)
+    try expectRemoved(upgraded, phase: "immediately")
+    for _ in 0..<3 {
+        upgraded.rescan()
+        try finishScan(upgraded)
+        try expectRemoved(upgraded, phase: "during repeated partial scans")
+    }
+    let restarted = fixture.store(restarting: true)
+    restarted.performInitialScanIfNeeded()
+    try finishScan(restarted)
+    try expectRemoved(restarted, phase: "after restart with the other subtree still unreadable")
+}
+
+func testRemovingUnconfirmedCandidateDoesNotRemoveLegacyApp(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "legacy-remove-unconfirmed-candidate")
+    defer { fixture.restorePermissions() }
+    let target = fixture.directory.appendingPathComponent("ExternalTargets/Unresolved.app")
+    try fixture.createApp(target)
+    try fixture.fileManager.createSymbolicLink(at: fixture.restricted.appendingPathComponent("Unresolved.app"), withDestinationURL: target)
+    let unconfirmedSource = fixture.directory.appendingPathComponent("OfflineCandidate/Apps").path
+    let original = fixture.store()
+    original.customAppSourcePaths = [unconfirmedSource]
+    original.performInitialScanIfNeeded()
+    try finishScan(original)
+    try expect(original.apps.contains { $0.name == "Unresolved" }, "unconfirmed-source control did not discover its real source")
+    fixture.discoveryDefaults.removeObject(forKey: ApplicationDiscoveryIndex.defaultsKey)
+    try fixture.denySubdirectory()
+    let upgraded = fixture.store(restarting: true)
+    upgraded.customAppSourcePaths = [unconfirmedSource]
+    upgraded.performInitialScanIfNeeded()
+    try finishScan(upgraded)
+    let index = ApplicationDiscoveryIndex.load(from: fixture.discoveryDefaults)
+    guard let indexedTarget = index.unresolvedLegacySources.keys.first(where: { $0.hasSuffix("/Unresolved.app") }) else {
+        throw TestFailure(description: "legacy fixture did not retain unresolved source candidates")
+    }
+    try expect((index.originsByTarget[indexedTarget] ?? []).isEmpty
+               && index.unresolvedLegacySources[indexedTarget]?.contains(unconfirmedSource) == true
+               && !indexedTarget.hasPrefix(unconfirmedSource + "/"),
+               "candidate removal requires no confirmed origin or path ownership")
+    let expected = try savedLayout(upgraded)
+    upgraded.removeCustomAppSource(path: unconfirmedSource)
+    let immediate = try savedLayout(upgraded)
+    try expect(immediate == expected, "removing a mere legacy candidate removed an unrelated app")
+    for _ in 0..<3 {
+        upgraded.rescan()
+        try finishScan(upgraded)
+    }
+    let restarted = fixture.store(restarting: true)
+    restarted.performInitialScanIfNeeded()
+    try finishScan(restarted)
+    let afterRestart = try savedLayout(restarted)
+    try expect(restarted.apps.contains { $0.name == "Unresolved" } && afterRestart == expected,
+               "removing an unconfirmed candidate lost an app protected by another unreadable source")
 }
 
 func testOnlyExternalTargetsInaccessible(_ root: URL, restart: Bool) throws {
@@ -1251,7 +1351,10 @@ let tests: [(String, (URL) throws -> Void)] = [
     ("target inside removed source survives through another source", { try testSharedTargetSurvivesOneSourceRemoval($0, targetInsideSource: true) }),
     ("legacy layout without discovery index survives source permission error", { try testLegacyLayoutWithoutDiscoveryIndex($0, inaccessibleTarget: false) }),
     ("legacy layout without discovery index survives target permission error", { try testLegacyLayoutWithoutDiscoveryIndex($0, inaccessibleTarget: true) }),
-    ("legacy unknown source survives removal of a newly learned source", testLegacyUnknownSourceSurvivesOtherSourceRemoval),
+    ("explicit source removal overrides unresolved legacy candidates", testExplicitRemovalOverridesLegacyPendingSource),
+    ("legacy ordinary source removal survives partial scans and restart", { try testLegacySourceRemovalDuringPermanentPartialScan($0, linked: false) }),
+    ("legacy linked source removal survives partial scans and restart", { try testLegacySourceRemovalDuringPermanentPartialScan($0, linked: true) }),
+    ("removing an unconfirmed legacy candidate does not remove an unrelated app", testRemovingUnconfirmedCandidateDoesNotRemoveLegacyApp),
     ("target-only permission error preserves running layout and recovery", { try testOnlyExternalTargetsInaccessible($0, restart: false) }),
     ("target-only permission error preserves restarted layout and recovery", { try testOnlyExternalTargetsInaccessible($0, restart: true) }),
     ("page entries preserve application names in cold folder placeholders", { try testColdFolderPlaceholderNames($0, legacy: false) }),
