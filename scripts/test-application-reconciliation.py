@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -30,8 +31,8 @@ DECLARATIONS = [
     "    private func purgeMissingPlaceholders(",
     "    private func updateHiddenAppPaths(",
     "    func performInitialScanIfNeeded(",
+    "    func reconcileApplicationsOnWindowShow(",
     "    func scanApplications(loadPersistedOrder:",
-    "    func applyOrderAndFolders(",
     "    private func requestApplicationReconciliation(",
     "    private func schedulePendingApplicationReconciliation(",
     "    private func startPendingApplicationReconciliation(",
@@ -79,6 +80,8 @@ VERSIONED_DECLARATIONS = [
     "    private func isInsideAnotherApp(",
     "    private func applicationSourcesDidChange(",
     "    private func invalidateApplicationDiscoveryForImportedLayout(",
+    "    func applyOrderAndFolders(",
+    "    func applyImportedOrderAndFolders(",
 ]
 
 
@@ -128,7 +131,34 @@ def declaration(source: str, marker: str) -> str:
     raise ValueError(f"Unterminated declaration matching {marker!r}")
 
 
-def run_tests(directory: Path, app_store: Path) -> int:
+def window_show_store_calls(lifecycle_root: Path) -> str:
+    """Use the real call order for an already-loaded window, without AppKit UI."""
+    app_source = (lifecycle_root / "LaunchNext/LaunchpadApp.swift").read_text()
+    view_source = (lifecycle_root / "LaunchNext/LaunchpadView.swift").read_text()
+    show = declaration(app_source, "    private func performShowWindow(")
+    observer = declaration(view_source, "    private func setupWindowShownObserver(")
+    notification = "NotificationCenter.default.post(name: .launchpadWindowShown"
+    if show.count(notification) != 1:
+        raise ValueError("Expected exactly one window-shown notification in performShowWindow")
+    before, after = show.split(notification)
+
+    def calls(block: str) -> list[str]:
+        result = []
+        for match in re.finditer(r"\b(?:self\.)?appStore\.([A-Za-z_]\w*)\s*\(", block):
+            # Current lifecycle calls take no arguments. A changed signature
+            # requires an explicit adapter rather than silently skipping it.
+            if not re.match(r"\s*\)", block[match.end():]):
+                raise ValueError(f"Window lifecycle call needs an adapter: {match.group(1)}")
+            result.append(f"        {match.group(1)}()")
+        return result
+
+    ordered = calls(before) + calls(observer) + calls(after)
+    if not ordered:
+        raise ValueError("Window lifecycle has no AppStore calls to exercise")
+    return "\n".join(ordered)
+
+
+def run_tests(directory: Path, app_store: Path, lifecycle_root: Path = REPOSITORY) -> int:
     source = app_store.read_text()
     model_source = (REPOSITORY / "LaunchNext/FolderInfo.swift").read_text()
     models = "\n\n".join(
@@ -148,13 +178,29 @@ def run_tests(directory: Path, app_store: Path) -> int:
         if "    private func applicationSourcesDidChange(" in source
         else "requestApplicationReconciliation(reason: .sourceChange)"
     )
+    import_call = (
+        "applyImportedOrderAndFolders()"
+        if "    func applyImportedOrderAndFolders(" in source
+        else "applyOrderAndFolders()"
+    )
+    fallback_lines = [line for line in source.splitlines()
+                      if line.startswith("    private static let applicationReconciliationFallbackInterval:")]
+    if len(fallback_lines) != 1:
+        raise ValueError("Expected one production window-show fallback interval")
+    window_calls = window_show_store_calls(lifecycle_root)
     for marker in ("// INSERT_PRODUCTION_DISCOVERY", "// INSERT_PRODUCTION_MODELS",
-                   "        // INSERT_SOURCE_CHANGE_CALL", "    // INSERT_PRODUCTION_METHODS"):
+                   "        // INSERT_SOURCE_CHANGE_CALL", "        // INSERT_IMPORT_CALL",
+                   "        // INSERT_WINDOW_SHOW_CALLS", "    // INSERT_PRODUCTION_FALLBACK_INTERVAL",
+                   "    // INSERT_PRODUCTION_METHODS"):
         if template.count(marker) != 1:
             raise ValueError(f"Harness template must contain exactly one {marker}")
     generated = template.replace("// INSERT_PRODUCTION_DISCOVERY", discovery_source).replace(
         "// INSERT_PRODUCTION_MODELS", models
     ).replace("        // INSERT_SOURCE_CHANGE_CALL", "        " + source_change_call).replace(
+        "        // INSERT_IMPORT_CALL", "        " + import_call
+    ).replace("        // INSERT_WINDOW_SHOW_CALLS", window_calls).replace(
+        "    // INSERT_PRODUCTION_FALLBACK_INTERVAL", fallback_lines[0]
+    ).replace(
         "    // INSERT_PRODUCTION_METHODS", methods
     )
     main = directory / "main.swift"
@@ -191,6 +237,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app-store", type=Path, default=REPOSITORY / "LaunchNext/AppStore.swift",
                         help="AppStore source to test; useful for proving a regression fails before a fix")
+    parser.add_argument("--lifecycle-source-root", type=Path, default=REPOSITORY,
+                        help="Root containing LaunchNext/LaunchpadApp.swift and LaunchpadView.swift for window-show calls")
     parser.add_argument("--keep-temp", action="store_true", help="Keep generated Swift and logs for diagnostics")
     args = parser.parse_args()
     if sys.platform != "darwin":
@@ -200,9 +248,9 @@ def main() -> int:
     if args.keep_temp:
         directory = Path(tempfile.mkdtemp(prefix="launchnext-reconciliation-"))
         print(f"Diagnostic directory: {directory}")
-        return run_tests(directory, args.app_store)
+        return run_tests(directory, args.app_store, args.lifecycle_source_root)
     with tempfile.TemporaryDirectory(prefix="launchnext-reconciliation-") as temporary:
-        return run_tests(Path(temporary), args.app_store)
+        return run_tests(Path(temporary), args.app_store, args.lifecycle_source_root)
 
 
 if __name__ == "__main__":

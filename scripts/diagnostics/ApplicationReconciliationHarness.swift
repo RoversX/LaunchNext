@@ -62,7 +62,12 @@ final class ProbeStore {
     var hasPerformedInitialScan = false
     var hasAppliedOrderFromStore = true
     private var applicationReconciliationReasons: Set<ApplicationReconciliationReason> = []
-    var applicationReconciliationInProgress = false
+    var applicationReconciliationInProgress = false {
+        didSet {
+            if applicationReconciliationInProgress && !oldValue { reconciliationStartCount += 1 }
+        }
+    }
+    private(set) var reconciliationStartCount = 0
     var applicationReconciliationWorkItem: DispatchWorkItem?
     var lastSuccessfulApplicationReconciliationAt: Date?
     var needsReconciliationAfterExternalUninstall = false
@@ -77,6 +82,7 @@ final class ProbeStore {
     private var resetLayoutAfterApplicationScan = false
     static let applicationReconciliationEventDebounce: TimeInterval = 1.0
     static let applicationReconciliationRetryDelays: [TimeInterval] = [1, 3]
+    // INSERT_PRODUCTION_FALLBACK_INTERVAL
     let cacheManager = CacheAdapter()
     var itemsPerPage = 6
     var gridColumnsPerPage = 3
@@ -105,6 +111,17 @@ final class ProbeStore {
     func staleRescan() { requestApplicationReconciliation(reason: .staleWindowFallback) }
     func sourceConfigurationDidChange() {
         // INSERT_SOURCE_CHANGE_CALL
+    }
+    func applyImportedLayout() {
+        // INSERT_IMPORT_CALL
+    }
+    func presentWindowForTesting() {
+        // AppStore calls are extracted in order from the real show-window
+        // method and its notification observer. The fixture already has apps.
+        // INSERT_WINDOW_SHOW_CALLS
+    }
+    func makeSuccessfulScanStale() {
+        lastSuccessfulApplicationReconciliationAt = Date().addingTimeInterval(-Self.applicationReconciliationFallbackInterval - 1)
     }
     func finishFailedInitialScan() {
         applicationReconciliationInProgress = true
@@ -662,8 +679,9 @@ func persistedApplicationPaths(_ rows: [SavedSlot]) -> [String] {
     rows.compactMap(\.app) + rows.flatMap(\.folderApps) + rows.flatMap(\.pins)
 }
 
-func testDeletedLinkDuringUnrelatedPartialScan(_ root: URL, offlineSource: Bool) throws {
-    let fixture = try Fixture(root: root, name: offlineSource ? "deleted-link-offline-source" : "deleted-link-unreadable-subtree")
+func testDeletedLinkDuringUnrelatedPartialScan(_ root: URL, offlineSource: Bool, openWindow: Bool = false) throws {
+    let name = offlineSource ? "deleted-link-offline-source" : "deleted-link-unreadable-subtree"
+    let fixture = try Fixture(root: root, name: name + (openWindow ? "-window-shown" : ""))
     defer { fixture.restorePermissions() }
     let target = fixture.directory.appendingPathComponent("ExternalTargets/External.app")
     try fixture.createApp(target)
@@ -677,6 +695,10 @@ func testDeletedLinkDuringUnrelatedPartialScan(_ root: URL, offlineSource: Bool)
     try finishScan(store)
     try expect(store.apps.contains { $0.name == "External" }, "readable control did not discover the external link")
     if !offlineSource { try fixture.denySubdirectory() }
+    if openWindow {
+        store.presentWindowForTesting()
+        try finishScan(store)
+    }
     try fixture.fileManager.removeItem(at: link)
     try expect(fixture.fileManager.fileExists(atPath: target.path), "unlink must leave the external app intact")
     // Repeated partial scans must not indefinitely protect a link whose own
@@ -727,8 +749,8 @@ func testRemoveOrdinarySourceDuringPartialScan(_ root: URL, offlineSource: Bool)
                "partial reconciliation restored an application from a removed ordinary source")
 }
 
-func testRemoveLinkedSourceWithOfflineRoot(_ root: URL) throws {
-    let fixture = try Fixture(root: root, name: "remove-linked-source-offline-root")
+func testRemoveLinkedSourceWithOfflineRoot(_ root: URL, openWindow: Bool = false) throws {
+    let fixture = try Fixture(root: root, name: "remove-linked-source-offline-root" + (openWindow ? "-window-shown" : ""))
     defer { fixture.restorePermissions() }
     let custom = fixture.directory.appendingPathComponent("RemovableB")
     try fixture.fileManager.createDirectory(at: custom, withIntermediateDirectories: true)
@@ -740,6 +762,10 @@ func testRemoveLinkedSourceWithOfflineRoot(_ root: URL) throws {
     store.performInitialScanIfNeeded()
     try finishScan(store)
     try expect(store.apps.contains { $0.name == "FromBLink" }, "linked source control did not discover its target")
+    if openWindow {
+        store.presentWindowForTesting()
+        try finishScan(store)
+    }
     store.removeCustomAppSource(path: custom.path)
     let immediate = try savedLayout(store)
     try expect(!store.apps.contains { $0.name == "FromBLink" }
@@ -973,7 +999,7 @@ func testImportSupersedesInFlightReset(_ root: URL) throws {
     context.insert(PageEntryData(slotId: "page-0-pos-1", pageIndex: 0, position: 1, kind: "app", appPath: visible.url.path))
     try context.save()
     let expected = try savedLayout(store)
-    store.applyOrderAndFolders()
+    store.applyImportedLayout()
     try expect(store.folders.first?.id == importedID, "import did not apply its new folder before the reset result")
     try finishScan(store)
     let first = try savedLayout(store)
@@ -1140,6 +1166,56 @@ func testColdFolderPlaceholderNames(_ root: URL, legacy: Bool) throws {
                "cold name handling replaced or removed the persisted folder member")
 }
 
+func testRecentWindowShowPreservesDiscovery(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "recent-window-show-preserves-discovery")
+    defer { fixture.restorePermissions() }
+    let store = try seedExternalApplicationLinks(fixture)
+    let indexBefore = ApplicationDiscoveryIndex.load(from: fixture.discoveryDefaults)
+    try expect(!indexBefore.originsByTarget.isEmpty, "window-show control has no persisted origins")
+    let startsBefore = store.reconciliationStartCount
+    store.presentWindowForTesting()
+    try finishScan(store)
+    let indexAfter = ApplicationDiscoveryIndex.load(from: fixture.discoveryDefaults)
+    let layoutAfter = try savedLayout(store)
+    try expect(store.reconciliationStartCount == startsBefore,
+               "showing a window after a recent successful scan started another scan")
+    try expect(indexAfter == indexBefore,
+               "showing a window cleared or changed persisted discovery origins, aliases, or names")
+    try expect(layoutAfter == fixture.originalLayout, "showing a window changed the saved layout")
+}
+
+func testStaleWindowShowStartsOneScan(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "stale-window-show-single-scan")
+    defer { fixture.restorePermissions() }
+    let store = try fixture.seedLayout()
+    let startsBefore = store.reconciliationStartCount
+    store.makeSuccessfulScanStale()
+    store.presentWindowForTesting()
+    try finishScan(store)
+    let layoutAfter = try savedLayout(store)
+    try expect(store.reconciliationStartCount == startsBefore + 1,
+               "showing a stale window did not perform exactly one reconciliation")
+    try expect(layoutAfter == fixture.originalLayout, "stale-window reconciliation changed the saved layout")
+}
+
+func testWindowShowDoesNotRestartInFlightScan(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "window-show-during-scan")
+    defer { fixture.restorePermissions() }
+    let store = try fixture.seedLayout()
+    store.rescan()
+    try expect(store.applicationReconciliationInProgress, "window-show control did not start its pending scan")
+    let startsBeforeShow = store.reconciliationStartCount
+    // Its main-queue callback cannot run until both real window-show call sites
+    // finish, so an accidental load/generation change deterministically causes
+    // the unwanted second reconciliation rather than relying on scan timing.
+    store.presentWindowForTesting()
+    try finishScan(store)
+    let layoutAfter = try savedLayout(store)
+    try expect(store.reconciliationStartCount == startsBeforeShow,
+               "showing a window invalidated or restarted an already-running scan")
+    try expect(layoutAfter == fixture.originalLayout, "window show during a scan changed the saved layout")
+}
+
 let root = URL(fileURLWithPath: CommandLine.arguments[1])
 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 let tests: [(String, (URL) throws -> Void)] = [
@@ -1164,7 +1240,7 @@ let tests: [(String, (URL) throws -> Void)] = [
     ("unreadable subtree does not retain deleted readable links", { try testDeletedLinkDuringUnrelatedPartialScan($0, offlineSource: false) }),
     ("real API removes ordinary source alongside offline source", { try testRemoveOrdinarySourceDuringPartialScan($0, offlineSource: true) }),
     ("real API removes ordinary source alongside unreadable subtree", { try testRemoveOrdinarySourceDuringPartialScan($0, offlineSource: false) }),
-    ("real API removes linked source alongside offline source", testRemoveLinkedSourceWithOfflineRoot),
+    ("real API removes linked source alongside offline source", { try testRemoveLinkedSourceWithOfflineRoot($0) }),
     ("restart uses persisted origins to remove a deleted link", { try testDiscoveryOriginsSurviveRestart($0, removeSource: false) }),
     ("restart removes a source before scanning by using persisted origins", { try testDiscoveryOriginsSurviveRestart($0, removeSource: true) }),
     ("source removal invalidates an in-flight scan", testSourceRemovalInvalidatesInFlightScan),
@@ -1179,7 +1255,13 @@ let tests: [(String, (URL) throws -> Void)] = [
     ("target-only permission error preserves running layout and recovery", { try testOnlyExternalTargetsInaccessible($0, restart: false) }),
     ("target-only permission error preserves restarted layout and recovery", { try testOnlyExternalTargetsInaccessible($0, restart: true) }),
     ("page entries preserve application names in cold folder placeholders", { try testColdFolderPlaceholderNames($0, legacy: false) }),
-    ("legacy entries preserve application names in cold folder placeholders", { try testColdFolderPlaceholderNames($0, legacy: true) })
+    ("legacy entries preserve application names in cold folder placeholders", { try testColdFolderPlaceholderNames($0, legacy: true) }),
+    ("window show preserves unlink cleanup alongside offline source", { try testDeletedLinkDuringUnrelatedPartialScan($0, offlineSource: true, openWindow: true) }),
+    ("window show preserves unlink cleanup alongside unreadable subtree", { try testDeletedLinkDuringUnrelatedPartialScan($0, offlineSource: false, openWindow: true) }),
+    ("window show preserves real API removal of an external linked target", { try testRemoveLinkedSourceWithOfflineRoot($0, openWindow: true) }),
+    ("recent window show preserves discovery without starting a scan", testRecentWindowShowPreservesDiscovery),
+    ("stale window show starts exactly one scan", testStaleWindowShowStartsOneScan),
+    ("window show does not restart an in-flight scan", testWindowShowDoesNotRestartInFlightScan)
 ]
 var failures = 0
 var skipped = 0

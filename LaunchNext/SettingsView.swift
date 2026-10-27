@@ -5737,7 +5737,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 if importData {
                     if srcDir.standardizedFileURL != destDir.standardizedFileURL {
                         try replaceDirectory(with: srcDir, at: destDir)
-                        appStore.applyOrderAndFolders()
+                        appStore.applyImportedOrderAndFolders()
                         appStore.refresh()
                     }
                 }

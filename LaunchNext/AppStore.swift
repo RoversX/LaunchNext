@@ -3542,7 +3542,9 @@ final class AppStore: ObservableObject {
     }
 
     // MARK: - Order Persistence
-    func applyOrderAndFolders() {
+    /// An imported layout replaces the saved application identities. Ordinary
+    /// window presentation must keep the discovery index and scan generation.
+    func applyImportedOrderAndFolders() {
         invalidateApplicationDiscoveryForImportedLayout()
         loadAllOrder()
     }
@@ -6840,7 +6842,7 @@ final class AppStore: ObservableObject {
 
             // 导入成功后刷新应用数据
             DispatchQueue.main.async { [weak self] in
-                self?.applyOrderAndFolders()
+                self?.applyImportedOrderAndFolders()
                 self?.scanApplicationsWithOrderPreservation()
                 self?.triggerGridRefresh()
             }
@@ -6863,7 +6865,7 @@ final class AppStore: ObservableObject {
 
             // 导入成功后刷新应用数据
             DispatchQueue.main.async { [weak self] in
-                self?.applyOrderAndFolders()
+                self?.applyImportedOrderAndFolders()
                 self?.scanApplicationsWithOrderPreservation()
                 self?.triggerGridRefresh()
             }

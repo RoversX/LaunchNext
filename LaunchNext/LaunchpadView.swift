@@ -2363,9 +2363,6 @@ extension LaunchpadView {
             isKeyboardNavigationActive = false
             selectedIndex = 0
             isSearchFieldFocused = true
-            if !appStore.apps.isEmpty {
-                appStore.applyOrderAndFolders()
-            }
         }
     }
     
