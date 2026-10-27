@@ -3,8 +3,10 @@ import Foundation
 import SwiftData
 
 // This file is a template consumed by test-application-reconciliation.py.
-// Scanner, layout, placeholder, and persistence methods are extracted unchanged
-// from AppStore.swift. Only unrelated UI/icon/cache behavior is adapted below.
+// The discovery runtime and AppStore's scanner, layout, placeholder, and
+// persistence methods are compiled unchanged. Unrelated UI/icon/cache behavior
+// is adapted; source metadata uses a disposable UserDefaults suite per fixture.
+// INSERT_PRODUCTION_DISCOVERY
 // INSERT_PRODUCTION_MODELS
 
 struct AppInfo: Hashable {
@@ -50,7 +52,10 @@ final class CacheAdapter {
 final class ProbeStore {
     var systemApplicationSearchPaths: [String] = []
     var customAppSourcePaths: [String] = []
-    var apps: [AppInfo] = []
+    var apps: [AppInfo] = [] {
+        didSet { inventoryObserver?(apps) }
+    }
+    var inventoryObserver: (([AppInfo]) -> Void)?
     var folders: [FolderInfo] = []
     var items: [LaunchpadItem] = []
     var isInitialLoading = true
@@ -61,9 +66,17 @@ final class ProbeStore {
     var applicationReconciliationWorkItem: DispatchWorkItem?
     var lastSuccessfulApplicationReconciliationAt: Date?
     var needsReconciliationAfterExternalUninstall = false
+    // Retained so --app-store can still execute pre-index source snapshots.
     private var unavailableApplicationDirectories = Set<String>()
     private var retainedUnscannedApplicationPaths = Set<String>()
+    private var applicationDiscoveryIndex: ApplicationDiscoveryIndex
+    private var applicationScanSnapshot: ApplicationDiscoverySnapshot?
+    private let applicationDiscoveryDefaults: UserDefaults
+    private var applicationReconciliationGeneration = 0
+    private var applicationReconciliationRetryCount = 0
+    private var resetLayoutAfterApplicationScan = false
     static let applicationReconciliationEventDebounce: TimeInterval = 1.0
+    static let applicationReconciliationRetryDelays: [TimeInterval] = [1, 3]
     let cacheManager = CacheAdapter()
     var itemsPerPage = 6
     var gridColumnsPerPage = 3
@@ -71,8 +84,17 @@ final class ProbeStore {
     var currentPage = 0
     var openFolder: FolderInfo?
     var hiddenAppPaths = Set<String>()
+    var customTitles: [String: String] = [:]
     var missingPlaceholders: [String: MissingAppPlaceholder] = [:]
     var modelContext: ModelContext?
+
+    init(discoveryDefaults: UserDefaults) {
+        applicationDiscoveryDefaults = discoveryDefaults
+        applicationDiscoveryIndex = ApplicationDiscoveryIndex.load(from: discoveryDefaults)
+    }
+
+    // Keep the real hidden-path update logic without writing user preferences.
+    private func persistHiddenApps(_ paths: Set<String>) {}
 
     func appInfo(from url: URL, preferredName: String? = nil) -> AppInfo {
         AppInfo(name: preferredName ?? url.deletingPathExtension().lastPathComponent, url: url)
@@ -81,6 +103,9 @@ final class ProbeStore {
     func triggerGridRefresh() {}
     func rescan() { requestApplicationReconciliation(reason: .explicit) }
     func staleRescan() { requestApplicationReconciliation(reason: .staleWindowFallback) }
+    func sourceConfigurationDidChange() {
+        // INSERT_SOURCE_CHANGE_CALL
+    }
     func finishFailedInitialScan() {
         applicationReconciliationInProgress = true
         finishApplicationReconciliation(reasons: [.initial], succeeded: false)
@@ -141,6 +166,8 @@ final class Fixture {
     let restricted: URL
     let container: ModelContainer
     let customSource: Bool
+    let defaultsSuiteName: String
+    let discoveryDefaults: UserDefaults
     let fileManager = FileManager.default
     var originalLayout: [SavedSlot] = []
     var reportedUnavailablePaths: [String] = []
@@ -150,6 +177,8 @@ final class Fixture {
         source = directory.appendingPathComponent("Applications")
         restricted = source.appendingPathComponent("Restricted")
         self.customSource = customSource
+        defaultsSuiteName = "test.launchnext.reconciliation." + UUID().uuidString
+        discoveryDefaults = UserDefaults(suiteName: defaultsSuiteName)!
         let schema = Schema([PageEntryData.self, TopItemData.self])
         container = try ModelContainer(for: schema, configurations: [
             ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
@@ -171,7 +200,9 @@ final class Fixture {
     }
 
     func store(restarting: Bool = false) -> ProbeStore {
-        let store = ProbeStore()
+        // A restart reloads production-encoded metadata from this fixture's
+        // private suite, rather than copying another store's in-memory index.
+        let store = ProbeStore(discoveryDefaults: discoveryDefaults)
         store.modelContext = ModelContext(container)
         store.hasAppliedOrderFromStore = !restarting
         if customSource {
@@ -232,6 +263,7 @@ final class Fixture {
 
     deinit {
         restorePermissions()
+        discoveryDefaults.removePersistentDomain(forName: defaultsSuiteName)
         try? fileManager.removeItem(at: directory)
     }
 }
@@ -626,6 +658,488 @@ func testInaccessibleExternalTargets(_ root: URL, restart: Bool) throws {
                "old permission-error protection retained an external target that was actually deleted")
 }
 
+func persistedApplicationPaths(_ rows: [SavedSlot]) -> [String] {
+    rows.compactMap(\.app) + rows.flatMap(\.folderApps) + rows.flatMap(\.pins)
+}
+
+func testDeletedLinkDuringUnrelatedPartialScan(_ root: URL, offlineSource: Bool) throws {
+    let fixture = try Fixture(root: root, name: offlineSource ? "deleted-link-offline-source" : "deleted-link-unreadable-subtree")
+    defer { fixture.restorePermissions() }
+    let target = fixture.directory.appendingPathComponent("ExternalTargets/External.app")
+    try fixture.createApp(target)
+    let link = fixture.source.appendingPathComponent("External.app")
+    try fixture.fileManager.createSymbolicLink(at: link, withDestinationURL: target)
+    let store = fixture.store()
+    if offlineSource {
+        store.customAppSourcePaths = [fixture.directory.appendingPathComponent("NotMounted/Apps").path]
+    }
+    store.performInitialScanIfNeeded()
+    try finishScan(store)
+    try expect(store.apps.contains { $0.name == "External" }, "readable control did not discover the external link")
+    if !offlineSource { try fixture.denySubdirectory() }
+    try fixture.fileManager.removeItem(at: link)
+    try expect(fixture.fileManager.fileExists(atPath: target.path), "unlink must leave the external app intact")
+    // Repeated partial scans must not indefinitely protect a link whose own
+    // source remained readable and reported its removal.
+    for _ in 0..<2 {
+        store.rescan()
+        try finishScan(store)
+    }
+    let rows = try savedLayout(store)
+    try expect(!store.apps.contains { $0.name == "External" },
+               "unrelated unavailable source retained a deleted readable application link")
+    try expect(!persistedApplicationPaths(rows).contains { $0.hasSuffix("/External.app") },
+               "deleted readable link remained in the saved layout")
+    try expect(store.apps.contains { $0.name == "SavedTop" },
+               "removing a readable link discarded an unrelated existing application")
+}
+
+func testRemoveOrdinarySourceDuringPartialScan(_ root: URL, offlineSource: Bool) throws {
+    let fixture = try Fixture(root: root, name: offlineSource ? "remove-ordinary-offline-source" : "remove-ordinary-unreadable-subtree")
+    defer { fixture.restorePermissions() }
+    let custom = fixture.directory.appendingPathComponent("RemovableB")
+    try fixture.createApp(custom.appendingPathComponent("FromB.app"))
+    let offline = fixture.directory.appendingPathComponent("NotMounted/Apps").path
+    let store = fixture.store()
+    store.customAppSourcePaths = offlineSource ? [offline, custom.path] : [custom.path]
+    store.performInitialScanIfNeeded()
+    try finishScan(store)
+    guard let app = store.apps.first(where: { $0.name == "FromB" }) else {
+        throw TestFailure(description: "ordinary source control did not discover FromB")
+    }
+    // Foundation may return /tmp for a configured /private/tmp path. Match the
+    // inventory spelling here to isolate ordinary source removal from aliases.
+    let sourcePath = app.url.deletingLastPathComponent().path
+    store.customAppSourcePaths = offlineSource ? [offline, sourcePath] : [sourcePath]
+    if !offlineSource {
+        try fixture.denySubdirectory()
+        store.rescan()
+        try finishScan(store)
+    }
+    store.removeCustomAppSource(path: sourcePath)
+    try expect(!store.apps.contains { $0.name == "FromB" },
+               "real source removal API did not immediately remove its ordinary application")
+    store.rescan()
+    try finishScan(store)
+    let rows = try savedLayout(store)
+    try expect(!store.apps.contains { $0.name == "FromB" }
+               && !persistedApplicationPaths(rows).contains { $0.hasSuffix("/FromB.app") },
+               "partial reconciliation restored an application from a removed ordinary source")
+}
+
+func testRemoveLinkedSourceWithOfflineRoot(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "remove-linked-source-offline-root")
+    defer { fixture.restorePermissions() }
+    let custom = fixture.directory.appendingPathComponent("RemovableB")
+    try fixture.fileManager.createDirectory(at: custom, withIntermediateDirectories: true)
+    let target = fixture.directory.appendingPathComponent("ExternalTargets/FromBLink.app")
+    try fixture.createApp(target)
+    try fixture.fileManager.createSymbolicLink(at: custom.appendingPathComponent("FromBLink.app"), withDestinationURL: target)
+    let store = fixture.store()
+    store.customAppSourcePaths = [fixture.directory.appendingPathComponent("NotMounted/Apps").path, custom.path]
+    store.performInitialScanIfNeeded()
+    try finishScan(store)
+    try expect(store.apps.contains { $0.name == "FromBLink" }, "linked source control did not discover its target")
+    store.removeCustomAppSource(path: custom.path)
+    let immediate = try savedLayout(store)
+    try expect(!store.apps.contains { $0.name == "FromBLink" }
+               && !persistedApplicationPaths(immediate).contains { $0.hasSuffix("/FromBLink.app") },
+               "removing a linked source did not immediately remove its external application")
+    for _ in 0..<2 {
+        store.rescan()
+        try finishScan(store)
+    }
+    let rows = try savedLayout(store)
+    try expect(!store.customAppSourcePaths.contains(custom.path), "real source removal API did not remove its configuration")
+    try expect(!store.apps.contains { $0.name == "FromBLink" }
+               && !persistedApplicationPaths(rows).contains { $0.hasSuffix("/FromBLink.app") },
+               "offline root protected an external target after its actual source was removed")
+}
+
+func testDiscoveryOriginsSurviveRestart(_ root: URL, removeSource: Bool) throws {
+    let fixture = try Fixture(root: root, name: removeSource ? "restart-remove-linked-source" : "restart-unlink-recorded-origin")
+    defer { fixture.restorePermissions() }
+    let source = fixture.directory.appendingPathComponent("CustomLinks")
+    try fixture.fileManager.createDirectory(at: source, withIntermediateDirectories: true)
+    let target = fixture.directory.appendingPathComponent("ExternalTargets/Recorded.app")
+    try fixture.createApp(target)
+    let link = source.appendingPathComponent("Recorded.app")
+    try fixture.fileManager.createSymbolicLink(at: link, withDestinationURL: target)
+    let configuredSources = [source.path, fixture.directory.appendingPathComponent("NotMounted/Apps").path]
+    let original = fixture.store()
+    original.customAppSourcePaths = configuredSources
+    original.performInitialScanIfNeeded()
+    try finishScan(original)
+    try expect(original.apps.contains { $0.name == "Recorded" }, "restart control did not discover its linked application")
+    let persistedIndex = ApplicationDiscoveryIndex.load(from: fixture.discoveryDefaults)
+    let origins = persistedIndex.originsByTarget.first { $0.key.hasSuffix("/Recorded.app") }?.value
+    try expect(origins?.contains { $0.entryPath.hasSuffix("/CustomLinks/Recorded.app") } == true,
+               "successful scan did not persist the actual source entry for restart")
+
+    if !removeSource { try fixture.fileManager.removeItem(at: link) }
+    let restarted = fixture.store(restarting: true)
+    restarted.customAppSourcePaths = configuredSources
+    if removeSource {
+        // Load the saved layout before the first scan: the removal must use
+        // genuinely persisted origins, without a fresh scan repopulating them.
+        restarted.loadAllOrder()
+        let deadline = Date().addingTimeInterval(15)
+        while !restarted.hasAppliedOrderFromStore && Date() < deadline {
+            _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        }
+        try expect(restarted.hasAppliedOrderFromStore, "restart did not finish loading the saved layout")
+        try expect(restarted.apps.contains { $0.name == "Recorded" }, "restart did not reconstruct the linked application")
+        restarted.removeCustomAppSource(path: source.path)
+        let immediate = try savedLayout(restarted)
+        try expect(!restarted.apps.contains { $0.name == "Recorded" }
+                   && !persistedApplicationPaths(immediate).contains { $0.hasSuffix("/Recorded.app") },
+                   "source removal before the first scan ignored persisted discovery origins")
+    }
+    restarted.performInitialScanIfNeeded()
+    try finishScan(restarted)
+    restarted.rescan()
+    try finishScan(restarted)
+    let rows = try savedLayout(restarted)
+    try expect(!restarted.apps.contains { $0.name == "Recorded" }
+               && !persistedApplicationPaths(rows).contains { $0.hasSuffix("/Recorded.app") },
+               "restart forgot the real source and retained an orphaned external target")
+}
+
+func testSourceRemovalInvalidatesInFlightScan(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "in-flight-source-removal")
+    defer { fixture.restorePermissions() }
+    let custom = fixture.directory.appendingPathComponent("CustomSource")
+    try fixture.createApp(custom.appendingPathComponent("InFlight.app"))
+    let store = fixture.store()
+    store.customAppSourcePaths = [custom.path]
+    store.performInitialScanIfNeeded()
+    try finishScan(store)
+    try expect(store.apps.contains { $0.name == "InFlight" }, "in-flight control did not discover its application")
+    store.rescan()
+    try expect(store.applicationReconciliationInProgress, "old-source scan did not start")
+    // The old scan has captured its sources, but its main-queue result cannot
+    // apply until this synchronous removal and property-observer hook finish.
+    store.removeCustomAppSource(path: custom.path)
+    var reintroduced = false
+    store.inventoryObserver = { apps in
+        if apps.contains(where: { $0.name == "InFlight" }) { reintroduced = true }
+    }
+    store.sourceConfigurationDidChange()
+    try finishScan(store)
+    let rows = try savedLayout(store)
+    try expect(!reintroduced, "an in-flight scan briefly restored an application from a removed source")
+    try expect(!persistedApplicationPaths(rows).contains { $0.hasSuffix("/InFlight.app") },
+               "an in-flight scan restored a removed source's persisted layout")
+    let index = ApplicationDiscoveryIndex.load(from: fixture.discoveryDefaults)
+    try expect(!index.originsByTarget.keys.contains { $0.hasSuffix("/InFlight.app") },
+               "an in-flight scan rewrote removed discovery origins")
+}
+
+func testPersistedPathAliasRemovedBeforeFirstScan(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "restart-remove-persisted-alias")
+    defer { fixture.restorePermissions() }
+    let custom = fixture.directory.appendingPathComponent("CustomLinks")
+    try fixture.fileManager.createDirectory(at: custom, withIntermediateDirectories: true)
+    let target = fixture.directory.appendingPathComponent("ExternalTargets/Alias.app")
+    try fixture.createApp(target)
+    try fixture.fileManager.createSymbolicLink(at: custom.appendingPathComponent("Alias.app"), withDestinationURL: target)
+    let original = fixture.store()
+    original.customAppSourcePaths = [custom.path]
+    original.performInitialScanIfNeeded()
+    try finishScan(original)
+    guard let app = original.apps.first(where: { $0.name == "Alias" }) else {
+        throw TestFailure(description: "alias control did not discover the application")
+    }
+    let aliasPath: String
+    if app.url.path.hasPrefix("/private/var/") || app.url.path.hasPrefix("/private/tmp/") {
+        aliasPath = String(app.url.path.dropFirst("/private".count))
+    } else if app.url.path.hasPrefix("/var/") || app.url.path.hasPrefix("/tmp/") {
+        aliasPath = "/private" + app.url.path
+    } else {
+        throw TestSkip(description: "temporary directory has no /private path alias on this runtime")
+    }
+    try expect(fixture.fileManager.fileExists(atPath: aliasPath), "alternate saved path does not resolve to the fixture application")
+    let aliasedApp = AppInfo(name: app.name, url: URL(fileURLWithPath: aliasPath))
+    original.apps = original.apps.map { $0.name == "Alias" ? aliasedApp : $0 }
+    original.items = original.items.map { item in
+        if case .app(let existing) = item, existing.name == "Alias" { return .app(aliasedApp) }
+        return item
+    }
+    original.saveAllOrder()
+    original.rescan()
+    try finishScan(original)
+    let saved = try savedLayout(original)
+    try expect(saved.contains { $0.app == aliasPath }, "scan replaced the saved path alias instead of preserving layout identity")
+    let restarted = fixture.store(restarting: true)
+    restarted.customAppSourcePaths = [custom.path]
+    restarted.loadAllOrder()
+    let deadline = Date().addingTimeInterval(15)
+    while !restarted.hasAppliedOrderFromStore && Date() < deadline {
+        _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
+    }
+    try expect(restarted.hasAppliedOrderFromStore, "alias restart did not finish loading saved layout")
+    restarted.removeCustomAppSource(path: custom.path)
+    let removed = try savedLayout(restarted)
+    try expect(!restarted.apps.contains { $0.name == "Alias" }
+               && !persistedApplicationPaths(removed).contains(aliasPath),
+               "source removal before the first scan ignored the persisted target mapping for a saved alias")
+}
+
+func testDirectoryAliasPermissionPreservesLayout(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "directory-alias-permission-layout")
+    defer { fixture.restorePermissions() }
+    let store = try seedExternalApplicationLinks(fixture)
+    let hidden = fixture.directory.appendingPathComponent("HiddenAliasParent")
+    try fixture.fileManager.createDirectory(at: hidden, withIntermediateDirectories: true)
+    defer { try? fixture.fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: hidden.path) }
+    let aliasDirectory = hidden.appendingPathComponent("Alias")
+    try fixture.fileManager.createSymbolicLink(at: aliasDirectory,
+        withDestinationURL: fixture.directory.appendingPathComponent("ExternalTargets"))
+    func aliased(_ app: AppInfo) -> AppInfo {
+        guard app.name == "LinkedTop" || app.name == "LinkedFolder" else { return app }
+        return AppInfo(name: app.name, url: aliasDirectory.appendingPathComponent(app.url.lastPathComponent))
+    }
+    store.apps = store.apps.map(aliased)
+    store.folders = store.folders.map { folder in
+        var copy = folder
+        copy.apps = folder.apps.map(aliased)
+        copy.pinnedAppPaths = [aliasDirectory.appendingPathComponent("LinkedFolder.app").path]
+        return copy
+    }
+    store.items = store.items.map { item in
+        switch item {
+        case .app(let app): return .app(aliased(app))
+        case .folder(let folder): return .folder(store.folders.first { $0.id == folder.id }!)
+        default: return item
+        }
+    }
+    store.saveAllOrder()
+    store.rescan()
+    try finishScan(store)
+    let expected = try savedLayout(store)
+    let topPath = aliasDirectory.appendingPathComponent("LinkedTop.app").path
+    let memberPath = aliasDirectory.appendingPathComponent("LinkedFolder.app").path
+    try expect(expected.contains { $0.app == topPath }
+               && expected.contains { $0.folderApps.contains(memberPath) && $0.pins == [memberPath] },
+               "directory-alias control did not preserve aliased top-level, folder, and pin paths")
+    let persisted = ApplicationDiscoveryIndex.load(from: fixture.discoveryDefaults)
+    try expect(persisted.targetsByPath[memberPath] != nil,
+               "readable alias scan did not persist its canonical target mapping")
+    try fixture.fileManager.setAttributes([.posixPermissions: 0o000], ofItemAtPath: hidden.path)
+    var permissionDenied = false
+    do {
+        _ = try fixture.fileManager.attributesOfItem(atPath: memberPath)
+    } catch {
+        let error = error as NSError
+        permissionDenied = error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoPermissionError
+    }
+    try expect(permissionDenied, "directory-alias fixture did not produce a real permission error")
+    try expect(fixture.fileManager.isReadableFile(atPath: fixture.restricted.path),
+               "the target's independent discovery source must remain readable")
+    store.rescan()
+    try finishScan(store)
+    let first = try savedLayout(store)
+    store.rescan()
+    try finishScan(store)
+    let second = try savedLayout(store)
+    try fixture.fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: hidden.path)
+    store.rescan()
+    try finishScan(store)
+    let recovered = try savedLayout(store)
+    try expect(first == expected && second == expected,
+               "denied directory alias lost a saved slot, folder member, or pin despite a readable canonical source")
+    try expect(recovered == expected, "directory-alias recovery changed the saved layout")
+    try expect(store.folders.first?.apps.map(\.name) == ["LinkedFolder", "SavedFolder"],
+               "directory-alias recovery failed to restore member metadata")
+}
+
+func testImportSupersedesInFlightReset(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "import-during-reset-scan")
+    defer { fixture.restorePermissions() }
+    let store = try fixture.seedLayout()
+    let visible = store.apps.first { $0.name == "Visible" }!
+    let top = store.apps.first { $0.name == "SavedTop" }!
+    let member = store.folders.flatMap(\.apps).first { $0.name == "SavedFolder" }!
+    store.scanApplications(loadPersistedOrder: false)
+    try expect(store.applicationReconciliationInProgress, "reset scan did not start before import")
+    // Match import's real sequence: replace persisted rows, then apply them
+    // while the old reset result is still waiting for its main-queue callback.
+    let context = store.modelContext!
+    for row in try context.fetch(FetchDescriptor<PageEntryData>()) { context.delete(row) }
+    let importedID = UUID().uuidString
+    context.insert(PageEntryData(slotId: "page-0-pos-0", pageIndex: 0, position: 0, kind: "folder",
+        folderId: importedID, folderName: "Imported Folder", appPaths: [top.url.path, member.url.path],
+        pinnedAppPaths: [member.url.path]))
+    context.insert(PageEntryData(slotId: "page-0-pos-1", pageIndex: 0, position: 1, kind: "app", appPath: visible.url.path))
+    try context.save()
+    let expected = try savedLayout(store)
+    store.applyOrderAndFolders()
+    try expect(store.folders.first?.id == importedID, "import did not apply its new folder before the reset result")
+    try finishScan(store)
+    let first = try savedLayout(store)
+    store.rescan()
+    try finishScan(store)
+    let second = try savedLayout(store)
+    try expect(first == expected && second == expected,
+               "stale reset intent erased the imported folder, membership, pins, or positions")
+}
+
+func testSharedTargetSurvivesOneSourceRemoval(_ root: URL, targetInsideSource: Bool) throws {
+    let fixture = try Fixture(root: root, name: targetInsideSource ? "shared-target-inside-removed-source" : "shared-target-source-removal")
+    defer { fixture.restorePermissions() }
+    let sources = ["SourceA", "SourceB"].map { fixture.directory.appendingPathComponent($0) }
+    let target = targetInsideSource ? sources[0].appendingPathComponent("Shared.app")
+        : fixture.directory.appendingPathComponent("ExternalTargets/Shared.app")
+    try fixture.createApp(target)
+    for source in sources {
+        try fixture.fileManager.createDirectory(at: source, withIntermediateDirectories: true)
+        if targetInsideSource && source == sources[0] { continue }
+        try fixture.fileManager.createSymbolicLink(at: source.appendingPathComponent("Shared.app"), withDestinationURL: target)
+    }
+    let store = fixture.store()
+    store.customAppSourcePaths = sources.map(\.path) + [fixture.directory.appendingPathComponent("NotMounted/Apps").path]
+    store.performInitialScanIfNeeded()
+    try finishScan(store)
+    try expect(store.apps.filter { $0.name == "Shared" }.count == 1, "shared target was not deduplicated")
+    let original = try savedLayout(store)
+    store.removeCustomAppSource(path: sources[0].path)
+    let immediate = try savedLayout(store)
+    try expect(store.apps.filter { $0.name == "Shared" }.count == 1 && immediate == original,
+               "source removal immediately discarded a target still reachable through another source")
+    store.rescan()
+    try finishScan(store)
+    let afterRemoval = try savedLayout(store)
+    try expect(store.apps.filter { $0.name == "Shared" }.count == 1 && afterRemoval == original,
+               "removing one source discarded or moved a target still reachable through another source")
+}
+
+func testLegacyLayoutWithoutDiscoveryIndex(_ root: URL, inaccessibleTarget: Bool) throws {
+    let fixture = try Fixture(root: root, name: inaccessibleTarget ? "legacy-index-missing-target-inaccessible" : "legacy-index-missing-source-inaccessible")
+    defer { fixture.restorePermissions() }
+    _ = try seedExternalApplicationLinks(fixture)
+    // Existing installations have layout rows but no discovery-index key.
+    fixture.discoveryDefaults.removeObject(forKey: ApplicationDiscoveryIndex.defaultsKey)
+    try fixture.denySubdirectory()
+    if inaccessibleTarget {
+        try fixture.fileManager.setAttributes([.posixPermissions: 0o000],
+            ofItemAtPath: fixture.directory.appendingPathComponent("ExternalTargets").path)
+    }
+    let restarted = fixture.store(restarting: true)
+    restarted.performInitialScanIfNeeded()
+    try finishScan(restarted)
+    let partial = try savedLayout(restarted)
+    fixture.restorePermissions()
+    restarted.rescan()
+    try finishScan(restarted)
+    let recovered = try savedLayout(restarted)
+    try expect(partial == fixture.originalLayout,
+               "upgrading a layout without discovery metadata discarded inaccessible linked applications")
+    try expect(recovered == fixture.originalLayout, "legacy discovery-index migration changed layout on recovery")
+    let persisted = ApplicationDiscoveryIndex.load(from: fixture.discoveryDefaults)
+    try expect(persisted.originsByTarget.keys.contains { $0.hasSuffix("/LinkedFolder.app") },
+               "legacy recovery did not persist newly learned discovery origins")
+}
+
+func testLegacyUnknownSourceSurvivesOtherSourceRemoval(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "legacy-partial-source-migration")
+    defer { fixture.restorePermissions() }
+    let sourceB = fixture.directory.appendingPathComponent("SourceB")
+    try fixture.fileManager.createDirectory(at: sourceB, withIntermediateDirectories: true)
+    let target = fixture.directory.appendingPathComponent("ExternalTargets/SharedLegacy.app")
+    try fixture.createApp(target)
+    let linkA = fixture.restricted.appendingPathComponent("SharedLegacy.app")
+    try fixture.fileManager.createSymbolicLink(at: linkA, withDestinationURL: target)
+    try fixture.fileManager.createSymbolicLink(at: sourceB.appendingPathComponent("SharedLegacy.app"), withDestinationURL: target)
+    let original = fixture.store()
+    original.customAppSourcePaths = [sourceB.path]
+    original.performInitialScanIfNeeded()
+    try finishScan(original)
+    try expect(original.apps.contains { $0.name == "SharedLegacy" }, "legacy shared-target control did not discover the app")
+    let originalLayout = try savedLayout(original)
+    fixture.discoveryDefaults.removeObject(forKey: ApplicationDiscoveryIndex.defaultsKey)
+    try fixture.denySubdirectory()
+    let restarted = fixture.store(restarting: true)
+    restarted.customAppSourcePaths = [sourceB.path]
+    restarted.performInitialScanIfNeeded()
+    try finishScan(restarted)
+    restarted.removeCustomAppSource(path: sourceB.path)
+    restarted.rescan()
+    try finishScan(restarted)
+    let stillPartial = try savedLayout(restarted)
+    try expect(stillPartial == originalLayout,
+               "learning one legacy source discarded the unresolved source when the known source was removed")
+    fixture.restorePermissions()
+    restarted.rescan()
+    try finishScan(restarted)
+    try fixture.fileManager.removeItem(at: linkA)
+    restarted.rescan()
+    try finishScan(restarted)
+    let removed = try savedLayout(restarted)
+    try expect(!persistedApplicationPaths(removed).contains { $0.hasSuffix("/SharedLegacy.app") },
+               "completed legacy migration continued retaining a deleted discovery link")
+}
+
+func testOnlyExternalTargetsInaccessible(_ root: URL, restart: Bool) throws {
+    let fixture = try Fixture(root: root, name: restart ? "target-only-restarted" : "target-only-running")
+    defer { fixture.restorePermissions() }
+    let original = try seedExternalApplicationLinks(fixture)
+    let external = fixture.directory.appendingPathComponent("ExternalTargets")
+    try fixture.fileManager.setAttributes([.posixPermissions: 0o000], ofItemAtPath: external.path)
+    try expect(fixture.fileManager.isReadableFile(atPath: fixture.restricted.path),
+               "target-only permission test requires a readable source directory")
+    var targetPermissionDenied = false
+    do {
+        _ = try fixture.fileManager.attributesOfItem(atPath: external.appendingPathComponent("LinkedTop.app").path)
+    } catch {
+        let error = error as NSError
+        targetPermissionDenied = error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoPermissionError
+    }
+    try expect(targetPermissionDenied, "external target did not produce a real permission error")
+    let store = restart ? fixture.store(restarting: true) : original
+    if restart { store.performInitialScanIfNeeded() } else { store.rescan() }
+    try finishScan(store)
+    let first = try savedLayout(store)
+    store.rescan()
+    try finishScan(store)
+    let second = try savedLayout(store)
+    fixture.restorePermissions()
+    store.rescan()
+    try finishScan(store)
+    let recovered = try savedLayout(store)
+    try expect(first == fixture.originalLayout, "target-only permission error discarded a folder member, pin, or top-level item")
+    try expect(second == fixture.originalLayout, "second target-only permission scan discarded retained layout or placeholders")
+    try expect(recovered == fixture.originalLayout, "restoring target access did not recover original folder membership and pins")
+    try expect(store.folders.first?.apps.map(\.name) == ["LinkedFolder", "SavedFolder"],
+               "target-only recovery did not refresh folder application names")
+}
+
+func testColdFolderPlaceholderNames(_ root: URL, legacy: Bool) throws {
+    let fixture = try Fixture(root: root, name: legacy ? "legacy-cold-placeholder-names" : "page-cold-placeholder-names")
+    defer { fixture.restorePermissions() }
+    let original = try fixture.seedLayout()
+    if legacy {
+        let context = original.modelContext!
+        for row in try context.fetch(FetchDescriptor<PageEntryData>()) { context.delete(row) }
+        for slot in fixture.originalLayout {
+            if let path = slot.app {
+                context.insert(TopItemData(appPath: path, orderIndex: slot.position))
+            } else if let id = slot.folderID {
+                context.insert(TopItemData(folderId: id, folderName: slot.folderName!,
+                                           appPaths: slot.folderApps, orderIndex: slot.position))
+            }
+        }
+        try context.save()
+    }
+    try fixture.denySubdirectory()
+    let store = fixture.store(restarting: true)
+    store.performInitialScanIfNeeded()
+    try finishScan(store)
+    try expect(store.folders.flatMap(\.apps).map(\.name) == ["SavedFolder"],
+               "cold folder placeholder inherited the folder name instead of the application name")
+    try expect(store.folders.flatMap(\.apps).map { $0.url.lastPathComponent } == ["SavedFolder.app"],
+               "cold name handling replaced or removed the persisted folder member")
+}
+
 let root = URL(fileURLWithPath: CommandLine.arguments[1])
 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 let tests: [(String, (URL) throws -> Void)] = [
@@ -645,7 +1159,27 @@ let tests: [(String, (URL) throws -> Void)] = [
     ("partial scan still cleans up deleted readable applications", testReadableRemovalDuringPartialScan),
     ("partial scan preserves imported items outside app inventory", testLoadedItemOutsideAppInventory),
     ("source and target permission errors preserve running layout", { try testInaccessibleExternalTargets($0, restart: false) }),
-    ("source and target permission errors preserve restarted layout", { try testInaccessibleExternalTargets($0, restart: true) })
+    ("source and target permission errors preserve restarted layout", { try testInaccessibleExternalTargets($0, restart: true) }),
+    ("offline source does not retain deleted readable links", { try testDeletedLinkDuringUnrelatedPartialScan($0, offlineSource: true) }),
+    ("unreadable subtree does not retain deleted readable links", { try testDeletedLinkDuringUnrelatedPartialScan($0, offlineSource: false) }),
+    ("real API removes ordinary source alongside offline source", { try testRemoveOrdinarySourceDuringPartialScan($0, offlineSource: true) }),
+    ("real API removes ordinary source alongside unreadable subtree", { try testRemoveOrdinarySourceDuringPartialScan($0, offlineSource: false) }),
+    ("real API removes linked source alongside offline source", testRemoveLinkedSourceWithOfflineRoot),
+    ("restart uses persisted origins to remove a deleted link", { try testDiscoveryOriginsSurviveRestart($0, removeSource: false) }),
+    ("restart removes a source before scanning by using persisted origins", { try testDiscoveryOriginsSurviveRestart($0, removeSource: true) }),
+    ("source removal invalidates an in-flight scan", testSourceRemovalInvalidatesInFlightScan),
+    ("restart removes a persisted path alias before its first scan", testPersistedPathAliasRemovedBeforeFirstScan),
+    ("directory-alias permission failure preserves saved layout and recovery", testDirectoryAliasPermissionPreservesLayout),
+    ("import supersedes an in-flight reset without losing its layout", testImportSupersedesInFlightReset),
+    ("shared target survives removal of one source", { try testSharedTargetSurvivesOneSourceRemoval($0, targetInsideSource: false) }),
+    ("target inside removed source survives through another source", { try testSharedTargetSurvivesOneSourceRemoval($0, targetInsideSource: true) }),
+    ("legacy layout without discovery index survives source permission error", { try testLegacyLayoutWithoutDiscoveryIndex($0, inaccessibleTarget: false) }),
+    ("legacy layout without discovery index survives target permission error", { try testLegacyLayoutWithoutDiscoveryIndex($0, inaccessibleTarget: true) }),
+    ("legacy unknown source survives removal of a newly learned source", testLegacyUnknownSourceSurvivesOtherSourceRemoval),
+    ("target-only permission error preserves running layout and recovery", { try testOnlyExternalTargetsInaccessible($0, restart: false) }),
+    ("target-only permission error preserves restarted layout and recovery", { try testOnlyExternalTargetsInaccessible($0, restart: true) }),
+    ("page entries preserve application names in cold folder placeholders", { try testColdFolderPlaceholderNames($0, legacy: false) }),
+    ("legacy entries preserve application names in cold folder placeholders", { try testColdFolderPlaceholderNames($0, legacy: true) })
 ]
 var failures = 0
 var skipped = 0

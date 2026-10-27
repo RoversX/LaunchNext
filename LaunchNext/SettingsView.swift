@@ -3475,13 +3475,12 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private func appsForSource(_ sourcePath: String) -> [SourceApp] {
         let normalizedSource = standardizePath(sourcePath)
-        let prefix = normalizedSource.hasSuffix("/") ? normalizedSource : normalizedSource + "/"
         var apps: [SourceApp] = []
         var seen: Set<String> = []
 
         func consider(name: String, path: String, icon: NSImage) {
             let normalized = standardizePath(path)
-            guard normalized == normalizedSource || normalized.hasPrefix(prefix) else { return }
+            guard ApplicationPath.isPath(normalized, within: normalizedSource) else { return }
             if seen.insert(normalized).inserted {
                 apps.append(SourceApp(name: name, path: normalized, icon: icon))
             }

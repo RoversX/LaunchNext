@@ -4,6 +4,7 @@
 The harness compiles the current AppStore methods and SwiftData models verbatim.
 Only icons, cache effects, UI notifications, and AppStore's unrelated state are
 adapted. Every database is in memory; all application bundles are temporary.
+Discovery metadata uses a unique disposable UserDefaults suite per fixture.
 
 Requires Xcode and a non-root account so chmod(000) produces real access errors.
 Run from any directory: python3 scripts/test-application-reconciliation.py
@@ -25,20 +26,22 @@ DECLARATIONS = [
     "    private var applicationSearchPaths:",
     "    private func normalizeApplicationPath(",
     "    private func standardizedFilePath(",
+    "    func removeCustomAppSource(path:",
+    "    private func purgeMissingPlaceholders(",
+    "    private func updateHiddenAppPaths(",
     "    func performInitialScanIfNeeded(",
+    "    func scanApplications(loadPersistedOrder:",
+    "    func applyOrderAndFolders(",
     "    private func requestApplicationReconciliation(",
     "    private func schedulePendingApplicationReconciliation(",
     "    private func startPendingApplicationReconciliation(",
     "    private func finishApplicationReconciliation(",
     "    private func performApplicationReconciliation(",
     "    private func processScannedApplications(",
-    "    private func isInsideAnotherApp(",
     "    private func isValidApp(",
     "    private func generateCacheAfterScan(",
-    "    private func smartRebuildItemsWithOrderPreservation(",
     "    private func hasPersistedOrderData(",
     "    private func mergeCurrentOrderWithPersistedData(",
-    "    private func loadFoldersFromPersistedData(",
     "    private func folderWithValidQuickLaunchPins(",
     "    private func reconcileFolderQuickLaunchPinsInCurrentLayout(",
     "    private func removableSourcePath(",
@@ -62,13 +65,20 @@ DECLARATIONS = [
     "    private func filteredFolderRemovingHidden(from folder: FolderInfo, hidden:",
 ]
 
-# Optional only so --app-store can run the same behavioral checks against the
-# original PR, which predates these helpers. Missing dependencies still produce
-# a compiler error instead of being silently replaced with test logic.
-AVAILABILITY_DECLARATIONS = [
+# Keep --app-store compatible with earlier source snapshots. Extract each
+# version's own methods; missing dependencies still cause a compiler error
+# instead of being silently replaced with test logic.
+VERSIONED_DECLARATIONS = [
     "    private func canonicalApplicationPath(",
     "    private func isApplicationPathUnavailable(",
     "    private func isApplicationPathInaccessible(",
+    "    private func applicationTargetPath(",
+    "    private func isApplicationPathAvailable(",
+    "    private func smartRebuildItemsWithOrderPreservation(",
+    "    private func loadFoldersFromPersistedData(",
+    "    private func isInsideAnotherApp(",
+    "    private func applicationSourcesDidChange(",
+    "    private func invalidateApplicationDiscoveryForImportedLayout(",
 ]
 
 
@@ -125,15 +135,26 @@ def run_tests(directory: Path, app_store: Path) -> int:
         "@Model\n" + declaration(model_source, f"final class {name}")
         for name in ("PageEntryData", "TopItemData")
     )
-    declarations = DECLARATIONS + [marker for marker in AVAILABILITY_DECLARATIONS if marker in source]
+    declarations = DECLARATIONS + [marker for marker in VERSIONED_DECLARATIONS if marker in source]
     methods = "\n\n".join(declaration(source, marker) for marker in declarations)
     template = (
         REPOSITORY / "scripts/diagnostics/ApplicationReconciliationHarness.swift"
     ).read_text()
-    for marker in ("// INSERT_PRODUCTION_MODELS", "    // INSERT_PRODUCTION_METHODS"):
+    discovery_source = (REPOSITORY / "LaunchNext/ApplicationDiscovery.swift").read_text()
+    # Invoke the real hook used by each version's source-property observer,
+    # without installing filesystem watchers or changing user preferences.
+    source_change_call = (
+        "applicationSourcesDidChange()"
+        if "    private func applicationSourcesDidChange(" in source
+        else "requestApplicationReconciliation(reason: .sourceChange)"
+    )
+    for marker in ("// INSERT_PRODUCTION_DISCOVERY", "// INSERT_PRODUCTION_MODELS",
+                   "        // INSERT_SOURCE_CHANGE_CALL", "    // INSERT_PRODUCTION_METHODS"):
         if template.count(marker) != 1:
             raise ValueError(f"Harness template must contain exactly one {marker}")
-    generated = template.replace("// INSERT_PRODUCTION_MODELS", models).replace(
+    generated = template.replace("// INSERT_PRODUCTION_DISCOVERY", discovery_source).replace(
+        "// INSERT_PRODUCTION_MODELS", models
+    ).replace("        // INSERT_SOURCE_CHANGE_CALL", "        " + source_change_call).replace(
         "    // INSERT_PRODUCTION_METHODS", methods
     )
     main = directory / "main.swift"
@@ -144,7 +165,7 @@ def run_tests(directory: Path, app_store: Path) -> int:
         "-module-cache-path", str(directory / "module-cache"),
         str(main), "-o", str(executable),
     ]
-    print(f"Compiling {len(declarations)} production declarations and two SwiftData models…", flush=True)
+    print(f"Compiling {len(declarations)} production declarations, discovery runtime, and two SwiftData models…", flush=True)
     compiled = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     (directory / "build.log").write_text(compiled.stdout)
     if compiled.returncode:

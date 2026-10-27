@@ -913,6 +913,7 @@ final class AppStore: ObservableObject {
         // Developer tooling and diagnostic logging remain local to this Mac.
         result.removeValue(forKey: Self.showQuarantineRemovalActionKey)
         result.removeValue(forKey: WallpaperDiagnostics.enabledKey)
+        result.removeValue(forKey: ApplicationDiscoveryIndex.defaultsKey)
         return result
     }
 
@@ -2432,10 +2433,12 @@ final class AppStore: ObservableObject {
         case manual
         case sourceChange
         case explicit
+        case retry
     }
 
     private static let applicationReconciliationFallbackInterval: TimeInterval = 15 * 60
     private static let applicationReconciliationEventDebounce: TimeInterval = 1.0
+    private static let applicationReconciliationRetryDelays: [TimeInterval] = [1, 3]
 
     private var fsEventStream: FSEventStreamRef?
     private var applicationReconciliationReasons: Set<ApplicationReconciliationReason> = []
@@ -2443,8 +2446,12 @@ final class AppStore: ObservableObject {
     private var applicationReconciliationWorkItem: DispatchWorkItem?
     private var lastSuccessfulApplicationReconciliationAt: Date?
     private var needsReconciliationAfterExternalUninstall = false
-    private var unavailableApplicationDirectories = Set<String>()
-    private var retainedUnscannedApplicationPaths = Set<String>()
+    private var applicationDiscoveryIndex = ApplicationDiscoveryIndex.load(from: .standard)
+    private let applicationDiscoveryDefaults = UserDefaults.standard
+    private var applicationScanSnapshot: ApplicationDiscoverySnapshot?
+    private var applicationReconciliationGeneration = 0
+    private var applicationReconciliationRetryCount = 0
+    private var resetLayoutAfterApplicationScan = false
 
     // 状态标记
     private var hasPerformedInitialScan: Bool = false
@@ -2498,62 +2505,37 @@ final class AppStore: ObservableObject {
     }
 
     private func standardizedFilePath(_ path: String) -> String {
-        URL(fileURLWithPath: path).standardized.path
+        ApplicationPath.standardized(path)
     }
 
-    /// Use resolved paths only for availability comparisons; persisted paths keep
-    /// their existing spelling and identity.
-    private func canonicalApplicationPath(_ path: String) -> String {
-        URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+    private func applicationTargetPath(for rawPath: String) -> String {
+        let path = standardizedFilePath(rawPath)
+        return applicationScanSnapshot?.canonicalPathsBySavedPath[path]
+            ?? applicationDiscoveryIndex.targetsByPath[path] ?? path
     }
 
     private func isApplicationPathUnavailable(_ rawPath: String) -> Bool {
-        let path = canonicalApplicationPath(rawPath)
-        if retainedUnscannedApplicationPaths.contains(path) { return true }
-        func containsPath(_ directory: String) -> Bool {
-            path == directory || path.hasPrefix(directory.hasSuffix("/") ? directory : directory + "/")
-        }
-
-        let configuredSources = (systemApplicationSearchPaths + customAppSourcePaths)
-            .compactMap(normalizeApplicationPath)
-            .map(canonicalApplicationPath)
-        if configuredSources.contains(where: containsPath),
-           unavailableApplicationDirectories.contains(where: containsPath) { return true }
-
-        // Persisted layouts load before the initial scan. A failed stat caused
-        // by permissions must not discard saved entries before that scan can
-        // report the unreadable subtree. Symlink targets may be outside every
-        // configured source, so permission failures need no source-prefix match.
-        return isApplicationPathInaccessible(rawPath)
+        // Loading a saved layout must not destroy it before the first scan has
+        // checked its sources. Afterwards all callers use the same snapshot.
+        guard let snapshot = applicationScanSnapshot else { return true }
+        return snapshot.unavailablePaths.contains(standardizedFilePath(rawPath))
     }
 
-    private func isApplicationPathInaccessible(_ rawPath: String) -> Bool {
-        do {
-            _ = try FileManager.default.attributesOfItem(atPath: rawPath)
-            return false
-        } catch {
-            var underlying: NSError? = error as NSError
-            while let current = underlying {
-                if current.domain == NSCocoaErrorDomain && current.code == NSFileReadNoPermissionError {
-                    return true
-                }
-                if current.domain == NSPOSIXErrorDomain,
-                   current.code == Int(POSIXErrorCode.EACCES.rawValue)
-                    || current.code == Int(POSIXErrorCode.EPERM.rawValue) {
-                    return true
-                }
-                underlying = current.userInfo[NSUnderlyingErrorKey] as? NSError
-            }
-            return false
-        }
+    private func isApplicationPathAvailable(_ rawPath: String) -> Bool {
+        applicationScanSnapshot?.availablePaths.contains(standardizedFilePath(rawPath)) == true
     }
 
     private func removableSourcePath(forAppPath path: String) -> String? {
         let standardizedApp = standardizedFilePath(path)
+        let customSources = Set(customAppSourcePaths.compactMap(normalizeApplicationPath))
+        if let origin = applicationDiscoveryIndex.originsByTarget[applicationTargetPath(for: path)]?
+            .filter({ customSources.contains($0.sourcePath) })
+            .sorted(by: { $0.sourcePath < $1.sourcePath }).first {
+            return origin.sourcePath
+        }
         for source in customAppSourcePaths {
             guard let normalizedSource = normalizeApplicationPath(source) else { continue }
-            if standardizedApp == normalizedSource { return normalizedSource }
-            if standardizedApp.hasPrefix(normalizedSource.hasSuffix("/") ? normalizedSource : normalizedSource + "/") {
+            if ApplicationPath.isPath(standardizedApp, within: normalizedSource) {
                 return normalizedSource
             }
         }
@@ -2566,6 +2548,7 @@ final class AppStore: ObservableObject {
         let candidates: [String?] = [preferred,
                                      missingPlaceholders[normalizedPath]?.displayName,
                                      legacyMatch,
+                                     applicationDiscoveryIndex.displayNames[applicationTargetPath(for: normalizedPath)],
                                      URL(fileURLWithPath: normalizedPath).deletingPathExtension().lastPathComponent]
         for candidate in candidates {
             if let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
@@ -2581,7 +2564,7 @@ final class AppStore: ObservableObject {
         let normalizedPath = standardizedFilePath(path)
         let resolvedDisplayName = placeholderDisplayName(for: normalizedPath, preferred: displayName)
         let resolvedSource = removableSource ?? removableSourcePath(forAppPath: normalizedPath) ?? missingPlaceholders[normalizedPath]?.removableSource
-        guard shouldTrackMissingPlaceholder(at: normalizedPath, removableSource: resolvedSource) else {
+        guard shouldTrackMissingPlaceholder(at: normalizedPath) else {
             missingPlaceholders.removeValue(forKey: normalizedPath)
             return nil
         }
@@ -2600,22 +2583,8 @@ final class AppStore: ObservableObject {
         return placeholder
     }
 
-    private func shouldTrackMissingPlaceholder(at normalizedPath: String,
-                                               removableSource: String?) -> Bool {
-        if isApplicationPathUnavailable(normalizedPath) { return true }
-        guard let removableSource else { return false }
-
-        let normalizedSource = normalizeApplicationPath(removableSource) ?? standardizedFilePath(removableSource)
-        let customSources = customAppSourcePaths.map { normalizeApplicationPath($0) ?? standardizedFilePath($0) }
-        guard customSources.contains(normalizedSource) else { return false }
-
-        // Outside a skipped or permission-denied subtree, retain missing apps
-        // only while their configured source itself is unavailable (for example,
-        // an unmounted external volume).
-        var isDirectory: ObjCBool = false
-        return !FileManager.default.fileExists(atPath: normalizedSource, isDirectory: &isDirectory)
-            || !isDirectory.boolValue
-            || !FileManager.default.isReadableFile(atPath: normalizedSource)
+    private func shouldTrackMissingPlaceholder(at normalizedPath: String) -> Bool {
+        isApplicationPathUnavailable(normalizedPath)
     }
 
     private func clearMissingPlaceholder(for path: String) {
@@ -2629,16 +2598,6 @@ final class AppStore: ObservableObject {
     }
 
     private func placeholderAppInfo(forMissingPath path: String, preferredName: String? = nil) -> AppInfo? {
-        // Folder reloads must retain the metadata already held for apps in a
-        // skipped subtree, including when those apps are not in the top-level list.
-        if isApplicationPathUnavailable(path) {
-            let canonicalPath = canonicalApplicationPath(path)
-            if let existing = folders.lazy.flatMap({ $0.apps }).first(where: {
-                canonicalApplicationPath($0.url.path) == canonicalPath
-            }) {
-                return existing
-            }
-        }
         guard let placeholder = updateMissingPlaceholder(path: path, displayName: preferredName) else {
             return nil
         }
@@ -2650,6 +2609,9 @@ final class AppStore: ObservableObject {
     }
 
     private func refreshMissingPlaceholders() {
+        // The background scan owns filesystem observations. Until it finishes,
+        // keep the saved presentation instead of probing disk on the UI thread.
+        guard applicationScanSnapshot != nil else { return }
         guard !items.isEmpty else {
             if !missingPlaceholders.isEmpty {
                 missingPlaceholders.removeAll()
@@ -2659,13 +2621,12 @@ final class AppStore: ObservableObject {
 
         var updatedItems = items
         var mutated = false
-        let fileManager = FileManager.default
 
         for index in updatedItems.indices {
             switch updatedItems[index] {
             case .app(let app):
                 let path = standardizedFilePath(app.url.path)
-                if fileManager.fileExists(atPath: path) {
+                if isApplicationPathAvailable(path) {
                     clearMissingPlaceholder(for: path)
                 } else {
                     if let placeholder = updateMissingPlaceholder(path: path, displayName: app.name) {
@@ -2677,7 +2638,7 @@ final class AppStore: ObservableObject {
                 }
             case .missingApp(let placeholder):
                 let path = standardizedFilePath(placeholder.bundlePath)
-                if fileManager.fileExists(atPath: path) {
+                if isApplicationPathAvailable(path) {
                     if let existing = apps.first(where: { standardizedFilePath($0.url.path) == path }) {
                         clearMissingPlaceholder(for: path)
                         updatedItems[index] = .app(existing)
@@ -2731,68 +2692,61 @@ final class AppStore: ObservableObject {
         guard !normalizedSources.isEmpty else { return }
         let sourceSet = Set(normalizedSources)
 
-        var removalSet = Set<String>()
-        var removalRawPaths = Set<String>()
-        for (key, placeholder) in missingPlaceholders {
-            let normalizedKey = standardizedFilePath(key)
-
-            var matchesRemovedSource = false
-            if let source = placeholder.removableSource {
-                let normalizedSource = normalizeApplicationPath(source) ?? standardizedFilePath(source)
-                if sourceSet.contains(normalizedSource) {
-                    matchesRemovedSource = true
-                }
-            }
-
-            if !matchesRemovedSource {
-                matchesRemovedSource = sourceSet.contains { source in
-                    if normalizedKey == source { return true }
-                    let prefix = source.hasSuffix("/") ? source : source + "/"
-                    return normalizedKey.hasPrefix(prefix)
-                }
-            }
-
-            if matchesRemovedSource {
-                removalSet.insert(normalizedKey)
-                removalRawPaths.insert(key)
+        let previousIndex = applicationDiscoveryIndex
+        var removedTargets = Set<String>()
+        let indexedTargets = Set(previousIndex.originsByTarget.keys)
+            .union(previousIndex.unresolvedLegacySources.keys)
+        for target in indexedTargets {
+            let oldOrigins = previousIndex.originsByTarget[target] ?? []
+            let oldPending = previousIndex.unresolvedLegacySources[target] ?? []
+            let origins = oldOrigins.filter { !sourceSet.contains($0.sourcePath) }
+            let pending = oldPending.subtracting(sourceSet)
+            applicationDiscoveryIndex.originsByTarget[target] = origins.isEmpty ? nil : origins
+            applicationDiscoveryIndex.unresolvedLegacySources[target] = pending.isEmpty ? nil : pending
+            if origins.isEmpty && pending.isEmpty,
+               origins != oldOrigins || pending != oldPending {
+                removedTargets.insert(target)
+                applicationDiscoveryIndex.displayNames.removeValue(forKey: target)
             }
         }
+        if applicationDiscoveryIndex != previousIndex {
+            applicationDiscoveryIndex.save(to: applicationDiscoveryDefaults)
+        }
 
-        // 主动添加所有来自已移除源的现存应用路径（无论是否缺失）
-        if !sourceSet.isEmpty {
-            let prefixes: [String] = sourceSet.map { $0.hasSuffix("/") ? $0 : $0 + "/" }
-
-            func considerRemoval(path raw: String) {
-                let normalized = standardizedFilePath(raw)
-                if sourceSet.contains(normalized) || prefixes.contains(where: { normalized.hasPrefix($0) }) {
-                    removalSet.insert(normalized)
-                    removalRawPaths.insert(raw)
-                }
+        var removalSet = Set<String>()
+        var removalRawPaths = Set<String>()
+        func considerRemoval(path raw: String, savedSource: String? = nil) {
+            let normalized = standardizedFilePath(raw)
+            let target = applicationTargetPath(for: normalized)
+            let remove: Bool
+            if indexedTargets.contains(target) {
+                // Removing one source must not remove an app still discovered
+                // through another source, even when its target lies in this one.
+                remove = removedTargets.contains(target)
+            } else {
+                remove = savedSource.flatMap(normalizeApplicationPath).map(sourceSet.contains) == true
+                    || sourceSet.contains { ApplicationPath.isPath(normalized, within: $0) }
             }
-
-            for app in apps {
-                considerRemoval(path: app.url.path)
+            if remove {
+                removalSet.insert(normalized)
+                removalRawPaths.insert(raw)
             }
-
-            for folder in folders {
-                for app in folder.apps {
-                    considerRemoval(path: app.url.path)
-                }
-            }
-
-            for item in items {
-                switch item {
-                case .app(let app):
-                    considerRemoval(path: app.url.path)
-                case .missingApp(let placeholder):
-                    considerRemoval(path: placeholder.bundlePath)
-                case .folder(let folder):
-                    for app in folder.apps {
-                        considerRemoval(path: app.url.path)
-                    }
-                case .empty:
-                    break
-                }
+        }
+        for (path, placeholder) in missingPlaceholders {
+            considerRemoval(path: path, savedSource: placeholder.removableSource)
+        }
+        for app in apps { considerRemoval(path: app.url.path) }
+        for folder in folders {
+            for app in folder.apps { considerRemoval(path: app.url.path) }
+        }
+        for item in items {
+            switch item {
+            case .app(let app): considerRemoval(path: app.url.path)
+            case .missingApp(let placeholder):
+                considerRemoval(path: placeholder.bundlePath, savedSource: placeholder.removableSource)
+            case .folder(let folder):
+                for app in folder.apps { considerRemoval(path: app.url.path) }
+            case .empty: break
             }
         }
 
@@ -2895,7 +2849,7 @@ final class AppStore: ObservableObject {
             guard customAppSourcePaths != oldValue else { return }
             UserDefaults.standard.set(customAppSourcePaths, forKey: AppStore.customAppSourcesKey)
             restartAutoRescan()
-            requestApplicationReconciliation(reason: .sourceChange)
+            applicationSourcesDidChange()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
                 self?.removeEmptyPages()
             }
@@ -3589,7 +3543,22 @@ final class AppStore: ObservableObject {
 
     // MARK: - Order Persistence
     func applyOrderAndFolders() {
-        self.loadAllOrder()
+        invalidateApplicationDiscoveryForImportedLayout()
+        loadAllOrder()
+    }
+
+    private func invalidateApplicationDiscoveryForImportedLayout() {
+        applicationReconciliationGeneration += 1
+        resetLayoutAfterApplicationScan = false
+        applicationScanSnapshot = nil
+        applicationDiscoveryIndex = ApplicationDiscoveryIndex()
+        applicationDiscoveryIndex.save(to: applicationDiscoveryDefaults)
+        lastSuccessfulApplicationReconciliationAt = nil
+    }
+
+    private func applicationSourcesDidChange() {
+        applicationReconciliationGeneration += 1
+        requestApplicationReconciliation(reason: .sourceChange)
     }
 
     // MARK: - Initial scan (once)
@@ -3635,6 +3604,7 @@ final class AppStore: ObservableObject {
             return
         }
 
+        if reason != .retry { applicationReconciliationRetryCount = 0 }
         applicationReconciliationReasons.insert(reason)
         guard !applicationReconciliationInProgress else { return }
 
@@ -3688,70 +3658,40 @@ final class AppStore: ObservableObject {
     private func finishApplicationReconciliation(reasons: Set<ApplicationReconciliationReason>,
                                                  succeeded: Bool) {
         precondition(Thread.isMainThread)
-
         if succeeded {
             lastSuccessfulApplicationReconciliationAt = Date()
+            applicationReconciliationRetryCount = 0
             if reasons.contains(.externalUninstallerReturn) {
                 needsReconciliationAfterExternalUninstall = false
             }
         }
         applicationReconciliationInProgress = false
-        isInitialLoading = false
+        if isInitialLoading { isInitialLoading = false }
 
         if !applicationReconciliationReasons.isEmpty {
             if applicationReconciliationReasons == [.fileSystemEvent] {
-                schedulePendingApplicationReconciliation(
-                    after: Self.applicationReconciliationEventDebounce
-                )
+                schedulePendingApplicationReconciliation(after: Self.applicationReconciliationEventDebounce)
             } else {
                 startPendingApplicationReconciliation()
             }
+        } else if !succeeded,
+                  applicationReconciliationRetryCount < Self.applicationReconciliationRetryDelays.count {
+            let delay = Self.applicationReconciliationRetryDelays[applicationReconciliationRetryCount]
+            applicationReconciliationRetryCount += 1
+            applicationReconciliationReasons.insert(.retry)
+            schedulePendingApplicationReconciliation(after: delay)
         }
     }
 
     func scanApplications(loadPersistedOrder: Bool = true) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            var found: [AppInfo] = []
-            var seenPaths = Set<String>()
-
-            for path in self.applicationSearchPaths {
-                let url = URL(fileURLWithPath: path)
-                
-                if let enumerator = FileManager.default.enumerator(
-                    at: url,
-                    includingPropertiesForKeys: [.isDirectoryKey],
-                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
-                ) {
-                    for case let item as URL in enumerator {
-                        let resolved = item.resolvingSymlinksInPath()
-                        guard resolved.pathExtension == "app",
-                              self.isValidApp(at: resolved),
-                              !self.isInsideAnotherApp(resolved) else { continue }
-                        if !seenPaths.contains(resolved.path) {
-                            seenPaths.insert(resolved.path)
-                            found.append(self.appInfo(from: resolved))
-                        }
-                    }
-                }
-            }
-
-            let sorted = found.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-            DispatchQueue.main.async {
-                self.apps = sorted
-                self.pruneHiddenAppsFromAppList()
-                if loadPersistedOrder {
-                    self.rebuildItems()
-                    self.loadAllOrder()
-                } else {
-                    self.items = self.filteredItemsRemovingHidden(from: sorted.map { .app($0) })
-                    self.saveAllOrder()
-                }
-                self.refreshMissingPlaceholders()
-                
-                // 扫描完成后生成缓存
-                self.generateCacheAfterScan()
-            }
+        if loadPersistedOrder {
+            if !hasAppliedOrderFromStore { loadAllOrder() }
+        } else {
+            applicationReconciliationGeneration += 1
+            resetLayoutAfterApplicationScan = true
         }
+        hasPerformedInitialScan = true
+        requestApplicationReconciliation(reason: .explicit)
     }
     
     /// Requests an order-preserving scan through the single-flight coordinator.
@@ -3761,180 +3701,91 @@ final class AppStore: ObservableObject {
 
     /// 智能扫描应用：保持现有排序，新增应用放到最后，缺失应用移除，自动页面内补位
     private func performApplicationReconciliation(reasons: Set<ApplicationReconciliationReason>) {
-        let searchPaths = applicationSearchPaths
+        let sourcePaths = (systemApplicationSearchPaths + customAppSourcePaths)
+            .compactMap(normalizeApplicationPath)
+        let customSources = Set(customAppSourcePaths.compactMap(normalizeApplicationPath))
+        let generation = applicationReconciliationGeneration
+        let previousIndex = applicationDiscoveryIndex
         let previousApps = apps
-        let normalizedCustomSources = customAppSourcePaths.compactMap(normalizeApplicationPath)
-        let normalizedCustomSourceSet = Set(normalizedCustomSources)
-        let fileManager = FileManager.default
-        let unavailableCustomSources = normalizedCustomSources.filter { source in
-            var isDirectory: ObjCBool = false
-            return !fileManager.fileExists(atPath: source, isDirectory: &isDirectory)
-                || !isDirectory.boolValue
-                || !fileManager.isReadableFile(atPath: source)
+        let savedTitles = customTitles
+        let itemPaths = items.flatMap { item -> [String] in
+            switch item {
+            case .app(let app): return [app.url.path]
+            case .missingApp(let placeholder): return [placeholder.bundlePath]
+            case .folder(let folder): return folder.apps.map { $0.url.path }
+            case .empty: return []
+            }
         }
+        let savedPathOrder = apps.map { $0.url.path }
+            + folders.flatMap { $0.apps.map { $0.url.path } }
+            + itemPaths + Array(missingPlaceholders.keys)
+        let savedPaths = Set(savedPathOrder.map(standardizedFilePath))
 
         DispatchQueue.global(qos: .userInitiated).async {
+            var snapshot = ApplicationDiscoveryScanner.scan(
+                sourcePaths: sourcePaths,
+                customSourcePaths: customSources,
+                savedPaths: savedPaths,
+                previousIndex: previousIndex,
+                isValidApplication: self.isValidApp
+            )
+            // Keep saved path spellings as layout identities; source discovery
+            // uses canonical targets only inside its background index.
+            var savedPathByTarget: [String: String] = [:]
+            for rawPath in savedPathOrder {
+                let path = self.standardizedFilePath(rawPath)
+                let target = snapshot.canonicalPathsBySavedPath[path] ?? path
+                if savedPathByTarget[target] == nil { savedPathByTarget[target] = rawPath }
+            }
             var found: [AppInfo] = []
-            var seenPaths = Set<String>()
-            var scanFailed = false
-            var sourceBecameUnavailable = false
-            var unavailableSources = unavailableCustomSources
-
-            // 使用并发队列加速扫描
-            let scanQueue = DispatchQueue(label: "app.scan", attributes: .concurrent)
-            let group = DispatchGroup()
-            let lock = NSLock()
-            
-            // 扫描所有应用
-            for path in searchPaths {
-                group.enter()
-                scanQueue.async {
-                    defer { group.leave() }
-                    let url = URL(fileURLWithPath: path)
-                    var localScanFailed = false
-                    var localUnavailableSources: [String] = []
-                    var localFound: [AppInfo] = []
-                    var localSeenPaths = Set<String>()
-
-                    guard let enumerator = FileManager.default.enumerator(
-                        at: url,
-                        includingPropertiesForKeys: [.isDirectoryKey],
-                        options: [.skipsHiddenFiles, .skipsPackageDescendants],
-                        errorHandler: { errorURL, error in
-                            NSLog("LaunchNext: Skipping unavailable application directory %@: %@", errorURL.path, error.localizedDescription)
-                            if self.canonicalApplicationPath(errorURL.path) == self.canonicalApplicationPath(url.path) {
-                                localScanFailed = true
-                                return false
-                            }
-                            localUnavailableSources.append(self.canonicalApplicationPath(errorURL.path))
-                            return true
-                        }
-                    ) else {
-                        lock.withLock {
-                            scanFailed = true
-                        }
-                        return
-                    }
-
-                    for case let item as URL in enumerator {
-                        let resolved = item.resolvingSymlinksInPath()
-                        guard resolved.pathExtension == "app",
-                              self.isValidApp(at: resolved),
-                              !self.isInsideAnotherApp(resolved) else { continue }
-                        if !localSeenPaths.contains(resolved.path) {
-                            localSeenPaths.insert(resolved.path)
-                            localFound.append(self.appInfo(from: resolved))
-                        }
-                    }
-
-                    var isDirectory: ObjCBool = false
-                    let sourceStillAvailable = FileManager.default.fileExists(
-                        atPath: path,
-                        isDirectory: &isDirectory
-                    ) && isDirectory.boolValue && FileManager.default.isReadableFile(atPath: path)
-
-                    lock.withLock {
-                        if localScanFailed || !sourceStillAvailable {
-                            scanFailed = true
-                            if !sourceStillAvailable && normalizedCustomSourceSet.contains(path) {
-                                sourceBecameUnavailable = true
-                            }
-                        } else {
-                            // Preserve apps under skipped subdirectories while
-                            // reconciling the accessible part of the source.
-                            found.append(contentsOf: localFound)
-                            seenPaths.formUnion(localSeenPaths)
-                            unavailableSources.append(contentsOf: localUnavailableSources)
-                        }
-                    }
-                }
+            for url in snapshot.applicationURLs {
+                let path = savedPathByTarget[url.path] ?? url.path
+                let metadata = self.appInfo(from: url)
+                let title = savedTitles[path]?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let name = title.flatMap { $0.isEmpty ? nil : $0 } ?? metadata.name
+                let app = AppInfo(name: name, icon: metadata.icon, url: URL(fileURLWithPath: path))
+                found.append(app)
+                snapshot.index.displayNames[url.path] = app.name
             }
-            
-            group.wait()
+            let foundByPath = Dictionary(uniqueKeysWithValues: found.map { ($0.url.path, $0) })
+            let oldPaths = Set(previousApps.map { $0.url.path })
+            let ordered = previousApps.compactMap { foundByPath[$0.url.path] }
+            let added = found.filter { !oldPaths.contains($0.url.path) }
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            let newApps = ordered + added
 
-            guard !scanFailed else {
-                DispatchQueue.main.async {
-                    self.finishApplicationReconciliation(reasons: reasons, succeeded: false)
-                    if sourceBecameUnavailable {
-                        self.requestApplicationReconciliation(reason: .sourceChange)
-                    }
-                }
-                return
-            }
-            
-            // 去重和排序 - 使用更安全的方法
-            var uniqueApps: [AppInfo] = []
-            var uniqueSeenPaths = Set<String>()
-            
-            for app in found {
-                if !uniqueSeenPaths.contains(app.url.path) {
-                    uniqueSeenPaths.insert(app.url.path)
-                    uniqueApps.append(app)
-                }
-            }
-            
-            // 保持现有应用的顺序，只对新增应用按名称排序
-            var newApps: [AppInfo] = []
-            var existingAppPaths = Set<String>()
-            let refreshedMap = Dictionary(uniqueKeysWithValues: uniqueApps.map { ($0.url.path, $0) })
-
-            for app in previousApps {
-                guard let refreshed = refreshedMap[app.url.path] else { continue }
-                newApps.append(refreshed)
-                existingAppPaths.insert(app.url.path)
-            }
-
-            let newAppPaths = uniqueApps.filter { !existingAppPaths.contains($0.url.path) }
-            let sortedNewApps = newAppPaths.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-            newApps.append(contentsOf: sortedNewApps)
-            
             DispatchQueue.main.async {
-                let unavailableDirectories = Set(unavailableSources.map(self.canonicalApplicationPath))
-                let observedPaths = Set(newApps.map { self.canonicalApplicationPath($0.url.path) })
-                var retainedPaths = Set<String>()
-                if !unavailableDirectories.isEmpty {
-                    // A skipped directory may contain a link to any saved app.
-                    // Its resolved target does not identify the link's source.
-                    // Defer removal of existing or permission-denied targets
-                    // until a complete scan; deleted bundles can still be removed.
-                    let itemPaths = self.items.compactMap { item -> String? in
-                        switch item {
-                        case .app(let app): return app.url.path
-                        case .missingApp(let placeholder): return placeholder.bundlePath
-                        default: return nil
-                        }
-                    }
-                    let savedPaths = self.apps.map { $0.url.path }
-                        + self.folders.flatMap { $0.apps.map { $0.url.path } }
-                        + itemPaths
-                        + Array(self.missingPlaceholders.keys)
-                    for rawPath in savedPaths {
-                        let path = self.canonicalApplicationPath(rawPath)
-                        if !observedPaths.contains(path),
-                           self.isValidApp(at: URL(fileURLWithPath: path))
-                            || self.isApplicationPathInaccessible(rawPath) {
-                            retainedPaths.insert(path)
-                        }
-                    }
+                guard generation == self.applicationReconciliationGeneration else {
+                    // Source removal or layout import superseded this scan.
+                    // Never write its old provenance or inventory back.
+                    self.applicationReconciliationReasons.insert(.sourceChange)
+                    self.finishApplicationReconciliation(reasons: reasons, succeeded: false)
+                    return
                 }
                 var reconciliationReasons = reasons
-                if self.unavailableApplicationDirectories != unavailableDirectories
-                    || self.retainedUnscannedApplicationPaths != retainedPaths {
-                    // Availability can change without changing the inventory's
-                    // paths. Refresh placeholders and metadata on recovery too.
+                if self.applicationScanSnapshot?.unavailablePaths != snapshot.unavailablePaths {
                     reconciliationReasons.insert(.sourceChange)
                 }
-                self.unavailableApplicationDirectories = unavailableDirectories
-                self.retainedUnscannedApplicationPaths = retainedPaths
-                let didApplyChanges = self.processScannedApplications(
-                    newApps,
-                    unavailableCustomSources: Array(unavailableDirectories),
-                    reasons: reconciliationReasons
-                )
-                if didApplyChanges {
-                    self.generateCacheAfterScan()
+                self.applicationScanSnapshot = snapshot
+                if self.applicationDiscoveryIndex != snapshot.index {
+                    self.applicationDiscoveryIndex = snapshot.index
+                    self.applicationDiscoveryIndex.save(to: self.applicationDiscoveryDefaults)
                 }
-                self.finishApplicationReconciliation(reasons: reasons, succeeded: true)
+                let didApplyChanges: Bool
+                if self.resetLayoutAfterApplicationScan {
+                    self.resetLayoutAfterApplicationScan = false
+                    self.apps = newApps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                    self.pruneHiddenAppsFromAppList()
+                    self.folders = []
+                    self.missingPlaceholders = [:]
+                    self.items = self.filteredItemsRemovingHidden(from: self.apps.map { .app($0) })
+                    self.saveAllOrder()
+                    didApplyChanges = true
+                } else {
+                    didApplyChanges = self.processScannedApplications(newApps, reasons: reconciliationReasons)
+                }
+                if didApplyChanges { self.generateCacheAfterScan() }
+                self.finishApplicationReconciliation(reasons: reasons, succeeded: !snapshot.shouldRetry)
             }
         }
     }
@@ -3949,19 +3800,10 @@ final class AppStore: ObservableObject {
     @discardableResult
     private func processScannedApplications(
         _ newApps: [AppInfo],
-        unavailableCustomSources: [String],
         reasons: Set<ApplicationReconciliationReason>
     ) -> Bool {
         // 保存当前 items 的顺序和结构
         let currentItems = self.items
-
-        func isUnderUnavailableCustomSource(_ rawPath: String) -> Bool {
-            let path = canonicalApplicationPath(rawPath)
-            if retainedUnscannedApplicationPaths.contains(path) { return true }
-            return unavailableCustomSources.contains { source in
-                path == source || path.hasPrefix(source.hasSuffix("/") ? source : source + "/")
-            }
-        }
 
         func inventoryPaths(apps: [AppInfo], folders: [FolderInfo]) -> Set<String> {
             var paths = Set(apps.map { standardizedFilePath($0.url.path) })
@@ -3985,7 +3827,7 @@ final class AppStore: ObservableObject {
         for app in self.apps {
             if let refreshed = freshMap[app.url.path] {
                 updatedApps.append(refreshed)
-            } else if isUnderUnavailableCustomSource(app.url.path) {
+            } else if isApplicationPathUnavailable(app.url.path) {
                 updatedApps.append(app)
             }
         }
@@ -3997,7 +3839,7 @@ final class AppStore: ObservableObject {
                 if let refreshed = freshMap[app.url.path] {
                     return refreshed
                 }
-                return isUnderUnavailableCustomSource(app.url.path) ? app : nil
+                return isApplicationPathUnavailable(app.url.path) ? app : nil
             }
             return folderWithValidQuickLaunchPins(updatedFolder)
         }
@@ -4033,13 +3875,12 @@ final class AppStore: ObservableObject {
 
         // A surviving target alone does not prove its discovery link still
         // exists. Do not let old placeholders resurrect unobserved targets.
-        let observedPaths = Set(newApps.map { canonicalApplicationPath($0.url.path) })
         missingPlaceholders = missingPlaceholders.filter { path, _ in
-            observedPaths.contains(canonicalApplicationPath(path)) || isUnderUnavailableCustomSource(path)
+            isApplicationPathAvailable(path) || isApplicationPathUnavailable(path)
         }
         
         // 第四步：智能重建项目列表，保持用户排序
-        self.smartRebuildItemsWithOrderPreservation(currentItems: currentItems, newApps: newAppsToAdd)
+        self.mergeCurrentOrderWithPersistedData(currentItems: currentItems)
         
         // 第五步：自动页面内补位
         self.compactItemsWithinPages()
@@ -4168,13 +4009,6 @@ final class AppStore: ObservableObject {
         self.items = filteredItemsRemovingHidden(from: newItems)
     }
     
-    /// 智能重建项目列表，保持用户排序
-    private func smartRebuildItemsWithOrderPreservation(currentItems: [LaunchpadItem], newApps: [AppInfo]) {
-        // Reconciliation has already updated folder membership and pins. Reloading
-        // saved rows here would resurrect removed links whose targets still exist.
-        self.mergeCurrentOrderWithPersistedData(currentItems: currentItems, newApps: newApps, loadPersistedFolders: false)
-    }
-    
     /// 检查是否有持久化数据
     private func hasPersistedOrderData() -> Bool {
         guard let modelContext = self.modelContext else { return false }
@@ -4189,15 +4023,10 @@ final class AppStore: ObservableObject {
     }
     
     /// 智能合并现有顺序和持久化数据
-    private func mergeCurrentOrderWithPersistedData(currentItems: [LaunchpadItem], newApps: [AppInfo], loadPersistedFolders: Bool = true) {
+    private func mergeCurrentOrderWithPersistedData(currentItems: [LaunchpadItem]) {
         
         // 保存当前的项目顺序
         let currentOrder = currentItems
-        
-        // 加载持久化数据，但只更新文件夹信息
-        if loadPersistedFolders {
-            self.loadFoldersFromPersistedData()
-        }
         
         // 重建项目列表，严格保持现有顺序
         var newItems: [LaunchpadItem] = []
@@ -4312,53 +4141,6 @@ final class AppStore: ObservableObject {
 
     }
     
-    /// 只加载文件夹信息，不重建项目顺序
-    private func loadFoldersFromPersistedData() {
-        guard let modelContext = self.modelContext else { return }
-        
-        do {
-            // 尝试从新的"页-槽位"模型读取文件夹信息
-            let saved = try modelContext.fetch(FetchDescriptor<PageEntryData>(
-                sortBy: [SortDescriptor(\.pageIndex, order: .forward), SortDescriptor(\.position, order: .forward)]
-            ))
-            
-            if !saved.isEmpty {
-                // 构建文件夹
-                var folderMap: [String: FolderInfo] = [:]
-                var foldersInOrder: [FolderInfo] = []
-                
-                for row in saved where row.kind == "folder" {
-                    guard let fid = row.folderId else { continue }
-                    if folderMap[fid] != nil { continue }
-                    
-                    let folderApps: [AppInfo] = row.appPaths.compactMap { path in
-                        if let existing = apps.first(where: { $0.url.path == path }) {
-                            return existing
-                        }
-                        let url = URL(fileURLWithPath: path)
-                        if FileManager.default.fileExists(atPath: url.path) {
-                            return self.appInfo(from: url)
-                        }
-                        return self.placeholderAppInfo(forMissingPath: path)
-                    }
-                    
-                    let folder = folderWithValidQuickLaunchPins(FolderInfo(
-                        id: fid,
-                        name: row.folderName ?? "Untitled",
-                        apps: folderApps,
-                        pinnedAppPaths: row.pinnedAppPaths ?? [],
-                        createdAt: row.createdAt
-                    ))
-                    folderMap[fid] = folder
-                    foldersInOrder.append(folder)
-                }
-                
-                self.folders = self.sanitizedFolders(foldersInOrder)
-            }
-        } catch {
-        }
-    }
-
     // MARK: - AI Overlay Preview
     //
     // func presentAIOverlayPreview() {
@@ -4618,7 +4400,7 @@ final class AppStore: ObservableObject {
 
         let relevant = customAppSourcePaths.contains { source in
             guard let normalized = normalizeApplicationPath(source) else { return false }
-            return normalized.hasPrefix(volumePath)
+            return ApplicationPath.isPath(normalized, within: volumePath)
         }
 
         guard relevant else { return }
@@ -4661,11 +4443,6 @@ final class AppStore: ObservableObject {
                 debounce: Self.applicationReconciliationEventDebounce
             )
         }
-    }
-
-    private func isInsideAnotherApp(_ url: URL) -> Bool {
-        let appCount = url.pathComponents.filter { $0.hasSuffix(".app") }.count
-        return appCount > 1
     }
 
     private func isValidApp(at url: URL) -> Bool {
@@ -5456,6 +5233,7 @@ final class AppStore: ObservableObject {
     
     // MARK: - 持久化：每页独立排序（新）+ 兼容旧版
     func loadAllOrder() {
+        precondition(Thread.isMainThread)
         guard let modelContext else {
             print("LaunchNext: ModelContext is nil, cannot load persisted order")
             return
@@ -5500,7 +5278,7 @@ final class AppStore: ObservableObject {
                     if FileManager.default.fileExists(atPath: url.path) {
                         return self.appInfo(from: url)
                     }
-                    return self.placeholderAppInfo(forMissingPath: path, preferredName: row.folderName)
+                    return self.placeholderAppInfo(forMissingPath: path)
                 }
                 let folder = folderWithValidQuickLaunchPins(FolderInfo(
                     id: fid,
@@ -5567,20 +5345,19 @@ final class AppStore: ObservableObject {
                 }
             }
 
-            DispatchQueue.main.async {
-                self.folders = self.sanitizedFolders(foldersInOrder)
-                if !combined.isEmpty {
-                    self.items = self.filteredItemsRemovingHidden(from: combined)
-                    // 如果应用列表为空，从持久化数据中恢复应用列表
-                    if self.apps.isEmpty {
-                        let freeApps: [AppInfo] = combined.compactMap { if case let .app(a) = $0 { return a } else { return nil } }
-                        self.apps = freeApps
-                        self.pruneHiddenAppsFromAppList()
-                    }
+            applicationReconciliationGeneration += 1
+            self.folders = self.sanitizedFolders(foldersInOrder)
+            if !combined.isEmpty {
+                self.items = self.filteredItemsRemovingHidden(from: combined)
+                // 如果应用列表为空，从持久化数据中恢复应用列表
+                if self.apps.isEmpty {
+                    let freeApps: [AppInfo] = combined.compactMap { if case let .app(a) = $0 { return a } else { return nil } }
+                    self.apps = freeApps
+                    self.pruneHiddenAppsFromAppList()
                 }
-                self.refreshMissingPlaceholders()
-                self.hasAppliedOrderFromStore = true
             }
+            self.refreshMissingPlaceholders()
+            self.hasAppliedOrderFromStore = true
             return true
         } catch {
             return false
@@ -5603,7 +5380,7 @@ final class AppStore: ObservableObject {
                     if FileManager.default.fileExists(atPath: url.path) {
                         return self.appInfo(from: url)
                     }
-                    return self.placeholderAppInfo(forMissingPath: path, preferredName: row.folderName)
+                    return self.placeholderAppInfo(forMissingPath: path)
                 }
                 let folder = FolderInfo(id: row.id, name: row.folderName ?? "Untitled", apps: folderApps, createdAt: row.createdAt)
                 folderMap[row.id] = folder
@@ -5648,20 +5425,19 @@ final class AppStore: ObservableObject {
                 .map { LaunchpadItem.app($0) }
             combined.append(contentsOf: missingFreeApps)
 
-            DispatchQueue.main.async {
-                self.folders = self.sanitizedFolders(foldersInOrder)
-                if !combined.isEmpty {
-                    self.items = self.filteredItemsRemovingHidden(from: combined)
-                    // 如果应用列表为空，从持久化数据中恢复应用列表
-                    if self.apps.isEmpty {
-                        let freeAppsAfterLoad: [AppInfo] = combined.compactMap { if case let .app(a) = $0 { return a } else { return nil } }
-                        self.apps = freeAppsAfterLoad
-                        self.pruneHiddenAppsFromAppList()
-                    }
+            applicationReconciliationGeneration += 1
+            self.folders = self.sanitizedFolders(foldersInOrder)
+            if !combined.isEmpty {
+                self.items = self.filteredItemsRemovingHidden(from: combined)
+                // 如果应用列表为空，从持久化数据中恢复应用列表
+                if self.apps.isEmpty {
+                    let freeAppsAfterLoad: [AppInfo] = combined.compactMap { if case let .app(a) = $0 { return a } else { return nil } }
+                    self.apps = freeAppsAfterLoad
+                    self.pruneHiddenAppsFromAppList()
                 }
-                self.refreshMissingPlaceholders()
-                self.hasAppliedOrderFromStore = true
             }
+            self.refreshMissingPlaceholders()
+            self.hasAppliedOrderFromStore = true
         } catch {
             // ignore
         }
@@ -7064,9 +6840,8 @@ final class AppStore: ObservableObject {
 
             // 导入成功后刷新应用数据
             DispatchQueue.main.async { [weak self] in
-                self?.performInitialScanIfNeeded()
-                // 新版使用 SwiftData 的统一加载入口
-                self?.loadAllOrder()
+                self?.applyOrderAndFolders()
+                self?.scanApplicationsWithOrderPreservation()
                 self?.triggerGridRefresh()
             }
 
@@ -7088,8 +6863,8 @@ final class AppStore: ObservableObject {
 
             // 导入成功后刷新应用数据
             DispatchQueue.main.async { [weak self] in
-                self?.performInitialScanIfNeeded()
-                self?.loadAllOrder()
+                self?.applyOrderAndFolders()
+                self?.scanApplicationsWithOrderPreservation()
                 self?.triggerGridRefresh()
             }
 
