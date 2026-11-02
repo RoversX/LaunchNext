@@ -3716,6 +3716,7 @@ final class AppStore: ObservableObject {
             var found: [AppInfo] = []
             var seenPaths = Set<String>()
             var scanFailed = false
+            var scanIncomplete = false
             var sourceBecameUnavailable = false
 
             // 使用并发队列加速扫描
@@ -3729,17 +3730,19 @@ final class AppStore: ObservableObject {
                 scanQueue.async {
                     defer { group.leave() }
                     let url = URL(fileURLWithPath: path)
-                    var localScanFailed = false
                     var localFound: [AppInfo] = []
                     var localSeenPaths = Set<String>()
+                    // 单个子目录不可读（例如应用目录里混入了 0700 的数据库目录）
+                    // 不是扫描失败：跳过该子树继续枚举，只把这次结果标记为不完整。
+                    var localEnumerationIncomplete = false
 
                     guard let enumerator = FileManager.default.enumerator(
                         at: url,
                         includingPropertiesForKeys: [.isDirectoryKey],
                         options: [.skipsHiddenFiles, .skipsPackageDescendants],
                         errorHandler: { _, _ in
-                            localScanFailed = true
-                            return false
+                            localEnumerationIncomplete = true
+                            return true
                         }
                     ) else {
                         lock.withLock {
@@ -3766,15 +3769,18 @@ final class AppStore: ObservableObject {
                     ) && isDirectory.boolValue && FileManager.default.isReadableFile(atPath: path)
 
                     lock.withLock {
-                        if localScanFailed || !sourceStillAvailable {
+                        if !sourceStillAvailable {
+                            // 整个来源都读不到才算失败：这时把已记录的应用判为缺失是危险的。
                             scanFailed = true
-                            if !sourceStillAvailable && normalizedCustomSourceSet.contains(path) {
+                            if normalizedCustomSourceSet.contains(path) {
                                 sourceBecameUnavailable = true
                             }
                         } else {
-                            // Only complete source results are allowed into the
-                            // aggregate. Partial enumeration must never authorize
-                            // removals from the persisted layout.
+                            // 结果不完整（有子目录读不到）时仍然合并进来，但只允许新增，
+                            // 不允许据此移除持久化布局里的应用。
+                            if localEnumerationIncomplete {
+                                scanIncomplete = true
+                            }
                             found.append(contentsOf: localFound)
                             seenPaths.formUnion(localSeenPaths)
                         }
@@ -3787,6 +3793,11 @@ final class AppStore: ObservableObject {
             guard !scanFailed else {
                 DispatchQueue.main.async {
                     self.finishApplicationReconciliation(reasons: reasons, succeeded: false)
+                    // 不要让首屏永远停在“正在加载应用”：扫描整体失败时退回到
+                    // 宽松扫描（忽略不可读子目录），先把界面解锁出来。
+                    if self.isInitialLoading {
+                        self.scanApplications(loadPersistedOrder: true)
+                    }
                     if sourceBecameUnavailable {
                         self.requestApplicationReconciliation(reason: .sourceChange)
                     }
@@ -3824,7 +3835,8 @@ final class AppStore: ObservableObject {
                 let didApplyChanges = self.processScannedApplications(
                     newApps,
                     unavailableCustomSources: unavailableCustomSources,
-                    reasons: reasons
+                    reasons: reasons,
+                    allowRemovals: !scanIncomplete
                 )
                 if didApplyChanges {
                     self.generateCacheAfterScan()
@@ -3845,7 +3857,8 @@ final class AppStore: ObservableObject {
     private func processScannedApplications(
         _ newApps: [AppInfo],
         unavailableCustomSources: [String],
-        reasons: Set<ApplicationReconciliationReason>
+        reasons: Set<ApplicationReconciliationReason>,
+        allowRemovals: Bool = true
     ) -> Bool {
         // 保存当前 items 的顺序和结构
         let currentItems = self.items
@@ -3879,7 +3892,8 @@ final class AppStore: ObservableObject {
         for app in self.apps {
             if let refreshed = freshMap[app.url.path] {
                 updatedApps.append(refreshed)
-            } else if isUnderUnavailableCustomSource(app.url.path) {
+            } else if isUnderUnavailableCustomSource(app.url.path) || !allowRemovals {
+                // 扫描结果不完整时保留原对象，避免误删只是“这次没扫到”的应用。
                 updatedApps.append(app)
             }
         }
@@ -3891,7 +3905,10 @@ final class AppStore: ObservableObject {
                 if let refreshed = freshMap[app.url.path] {
                     return refreshed
                 }
-                return isUnderUnavailableCustomSource(app.url.path) ? app : nil
+                if isUnderUnavailableCustomSource(app.url.path) || !allowRemovals {
+                    return app
+                }
+                return nil
             }
             return folderWithValidQuickLaunchPins(updatedFolder)
         }
