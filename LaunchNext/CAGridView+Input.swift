@@ -1607,6 +1607,9 @@ extension CAGridView {
         let globalIndex = pageIndex * itemsPerPage + localIndex
 
         guard globalIndex < items.count else { return nil }
+        // Empty layout slots are background, including their invisible icon area.
+        // Route both clicks and page drags through the existing background path.
+        if case .empty = items[globalIndex] { return nil }
 
         // 检查是否点击在图标+标签区域内（不是单元格的空白部分）
         let actualIconSize = iconSize

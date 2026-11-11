@@ -92,8 +92,7 @@ struct CAGridViewRepresentable: NSViewRepresentable {
                 // 丢失的应用，不处理
                 break
             case .empty:
-                // 空白位置，不做任何操作（和真实Launchpad一致）
-                // 只有点击网格外的空白区域才关闭窗口
+                // Hit testing routes empty slots through onEmptyAreaClicked.
                 break
             }
         }

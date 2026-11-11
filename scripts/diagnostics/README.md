@@ -30,6 +30,25 @@ types. Its model callbacks still use fixtures rather than AppStore.
 
 Nothing here runs in CI, and none of it ships in LaunchNext.
 
+## Empty grid clicks and page drags
+
+```sh
+python3 scripts/diagnostics/check_grid_empty_input.py
+```
+
+Compiles the current hit tests, mouse handlers and item-click callback into a
+minimal NSView host. Checks empty-slot clicks, cell margins and gaps, unallocated
+cells, ordinary app/folder/missing-app clicks, and forward/backward page drags
+starting on empty slots. Empty slots must also remain valid drop destinations.
+Animation and item drag effects are stubbed; this does not verify real window
+event delivery. Use `--input-source <path>` to check an older input source.
+
+The scan regression suite (`python3 scripts/test-application-reconciliation.py`)
+also gates real metadata reads to test renaming, adding and clearing custom
+titles during a scan, including folder members and saved path aliases. It checks
+the displayed name and persisted discovery index, using temporary apps and an
+in-memory layout database without changing the user's custom-title preferences.
+
 ## Legacy drag completion
 
 ```sh
