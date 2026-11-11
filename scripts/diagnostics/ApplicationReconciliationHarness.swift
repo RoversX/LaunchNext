@@ -9,12 +9,15 @@ import SwiftData
 // INSERT_PRODUCTION_DISCOVERY
 // INSERT_PRODUCTION_MODELS
 
-struct AppInfo: Hashable {
-    var name: String
-    var icon = NSImage(size: .zero)
-    var url: URL
-    static func == (lhs: AppInfo, rhs: AppInfo) -> Bool { lhs.url == rhs.url }
-    func hash(into hasher: inout Hasher) { hasher.combine(url.path) }
+// INSERT_PRODUCTION_APP_INFO
+
+extension AppInfo {
+    init(name: String, url: URL) { self.init(name: name, icon: NSImage(size: .zero), url: url) }
+}
+
+enum PerformanceMode {
+    case full, lean
+    static let current = Self.lean
 }
 
 struct FolderInfo {
@@ -102,9 +105,15 @@ final class ProbeStore {
     // Keep the real hidden-path update logic without writing user preferences.
     private func persistHiddenApps(_ paths: Set<String>) {}
 
-    func appInfo(from url: URL, preferredName: String? = nil) -> AppInfo {
-        AppInfo(name: preferredName ?? url.deletingPathExtension().lastPathComponent, url: url)
+    var beforeMetadataRead: ((URL) -> Void)?
+    var afterMetadataRead: ((URL) -> Void)?
+    func appInfo(from url: URL, preferredName: String? = nil, includeCustomTitle: Bool = true) -> AppInfo {
+        beforeMetadataRead?(url)
+        let info = // INSERT_METADATA_CALL
+        afterMetadataRead?(url)
+        return info
     }
+    func scheduleCustomTitleCacheRefresh() {}
     func triggerFolderUpdate() {}
     func triggerGridRefresh() {}
     func rescan() { requestApplicationReconciliation(reason: .explicit) }
@@ -1316,9 +1325,79 @@ func testWindowShowDoesNotRestartInFlightScan(_ root: URL) throws {
     try expect(layoutAfter == fixture.originalLayout, "window show during a scan changed the saved layout")
 }
 
+func testTitleChangeDuringScan(_ root: URL, initial: String, replacement: String,
+                               afterMetadata: Bool = true, inFolder: Bool = false,
+                               alias: Bool = false, expectedName: String? = nil) throws {
+    let fixture = try Fixture(root: root, name: UUID().uuidString)
+    let store = try fixture.seedLayout()
+    let original = inFolder ? store.folders[0].apps[0] : store.apps.first { $0.name == "Visible" }!
+    var app = original
+    if alias {
+        let url = fixture.directory.appendingPathComponent("LayoutAlias.app")
+        try fixture.fileManager.createSymbolicLink(at: url, withDestinationURL: original.url)
+        app = AppInfo(name: original.name, url: url)
+        store.apps = store.apps.map { $0.url == original.url ? app : $0 }
+        store.items = store.items.map {
+            if case .app(let value) = $0, value.url == original.url { return .app(app) }
+            return $0
+        }
+    }
+    store.setCustomTitle(initial, for: app)
+    let expected = expectedName ?? (replacement.isEmpty ? original.name : replacement)
+    let targetPath = original.url.resolvingSymlinksInPath().path
+    let reached = DispatchSemaphore(value: 0)
+    let resume = DispatchSemaphore(value: 0)
+    let gate: (URL) -> Void = { url in
+        guard !Thread.isMainThread, url.resolvingSymlinksInPath().path == targetPath else { return }
+        reached.signal()
+        _ = resume.wait(timeout: .now() + 15)
+    }
+    if afterMetadata { store.afterMetadataRead = gate } else { store.beforeMetadataRead = gate }
+    defer { resume.signal() }
+    let starts = store.reconciliationStartCount
+    store.rescan()
+    try expect(reached.wait(timeout: .now() + 10) == .success, "scan did not reach metadata gate")
+    store.setCustomTitle(replacement, for: app)
+    if let expectedName {
+        let renamed = (store.apps + store.folders.flatMap(\.apps)).first { $0.url == app.url }
+        try expect(renamed?.name == expectedName, "immediate rename did not display the expected name")
+    }
+    resume.signal()
+    try finishScan(store)
+    store.beforeMetadataRead = nil
+    store.afterMetadataRead = nil
+
+    let inventory = store.apps + store.folders.flatMap(\.apps)
+    let displayed = store.items.flatMap { item -> [AppInfo] in
+        switch item {
+        case .app(let app): return [app]
+        case .folder(let folder): return folder.apps
+        default: return []
+        }
+    }
+    try expect(inventory.filter { $0.url == app.url }.allSatisfy { $0.name == expected }
+               && displayed.contains { $0.url == app.url && $0.name == expected },
+               "scan overwrote the latest title in the inventory or grid")
+    try expect(store.customTitles[app.url.path] == (replacement.isEmpty ? nil : replacement),
+               "scan changed the custom-title setting")
+    let index = ApplicationDiscoveryIndex.load(from: fixture.discoveryDefaults)
+    try expect(index.displayNames[targetPath] == expected, "discovery index persisted a stale display name")
+    try expect(store.reconciliationStartCount == starts + 1, "a rename unnecessarily restarted inventory discovery")
+}
+
 let root = URL(fileURLWithPath: CommandLine.arguments[1])
 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 let tests: [(String, (URL) throws -> Void)] = [
+    ("rename before metadata read survives scan", { try testTitleChangeDuringScan($0, initial: "Old", replacement: "New", afterMetadata: false) }),
+    ("rename after metadata read survives scan", { try testTitleChangeDuringScan($0, initial: "Old", replacement: "New") }),
+    ("clearing title during scan restores default name", { try testTitleChangeDuringScan($0, initial: "Old", replacement: "") }),
+    ("new title after metadata read survives scan", { try testTitleChangeDuringScan($0, initial: "", replacement: "New") }),
+    ("folder member rename survives scan", { try testTitleChangeDuringScan($0, initial: "Old", replacement: "New", inFolder: true) }),
+    ("saved alias rename updates canonical discovery name", { try testTitleChangeDuringScan($0, initial: "Old", replacement: "New", alias: true) }),
+    ("clearing saved alias title restores target default", { try testTitleChangeDuringScan($0, initial: "Old", replacement: "", alias: true) }),
+    ("app suffix stays normalized after scan", { try testTitleChangeDuringScan($0, initial: "Old", replacement: "Notes.app", expectedName: "Notes") }),
+    ("uppercase app suffix stays normalized in a folder", { try testTitleChangeDuringScan($0, initial: "Old", replacement: "Notes.APP", inFolder: true, expectedName: "Notes") }),
+    ("suffix-only title falls back to the default", { try testTitleChangeDuringScan($0, initial: "Old", replacement: ".app", expectedName: "Visible") }),
     ("cold launch skips unreadable subtree", testColdUnreadableSource),
     ("built-in source preserves layout and recovers", { try testPreservedLayout($0, custom: false) }),
     ("custom source preserves layout and recovers", { try testPreservedLayout($0, custom: true) }),

@@ -64,6 +64,8 @@ DECLARATIONS = [
     "    private func filteredItemsRemovingHidden(",
     "    private func filteredFolderRemovingHidden(from folder: FolderInfo) ",
     "    private func filteredFolderRemovingHidden(from folder: FolderInfo, hidden:",
+    "    func setCustomTitle(",
+    "    private func applyCustomTitleOverride(",
 ]
 
 # Keep --app-store compatible with earlier source snapshots. Extract each
@@ -167,6 +169,12 @@ def run_tests(directory: Path, app_store: Path, lifecycle_root: Path = REPOSITOR
     )
     declarations = DECLARATIONS + [marker for marker in VERSIONED_DECLARATIONS if marker in source]
     methods = "\n\n".join(declaration(source, marker) for marker in declarations)
+    metadata_method = declaration(source, "    private func appInfo(from")
+    methods += "\n" + metadata_method.replace("func appInfo(", "func productionAppInfo(", 1)
+    metadata_call = "productionAppInfo(from: url, preferredName: preferredName"
+    if "includeCustomTitle:" in metadata_method:
+        metadata_call += ", includeCustomTitle: includeCustomTitle"
+    metadata_call += ")"
     template = (
         REPOSITORY / "scripts/diagnostics/ApplicationReconciliationHarness.swift"
     ).read_text()
@@ -189,12 +197,15 @@ def run_tests(directory: Path, app_store: Path, lifecycle_root: Path = REPOSITOR
         raise ValueError("Expected one production window-show fallback interval")
     window_calls = window_show_store_calls(lifecycle_root)
     for marker in ("// INSERT_PRODUCTION_DISCOVERY", "// INSERT_PRODUCTION_MODELS",
+                   "// INSERT_PRODUCTION_APP_INFO", "// INSERT_METADATA_CALL",
                    "        // INSERT_SOURCE_CHANGE_CALL", "        // INSERT_IMPORT_CALL",
                    "        // INSERT_WINDOW_SHOW_CALLS", "    // INSERT_PRODUCTION_FALLBACK_INTERVAL",
                    "    // INSERT_PRODUCTION_METHODS"):
         if template.count(marker) != 1:
             raise ValueError(f"Harness template must contain exactly one {marker}")
     generated = template.replace("// INSERT_PRODUCTION_DISCOVERY", discovery_source).replace(
+        "// INSERT_PRODUCTION_APP_INFO", (REPOSITORY / "LaunchNext/AppInfo.swift").read_text()
+    ).replace("// INSERT_METADATA_CALL", metadata_call).replace(
         "// INSERT_PRODUCTION_MODELS", models
     ).replace("        // INSERT_SOURCE_CHANGE_CALL", "        " + source_change_call).replace(
         "        // INSERT_IMPORT_CALL", "        " + import_call

@@ -50,14 +50,18 @@ struct AppInfo: Identifiable, Equatable, Hashable {
             icon = transparentPlaceholderIcon
         }
 
-        if let override = customTitle.flatMap({ title -> String? in
-            let normalized = normalizeCandidate(title)
-            return normalized.isEmpty ? nil : normalized
-        }) {
+        if let override = normalizedCustomTitle(customTitle) {
             return AppInfo(name: override, icon: icon, url: url)
         }
 
         return AppInfo(name: chosenName, icon: icon, url: url)
+    }
+
+    // Renames and background scan results must display the same override.
+    static func normalizedCustomTitle(_ title: String?) -> String? {
+        guard let title else { return nil }
+        let normalized = normalizeCandidate(title)
+        return normalized.isEmpty ? nil : normalized
     }
 
     // MARK: - 获取本地化应用名

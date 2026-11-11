@@ -3721,7 +3721,6 @@ final class AppStore: ObservableObject {
         let generation = applicationReconciliationGeneration
         let previousIndex = applicationDiscoveryIndex
         let previousApps = apps
-        let savedTitles = customTitles
         let itemPaths = items.flatMap { item -> [String] in
             switch item {
             case .app(let app): return [app.url.path]
@@ -3751,22 +3750,15 @@ final class AppStore: ObservableObject {
                 let target = snapshot.canonicalPathsBySavedPath[path] ?? path
                 if savedPathByTarget[target] == nil { savedPathByTarget[target] = rawPath }
             }
-            var found: [AppInfo] = []
+            var found: [(app: AppInfo, targetPath: String)] = []
             for url in snapshot.applicationURLs {
                 let path = savedPathByTarget[url.path] ?? url.path
-                let metadata = self.appInfo(from: url)
-                let title = savedTitles[path]?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let name = title.flatMap { $0.isEmpty ? nil : $0 } ?? metadata.name
-                let app = AppInfo(name: name, icon: metadata.icon, url: URL(fileURLWithPath: path))
-                found.append(app)
-                snapshot.index.displayNames[url.path] = app.name
+                // Keep the default name so clearing an override during the scan
+                // can restore it. User-owned titles are read only on the main queue.
+                let metadata = self.appInfo(from: url, includeCustomTitle: false)
+                let app = AppInfo(name: metadata.name, icon: metadata.icon, url: URL(fileURLWithPath: path))
+                found.append((app, url.path))
             }
-            let foundByPath = Dictionary(uniqueKeysWithValues: found.map { ($0.url.path, $0) })
-            let oldPaths = Set(previousApps.map { $0.url.path })
-            let ordered = previousApps.compactMap { foundByPath[$0.url.path] }
-            let added = found.filter { !oldPaths.contains($0.url.path) }
-                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-            let newApps = ordered + added
 
             DispatchQueue.main.async {
                 guard generation == self.applicationReconciliationGeneration else {
@@ -3776,6 +3768,21 @@ final class AppStore: ObservableObject {
                     self.finishApplicationReconciliation(reasons: reasons, succeeded: false)
                     return
                 }
+                // A rename does not invalidate inventory discovery. Apply the
+                // latest overrides immediately before publishing its results.
+                let titledApps = found.map { entry -> AppInfo in
+                    let name = AppInfo.normalizedCustomTitle(self.customTitles[entry.app.url.path])
+                        ?? entry.app.name
+                    let app = AppInfo(name: name, icon: entry.app.icon, url: entry.app.url)
+                    snapshot.index.displayNames[entry.targetPath] = name
+                    return app
+                }
+                let foundByPath = Dictionary(uniqueKeysWithValues: titledApps.map { ($0.url.path, $0) })
+                let oldPaths = Set(previousApps.map { $0.url.path })
+                let ordered = previousApps.compactMap { foundByPath[$0.url.path] }
+                let added = titledApps.filter { !oldPaths.contains($0.url.path) }
+                    .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                let newApps = ordered + added
                 var reconciliationReasons = reasons
                 if self.applicationScanSnapshot?.unavailablePaths != snapshot.unavailablePaths {
                     reconciliationReasons.insert(.sourceChange)
@@ -4464,10 +4471,10 @@ final class AppStore: ObservableObject {
         NSWorkspace.shared.isFilePackage(atPath: url.path)
     }
 
-    private func appInfo(from url: URL, preferredName: String? = nil) -> AppInfo {
+    private func appInfo(from url: URL, preferredName: String? = nil, includeCustomTitle: Bool = true) -> AppInfo {
         AppInfo.from(url: url,
                      preferredName: preferredName,
-                     customTitle: customTitles[url.path],
+                     customTitle: includeCustomTitle ? customTitles[url.path] : nil,
                      loadIcon: PerformanceMode.current == .full)
     }
     
