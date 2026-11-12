@@ -903,6 +903,15 @@ final class AppStore: ObservableObject {
         Set(appearanceBackupValues.keys).union(encodedAppearanceBackupValues.keys)
     }
 
+    /// Developer tooling, diagnostic logging and application discovery state
+    /// describe this Mac. Backups omit them and imports ignore them, including
+    /// preference files copied from another Mac.
+    static let deviceLocalPreferenceKeys: [String] = [
+        showQuarantineRemovalActionKey,
+        WallpaperDiagnostics.enabledKey,
+        ApplicationDiscoveryIndex.defaultsKey
+    ]
+
     func preferencesForBackup(persisted: [String: Any]) throws -> [String: Any] {
         var result = persisted
         result.merge(appearanceBackupValues) { _, effectiveValue in effectiveValue }
@@ -910,10 +919,7 @@ final class AppStore: ObservableObject {
         for (key, value) in encodedAppearanceBackupValues {
             result[key] = try encoder.encode(value)
         }
-        // Developer tooling and diagnostic logging remain local to this Mac.
-        result.removeValue(forKey: Self.showQuarantineRemovalActionKey)
-        result.removeValue(forKey: WallpaperDiagnostics.enabledKey)
-        result.removeValue(forKey: ApplicationDiscoveryIndex.defaultsKey)
+        for key in Self.deviceLocalPreferenceKeys { result.removeValue(forKey: key) }
         return result
     }
 

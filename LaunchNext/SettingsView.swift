@@ -5906,9 +5906,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             let data = try Data(contentsOf: url)
             guard var incoming = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else { return }
 
-            // Developer tooling and diagnostic logging are local to this Mac.
-            incoming.removeValue(forKey: AppStore.showQuarantineRemovalActionKey)
-            incoming.removeValue(forKey: WallpaperDiagnostics.enabledKey)
+            // Keep this Mac's own values; the merge below leaves them untouched.
+            for key in AppStore.deviceLocalPreferenceKeys { incoming.removeValue(forKey: key) }
 
             if let allowedKeys, !allowedKeys.isEmpty {
                 incoming = incoming.filter { allowedKeys.contains($0.key) }
