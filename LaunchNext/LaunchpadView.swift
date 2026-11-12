@@ -374,6 +374,14 @@ struct LaunchpadView: View {
           .onChange(of: isSearchFieldFocused) { _, focused in
              if focused { isKeyboardNavigationActive = false }
          }
+          .onChange(of: appStore.currentPage) { _, page in
+             // While searching, Return opens the selected result even when no
+             // selection is shown. Keep that hidden selection on the visible page,
+             // however the page changed: shortcut, swipe, wheel or page dot.
+             guard !isKeyboardNavigationActive,
+                   !appStore.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+             setSelectionToPageStart(page)
+         }
          .onReceive(ControllerInputManager.shared.commands) { command in
              appStore.layoutRevealRequest = nil
              handleControllerCommand(command)
