@@ -216,6 +216,13 @@ extension CAGridView {
 
         let direction = scaledDelta > 0 ? 1 : -1
         let effectiveDirection = reverseWheelPagingDirection ? -direction : direction
+        let now = Date()
+        // A pause or a change of direction starts a new burst of wheel steps.
+        if wheelLastDirection != direction
+            || now.timeIntervalSince(wheelLastEventAt ?? .distantPast) > PageEdgeBounce.inputBurstGap {
+            wheelBurstBounced = false
+        }
+        wheelLastEventAt = now
         if wheelLastDirection != direction {
             wheelAccumulatedDelta = 0
         }
@@ -226,7 +233,6 @@ extension CAGridView {
         let threshold: CGFloat = 2.0
         guard wheelAccumulatedDelta >= threshold else { return }
 
-        let now = Date()
         if let last = wheelLastFlipAt, now.timeIntervalSince(last) < wheelFlipCooldown {
             return
         }
@@ -235,6 +241,13 @@ extension CAGridView {
         let targetPage = effectiveDirection > 0 ? currentPage - 1 : currentPage + 1
         wheelLastFlipAt = now
         wheelAccumulatedDelta = 0
+        guard targetPage >= 0, targetPage < pageCount else {
+            // A spinning wheel keeps hitting the edge; bounce once per burst.
+            if !wheelBurstBounced {
+                wheelBurstBounced = bounceAtPageEdge(towardNextPage: targetPage > currentPage)
+            }
+            return
+        }
         navigateToPage(targetPage, animated: true)
     }
 
@@ -1281,6 +1294,7 @@ extension CAGridView {
         guard bounds.width > 0 else { return }
         resetScrollInteractionState()
         isScrollAnimating = false
+        edgeBounceMotion = nil
         scrollAnimationStartTime = 0
         let expectedOffset = -CGFloat(currentPage) * (bounds.width + pageSpacing)
         scrollOffset = expectedOffset

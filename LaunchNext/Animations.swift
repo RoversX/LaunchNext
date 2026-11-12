@@ -6,6 +6,9 @@ enum LNAnimations {
         guard AnimationPreferences.isEnabled else { return .linear(duration: 0.0001) }
         return .spring(response: AnimationPreferences.springResponse, dampingFraction: 0.8)
     }
+
+    /// The response of springFast. With its damping, the motion has settled by then.
+    static var springFastResponse: TimeInterval { AnimationPreferences.springResponse }
     
     // MARK: - 性能优化的动画
     static var dragPreview: Animation {

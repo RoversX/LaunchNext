@@ -83,6 +83,8 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     var scrollVelocity: CGFloat = 0
     var isScrollAnimating = false
     var layoutRevealPageMotion: LayoutRevealFeedback.PageMotion?
+    /// Set while the grid moves toward a missing page and back.
+    var edgeBounceMotion: PageEdgeBounce.Motion?
     var scrollSensitivity: Double = AppStore.defaultScrollSensitivity
     var reverseWheelPagingDirection: Bool = false
     var trackpadVerticalDirection: AppStore.TrackpadVerticalDirection = .natural
@@ -187,6 +189,9 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     var wheelAccumulatedDelta: CGFloat = 0
     var wheelLastDirection: Int = 0
     var wheelLastFlipAt: Date?
+    var wheelLastEventAt: Date?
+    /// Set once the current burst of wheel steps has bounced at an edge.
+    var wheelBurstBounced = false
     let wheelFlipCooldown: TimeInterval = 0.15
     // Legacy reference:
     // var wheelSnapTimer: Timer?
@@ -522,6 +527,7 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
             scrollVelocity = 0
             isScrollAnimating = false
             layoutRevealPageMotion = nil
+            edgeBounceMotion = nil
         } else if let motion = layoutRevealPageMotion {
             let progress = min(1, max(0, (CACurrentMediaTime() - motion.startedAt) / motion.duration))
             let fraction = CGFloat(progress * progress * (3 - 2 * progress))
@@ -531,6 +537,21 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
                 scrollVelocity = 0
                 isScrollAnimating = false
                 layoutRevealPageMotion = nil
+            }
+        } else if let bounce = edgeBounceMotion {
+            if isDragging || isPageDragging {
+                // A gesture took over and now owns the offset.
+                edgeBounceMotion = nil
+                isScrollAnimating = false
+                return
+            }
+            let elapsed = CACurrentMediaTime() - bounce.startedAt
+            scrollOffset = targetScrollOffset + bounce.amplitude * PageEdgeBounce.displacement(at: elapsed)
+            if elapsed >= PageEdgeBounce.totalDuration {
+                scrollOffset = targetScrollOffset
+                scrollVelocity = 0
+                isScrollAnimating = false
+                edgeBounceMotion = nil
             }
         } else {
             let diff = targetScrollOffset - scrollOffset
@@ -639,6 +660,7 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
 
     func navigateToPage(_ page: Int, animated: Bool = true, revealDuration: TimeInterval? = nil) {
         layoutRevealPageMotion = nil
+        edgeBounceMotion = nil
         let newPage = max(0, min(pageCount - 1, page))
         let pageChanged = newPage != currentPage
         if pageChanged, isDraggingItem, !isBatchDragging {
@@ -683,6 +705,21 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
             onPageChanged?(currentPage)
         }
         logIfMismatch("navigateToPage")
+    }
+
+    /// Move toward a page that does not exist and back, so paging past the first
+    /// or last page visibly reaches an edge. Motion already in progress, from a
+    /// page change or a gesture, shows enough and is left alone.
+    /// Returns whether the bounce started.
+    @discardableResult
+    func bounceAtPageEdge(towardNextPage: Bool) -> Bool {
+        guard animationsEnabled, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              bounds.width > 0, !isScrollAnimating, !isDragging, !isPageDragging, !isItemDragInProgress else { return false }
+        targetScrollOffset = -CGFloat(currentPage) * (bounds.width + pageSpacing)
+        let amplitude = towardNextPage ? -PageEdgeBounce.distance : PageEdgeBounce.distance
+        edgeBounceMotion = PageEdgeBounce.Motion(amplitude: amplitude, startedAt: CACurrentMediaTime())
+        isScrollAnimating = true
+        return true
     }
 
     // MARK: - Public Methods
@@ -820,7 +857,11 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
         guard bounds.width > 0 else { return }
         let pageStride = bounds.width + pageSpacing
         let expectedOffset = -CGFloat(currentPage) * pageStride
+        // An edge bounce on this same page returns to it by itself. Snapping now
+        // would only make the next frame jump back out.
+        if edgeBounceMotion != nil, isScrollAnimating, targetScrollOffset == expectedOffset { return }
         if abs(scrollOffset - expectedOffset) > 0.5 {
+            edgeBounceMotion = nil
             scrollOffset = expectedOffset
             targetScrollOffset = expectedOffset
         }
@@ -851,4 +892,33 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
 
     /// 获取实例ID（用于调试）
     var debugInstanceId: Int { instanceId }
+}
+
+/// Paging past the first or last page with keys or a mouse wheel moves the grid a
+/// little toward the missing page and back. Swipes already stretch at the edges.
+enum PageEdgeBounce {
+    static let distance: CGFloat = 30
+    static let outDuration: TimeInterval = 0.1
+    static let returnDuration: TimeInterval = 0.22
+    /// Wheel steps closer together than this form one burst, which bounces once.
+    static let inputBurstGap: TimeInterval = 0.3
+    static var totalDuration: TimeInterval { outDuration + returnDuration }
+
+    struct Motion {
+        /// Signed offset at the turning point; negative points toward later pages.
+        let amplitude: CGFloat
+        let startedAt: CFTimeInterval
+    }
+
+    /// The fraction of the amplitude reached after `elapsed` seconds: ease out
+    /// to the turning point, then ease in and out back to rest.
+    static func displacement(at elapsed: TimeInterval) -> CGFloat {
+        guard elapsed > 0 else { return 0 }
+        if elapsed < outDuration {
+            let t = CGFloat(elapsed / outDuration)
+            return 1 - (1 - t) * (1 - t) * (1 - t)
+        }
+        let t = CGFloat(min(1, (elapsed - outDuration) / returnDuration))
+        return 1 - t * t * (3 - 2 * t)
+    }
 }

@@ -140,6 +140,14 @@ struct LaunchpadView: View {
     @State private var windowObserver: NSObjectProtocol?
     @State private var windowHiddenObserver: NSObjectProtocol?
     @State private var draggingItem: LaunchpadItem?
+    /// Classic grid only; the CA grid runs its own edge bounce.
+    @State private var pageEdgeBounceOffset: CGFloat = 0
+    /// Set once a held key or a burst of wheel steps has bounced at an edge,
+    /// so continuous input bounces once rather than on every repeat.
+    @State private var edgeBounceUsed = false
+    /// Classic grid only: until when a page change or an edge bounce is still
+    /// moving. A new bounce waits for it, as the CA grid waits for its own motion.
+    @State private var pageMotionEndsAt = Date.distantPast
     @State private var legacyItemDragSession: LegacyItemDragSession?
     @State private var displayedGridRefreshID: UUID
     @State private var dragPreviewPosition: CGPoint = .zero
@@ -177,6 +185,7 @@ struct LaunchpadView: View {
         var wheelAccumulated: CGFloat = 0
         var wheelLastDirection: Int = 0
         var wheelLastFlipAt: Date? = nil
+        var wheelLastEventAt: Date? = nil
         var followOffset: CGFloat = 0
         var followLastUpdateAt: TimeInterval = 0
         var followLastOffset: CGFloat = 0
@@ -1107,6 +1116,7 @@ struct LaunchpadView: View {
 
         let hStackOffset = -CGFloat(appStore.currentPage) * effectivePageWidth
             + (appStore.followScrollPagingEnabled ? scrollState.followOffset : 0)
+            + pageEdgeBounceOffset
 
         return AnyView(
             ZStack(alignment: .topLeading) {
@@ -1522,6 +1532,9 @@ struct LaunchpadView: View {
 
     private func navigateToPage(_ targetPage: Int, animated: Bool = true) {
         guard targetPage >= 0 && targetPage < pages.count else { return }
+        if animated, targetPage != appStore.currentPage {
+            pageMotionEndsAt = max(pageMotionEndsAt, Date().addingTimeInterval(LNAnimations.springFastResponse))
+        }
         if animated {
             withAnimation(LNAnimations.springFast) {
                 appStore.currentPage = targetPage
@@ -1536,12 +1549,46 @@ struct LaunchpadView: View {
         }
     }
 
-    private func navigateToNextPage() {
+    /// Paging past the last page bounces at the edge instead, unless the caller
+    /// already shows the edge, as a rubber-band swipe or an item drag does.
+    private func navigateToNextPage(bouncingAtEdge: Bool = true) {
+        guard appStore.currentPage + 1 < pages.count else {
+            if bouncingAtEdge { bounceAtPageEdge(towardNextPage: true) }
+            return
+        }
         navigateToPage(appStore.currentPage + 1)
     }
-    
-    private func navigateToPreviousPage() {
+
+    private func navigateToPreviousPage(bouncingAtEdge: Bool = true) {
+        guard appStore.currentPage > 0 else {
+            if bouncingAtEdge { bounceAtPageEdge(towardNextPage: false) }
+            return
+        }
         navigateToPage(appStore.currentPage - 1)
+    }
+
+    /// Move a little toward a page that does not exist and back. The CA grid
+    /// runs this motion itself; the classic grid offsets its page stack.
+    private func bounceAtPageEdge(towardNextPage: Bool) {
+        guard draggingItem == nil else { return }
+        if appStore.useCAGridRenderer {
+            if folderPresentation.grid?.bounceAtPageEdge(towardNextPage: towardNextPage) == true {
+                edgeBounceUsed = true
+            }
+            return
+        }
+        let now = Date()
+        guard appStore.enableAnimations, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              now >= pageMotionEndsAt else { return }
+        edgeBounceUsed = true
+        pageMotionEndsAt = now.addingTimeInterval(PageEdgeBounce.totalDuration)
+        withAnimation(.easeOut(duration: PageEdgeBounce.outDuration)) {
+            pageEdgeBounceOffset = towardNextPage ? -PageEdgeBounce.distance : PageEdgeBounce.distance
+        } completion: {
+            withAnimation(.easeInOut(duration: PageEdgeBounce.returnDuration)) {
+                pageEdgeBounceOffset = 0
+            }
+        }
     }
     
 }
@@ -2429,6 +2476,8 @@ extension LaunchpadView {
         
         guard !filteredItems.isEmpty else { return event }
         let code = event.keyCode
+        // A fresh key press may bounce at an edge again; its repeats may not.
+        if !event.isARepeat { edgeBounceUsed = false }
 
         // The CA grid tracks its own drags; draggingItem only covers the classic grid.
         if draggingItem != nil || folderPresentation.grid?.isItemDragInProgress == true {
@@ -2446,9 +2495,9 @@ extension LaunchpadView {
             // An input method may still be composing text in the search field.
             if isSearchFieldFocused, isIMEComposing() { return event }
             if code == 123 {
-                navigateToPreviousPage()
+                navigateToPreviousPage(bouncingAtEdge: !edgeBounceUsed)
             } else {
-                navigateToNextPage()
+                navigateToNextPage(bouncingAtEdge: !edgeBounceUsed)
             }
             return nil
         }
@@ -2506,9 +2555,9 @@ extension LaunchpadView {
             // 已激活时保留原有翻页行为（Shift 反向）
             let backward = event.modifierFlags.contains(.shift)
             if backward {
-                navigateToPreviousPage()
+                navigateToPreviousPage(bouncingAtEdge: !edgeBounceUsed)
             } else {
-                navigateToNextPage()
+                navigateToNextPage(bouncingAtEdge: !edgeBounceUsed)
             }
             setSelectionToPageStart(appStore.currentPage)
             return nil
@@ -2519,12 +2568,12 @@ extension LaunchpadView {
             switch code {
             case 123: // left arrow - 向前翻页
                 guard isKeyboardNavigationActive else { return event }
-                navigateToPreviousPage()
+                navigateToPreviousPage(bouncingAtEdge: !edgeBounceUsed)
                 setSelectionToPageStart(appStore.currentPage)
                 return nil
             case 124: // right arrow - 向后翻页
                 guard isKeyboardNavigationActive else { return event }
-                navigateToNextPage()
+                navigateToNextPage(bouncingAtEdge: !edgeBounceUsed)
                 setSelectionToPageStart(appStore.currentPage)
                 return nil
             default:
@@ -2979,6 +3028,14 @@ extension LaunchpadView {
         if primaryDelta == 0 { return }
         let direction = primaryDelta > 0 ? 1 : -1
         let effectiveDirection = appStore.reverseWheelPagingDirection ? -direction : direction
+        let now = Date()
+        // A pause or a change of direction starts a new burst of wheel steps,
+        // which may bounce at an edge once.
+        if scrollState.wheelLastDirection != direction
+            || now.timeIntervalSince(scrollState.wheelLastEventAt ?? .distantPast) > PageEdgeBounce.inputBurstGap {
+            edgeBounceUsed = false
+        }
+        scrollState.wheelLastEventAt = now
         if scrollState.wheelLastDirection != direction { scrollState.wheelAccumulated = 0 }
         scrollState.wheelLastDirection = direction
         scrollState.wheelAccumulated += abs(primaryDelta)
@@ -2986,10 +3043,13 @@ extension LaunchpadView {
         let relativeSensitivity = max(appStore.scrollSensitivity, 0.0001) / baselineSensitivity
         // Scale wheel threshold by sensitivity.
         let threshold: CGFloat = 2.0 / CGFloat(relativeSensitivity)
-        let now = Date()
         if scrollState.wheelAccumulated >= threshold {
             if let last = scrollState.wheelLastFlipAt, now.timeIntervalSince(last) < wheelFlipCooldown { return }
-            if effectiveDirection > 0 { navigateToNextPage() } else { navigateToPreviousPage() }
+            if effectiveDirection > 0 {
+                navigateToNextPage(bouncingAtEdge: !edgeBounceUsed)
+            } else {
+                navigateToPreviousPage(bouncingAtEdge: !edgeBounceUsed)
+            }
             scrollState.wheelLastFlipAt = now
             // Reset so one tick flips at most once.
             scrollState.wheelAccumulated = 0
@@ -3099,10 +3159,11 @@ extension LaunchpadView {
             }
         case .ended, .cancelled:
             let threshold = flipThreshold(pageWidth)
+            // The rubber band already showed the edge; do not bounce as well.
             if scrollState.accumulatedX <= -threshold {
-                navigateToNextPage()
+                navigateToNextPage(bouncingAtEdge: false)
             } else if scrollState.accumulatedX >= threshold {
-                navigateToPreviousPage()
+                navigateToPreviousPage(bouncingAtEdge: false)
             }
             resetFollowOffset(animated: true)
             scrollState.accumulatedX = 0
@@ -3242,7 +3303,7 @@ extension LaunchpadView {
         }
                 
         if iconCenter.x <= edgeMargin && appStore.currentPage > 0 {
-            navigateToPreviousPage()
+            navigateToPreviousPage(bouncingAtEdge: false)
             pageFlipManager.recordFlip()
             return true
         } else if iconCenter.x >= containerSize.width - edgeMargin {
@@ -3259,7 +3320,7 @@ extension LaunchpadView {
                 }
             }
             
-            navigateToNextPage()
+            navigateToNextPage(bouncingAtEdge: false)
             pageFlipManager.recordFlip()
             return true
         }

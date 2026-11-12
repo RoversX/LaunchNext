@@ -489,8 +489,11 @@ extension CAGridView {
         if let motion = layoutRevealPageMotion, isScrollAnimating,
            motion.pageStride == pageStride, motion.to == expectedOffset {
             targetScrollOffset = expectedOffset
+        } else if edgeBounceMotion != nil, isScrollAnimating, targetScrollOffset == expectedOffset {
+            // An edge bounce returns to this same page; let it finish.
         } else {
             layoutRevealPageMotion = nil
+            edgeBounceMotion = nil
             scrollOffset = expectedOffset
             targetScrollOffset = scrollOffset
             isScrollAnimating = false
