@@ -2526,6 +2526,17 @@ final class AppStore: ObservableObject {
         applicationScanSnapshot?.availablePaths.contains(standardizedFilePath(rawPath)) == true
     }
 
+    /// Whether a configured source provides the application at a layout path:
+    /// one of its entries discovered the app, or the path lies inside it.
+    /// Source removal uses the same provenance, so links and linked roots count.
+    func isApplication(atPath path: String, providedBySource source: String) -> Bool {
+        guard let normalizedSource = normalizeApplicationPath(source) else { return false }
+        let normalizedPath = standardizedFilePath(path)
+        return ApplicationPath.isPath(normalizedPath, within: normalizedSource)
+            || applicationDiscoveryIndex.originsByTarget[applicationTargetPath(for: normalizedPath)]?
+                .contains { $0.sourcePath == normalizedSource } == true
+    }
+
     private func removableSourcePath(forAppPath path: String) -> String? {
         let standardizedApp = standardizedFilePath(path)
         let customSources = Set(customAppSourcePaths.compactMap(normalizeApplicationPath))

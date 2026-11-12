@@ -3474,13 +3474,14 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     }
 
     private func appsForSource(_ sourcePath: String) -> [SourceApp] {
-        let normalizedSource = standardizePath(sourcePath)
         var apps: [SourceApp] = []
         var seen: Set<String> = []
 
         func consider(name: String, path: String, icon: NSImage) {
             let normalized = standardizePath(path)
-            guard ApplicationPath.isPath(normalized, within: normalizedSource) else { return }
+            // Use the provenance that source removal uses, so apps reached
+            // through links or a linked source root are listed too.
+            guard appStore.isApplication(atPath: path, providedBySource: sourcePath) else { return }
             if seen.insert(normalized).inserted {
                 apps.append(SourceApp(name: name, path: normalized, icon: icon))
             }

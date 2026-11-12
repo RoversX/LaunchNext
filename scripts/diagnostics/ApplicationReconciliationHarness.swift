@@ -1621,6 +1621,40 @@ func testLinkedSourceRoot(_ root: URL) throws {
     try expect(!store.apps.contains { $0.name == "BehindLink" }, "a linked source root did not report a removed app")
 }
 
+func testSourceListingMatchesRemoval(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "source-listing-matches-removal")
+    defer { fixture.restorePermissions() }
+    // One source only links to its app; another source is itself a link.
+    let linkSource = fixture.directory.appendingPathComponent("LinkSource")
+    try fixture.fileManager.createDirectory(at: linkSource, withIntermediateDirectories: true)
+    let target = fixture.directory.appendingPathComponent("ExternalTargets/Linked.app")
+    try fixture.createApp(target)
+    try fixture.fileManager.createSymbolicLink(at: linkSource.appendingPathComponent("Linked.app"), withDestinationURL: target)
+    let realDirectory = fixture.directory.appendingPathComponent("RealDirectory")
+    try fixture.createApp(realDirectory.appendingPathComponent("BehindLink.app"))
+    let linkedRoot = fixture.directory.appendingPathComponent("LinkedRoot")
+    try fixture.fileManager.createSymbolicLink(at: linkedRoot, withDestinationURL: realDirectory)
+    let store = fixture.store()
+    store.customAppSourcePaths = [linkSource.path, linkedRoot.path]
+    store.performInitialScanIfNeeded()
+    try finishScan(store)
+    guard let linked = store.apps.first(where: { $0.name == "Linked" }),
+          let behind = store.apps.first(where: { $0.name == "BehindLink" }),
+          let visible = store.apps.first(where: { $0.name == "Visible" }) else {
+        throw TestFailure(description: "source listing control did not discover its applications")
+    }
+    try expect(store.isApplication(atPath: linked.url.path, providedBySource: linkSource.path),
+               "Settings omitted an app that its source discovered through a link")
+    try expect(store.isApplication(atPath: behind.url.path, providedBySource: linkedRoot.path),
+               "Settings omitted an app from a source whose root is a link")
+    try expect(!store.isApplication(atPath: visible.url.path, providedBySource: linkSource.path)
+               && !store.isApplication(atPath: linked.url.path, providedBySource: linkedRoot.path),
+               "Settings listed an app under a source that did not provide it")
+    store.removeCustomAppSource(path: linkSource.path)
+    try expect(!store.apps.contains { $0.name == "Linked" } && store.apps.contains { $0.name == "BehindLink" },
+               "source removal disagreed with the apps Settings listed for it")
+}
+
 /// Waits for a scan that the code under test schedules on its own, then for it to finish.
 func waitForScheduledScan(_ store: ProbeStore, after starts: Int) throws {
     let deadline = Date().addingTimeInterval(10)
@@ -1753,6 +1787,7 @@ let tests: [(String, (URL) throws -> Void)] = [
     ("superseded initial scan keeps the loading screen", testSupersededInitialScanKeepsLoading),
     ("display names follow indexed applications", testDisplayNamesFollowIndexedTargets),
     ("source whose root is a link discovers and removes its apps", testLinkedSourceRoot),
+    ("source app listing follows discovery links like removal", testSourceListingMatchesRemoval),
     ("linked apps keep their positions while their drive is unplugged", testLinkedAppsOnUnpluggedDrive)
 ]
 var failures = 0

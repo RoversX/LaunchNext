@@ -63,6 +63,9 @@ A source change that supersedes a running scan must rerun with that scan's
 reasons, and on first launch the loading screen must stay up until a scan has
 applied applications. Display names are kept only for indexed applications. A
 source whose root is a link must discover and remove apps like any directory.
+The Settings query for a source's apps must follow discovery links, as source
+removal does; for older AppStore snapshots the harness substitutes Settings'
+former literal-path check.
 
 Links in a source that point to apps on a drive keep their positions while the
 drive is unplugged, and return in place when it is plugged back in. The test
