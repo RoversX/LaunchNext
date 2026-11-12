@@ -49,6 +49,26 @@ titles during a scan, including folder members and saved path aliases. It checks
 the displayed name and persisted discovery index, using temporary apps and an
 in-memory layout database without changing the user's custom-title preferences.
 
+The same suite replaces a source directory with a file and checks that the
+saved layout survives and recovers. It wraps `isValidApp` to replace an app with
+a link while the scan is running, so two targets claim one saved layout path;
+both apps must remain without a crash. A link target whose name exceeds
+`NAME_MAX` fails with `ENAMETOOLONG` on every scan. That stands in for a
+persistent retryable error, such as `EIO` or `ETIMEDOUT` on a network volume:
+retries must stay bounded, window shows must not rescan, and the unchanged
+layout must not be rewritten. Once the retries are spent, each later trigger
+must cost one scan until a complete scan restores them.
+
+A source change that supersedes a running scan must rerun with that scan's
+reasons, and on first launch the loading screen must stay up until a scan has
+applied applications. Display names are kept only for indexed applications. A
+source whose root is a link must discover and remove apps like any directory.
+
+Links in a source that point to apps on a drive keep their positions while the
+drive is unplugged, and return in place when it is plugged back in. The test
+calls the real volume handler, which must rescan when known apps live on that
+volume. Deleting an app while its drive stays connected is still a removal.
+
 ## Legacy drag completion
 
 ```sh

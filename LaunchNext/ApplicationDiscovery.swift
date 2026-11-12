@@ -58,12 +58,57 @@ nonisolated struct ApplicationDiscoverySnapshot: Sendable {
     var index: ApplicationDiscoveryIndex
     var shouldRetry: Bool
     var canonicalPathsBySavedPath: [String: String]
+
+    /// Chooses the saved spelling that represents each available target in the
+    /// layout. Distinct targets never share a spelling, because a layout path
+    /// identifies exactly one application.
+    ///
+    /// A saved alias can disagree with enumeration when its mapping is stale or
+    /// a link replaced an app during the scan: the alias resolves to one target
+    /// while another target lives at that exact path. Every target owns its own
+    /// path, so a conflicting alias falls back to the target path instead of
+    /// merging two applications.
+    func layoutPathsByTarget(savedPathOrder: [String]) -> [String: String] {
+        var aliasByTarget: [String: String] = [:]
+        for rawPath in savedPathOrder {
+            let path = ApplicationPath.standardized(rawPath)
+            let target = canonicalPathsBySavedPath[path] ?? path
+            if aliasByTarget[target] == nil { aliasByTarget[target] = rawPath }
+        }
+        // Layout items are keyed by URL path, so compare that spelling.
+        func layoutKey(_ path: String) -> String { URL(fileURLWithPath: path).path }
+        let targets = applicationURLs.map(\.path)
+        let targetKeys = Set(targets.map(layoutKey))
+        var claimedAliasKeys = Set<String>()
+        var result: [String: String] = [:]
+        for target in targets {
+            guard let alias = aliasByTarget[target] else {
+                result[target] = target
+                continue
+            }
+            let key = layoutKey(alias)
+            if key == layoutKey(target)
+                || (!targetKeys.contains(key) && claimedAliasKeys.insert(key).inserted) {
+                result[target] = alias
+            } else {
+                result[target] = target
+            }
+        }
+        return result
+    }
 }
 
 /// Synchronous filesystem work. The caller runs this scanner on a background queue.
 nonisolated enum ApplicationDiscoveryScanner {
     private enum PathState {
         case present
+        case missing
+        case inaccessible(retry: Bool)
+    }
+
+    private enum SourceRootState {
+        case directory
+        case notDirectory
         case missing
         case inaccessible(retry: Bool)
     }
@@ -101,6 +146,7 @@ nonisolated enum ApplicationDiscoveryScanner {
         var sources: [String: SourceState] = [:]
         var observedOrigins: [String: Set<ApplicationDiscoveryOrigin>] = [:]
         var targetStates: [String: TargetState] = [:]
+        var offlineLinkTargets = Set<String>()
         var shouldRetry = false
 
         func targetState(_ target: String) -> TargetState {
@@ -122,7 +168,7 @@ nonisolated enum ApplicationDiscoveryScanner {
         for source in configuredSources.sorted() {
             let root = resolvedPath(source, manager: manager)
             var state = SourceState(root: root)
-            switch pathState(root, manager: manager) {
+            switch sourceRootState(root, manager: manager) {
             case .missing:
                 if customSources.contains(source) {
                     state.offline = true
@@ -130,32 +176,48 @@ nonisolated enum ApplicationDiscoveryScanner {
                 }
                 sources[source] = state
                 continue
+            case .notDirectory:
+                // A file, Finder alias or link to a file in place of the source
+                // directory says nothing about the applications it held. Treat
+                // it as offline rather than as a complete, empty source.
+                state.offline = true
+                state.unavailablePrefixes.insert(root)
+                sources[source] = state
+                continue
             case .inaccessible(let retry):
                 state.unavailablePrefixes.insert(root)
                 shouldRetry = shouldRetry || retry
                 sources[source] = state
                 continue
-            case .present:
+            case .directory:
                 break
             }
 
             let sourceEntry = entryPath(URL(fileURLWithPath: source), manager: manager)
+            var rootListingFailed = false
+            // FileManager does not follow a link at the enumeration root; it
+            // reports ENOTDIR. List the resolved directory instead. Entry paths
+            // resolve their parents, so they are the same either way.
             let enumerator = manager.enumerator(
-                at: URL(fileURLWithPath: source),
+                at: URL(fileURLWithPath: root),
                 includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
                 options: [.skipsHiddenFiles, .skipsPackageDescendants],
                 errorHandler: { errorURL, error in
+                    // Error locations use the same entry coordinates as origins.
+                    // Only a source-root error maps to its resolved root directory.
+                    let failedEntry = entryPath(errorURL, manager: manager)
+                    let failedAtRoot = failedEntry == sourceEntry || failedEntry == root
                     switch classify(error) {
-                    case .missing:
+                    case .missing where !failedAtRoot:
                         // A directory removed during enumeration is evidence of deletion.
                         // The root recheck below distinguishes a disappearing volume.
                         break
+                    case .missing:
+                        // None of the root's entries were listed. This is never
+                        // evidence of deletion; the root recheck below decides.
+                        rootListingFailed = true
                     case .inaccessible(let retry):
-                        let failedEntry = entryPath(errorURL, manager: manager)
-                        // Error locations use the same entry coordinates as origins.
-                        // Only a source-root error maps to its resolved root directory.
-                        let prefix = failedEntry == sourceEntry || failedEntry == root ? root : failedEntry
-                        state.unavailablePrefixes.insert(prefix)
+                        state.unavailablePrefixes.insert(failedAtRoot ? root : failedEntry)
                         shouldRetry = shouldRetry || retry
                     case .present:
                         break
@@ -165,6 +227,12 @@ nonisolated enum ApplicationDiscoveryScanner {
             )
             if let enumerator {
                 for case let entryURL as URL in enumerator {
+                    // Resolving parents never changes the final component, so
+                    // only an .app entry or a link can reach an application.
+                    // Origins come only from such entries, so skipping the rest
+                    // also leaves origin bookkeeping unchanged.
+                    let isLink = (try? entryURL.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink
+                    guard entryURL.pathExtension == "app" || isLink != false else { continue }
                     // Resolve parent aliases, but retain the discovery link itself.
                     let entry = entryPath(entryURL, manager: manager)
                     state.seenEntries.insert(entry)
@@ -174,11 +242,16 @@ nonisolated enum ApplicationDiscoveryScanner {
                           targetURL.pathComponents.filter({ $0.hasSuffix(".app") }).count == 1 else { continue }
 
                     // Record every source edge before coalescing applications by target.
+                    let origin = ApplicationDiscoveryOrigin(sourcePath: source, entryPath: entry, sourceRootPath: root)
                     switch targetState(target) {
                     case .valid, .inaccessible:
-                        observedOrigins[target, default: []].insert(
-                            ApplicationDiscoveryOrigin(sourcePath: source, entryPath: entry, sourceRootPath: root)
-                        )
+                        observedOrigins[target, default: []].insert(origin)
+                    case .missing where isLink == true && isOfflineLinkTarget(target, manager: manager):
+                        // An app on an unplugged drive keeps its slot. Removing the
+                        // link, or deleting the app while its folder remains, is
+                        // still a removal.
+                        offlineLinkTargets.insert(target)
+                        observedOrigins[target, default: []].insert(origin)
                     case .missing, .invalid:
                         break
                     }
@@ -190,15 +263,22 @@ nonisolated enum ApplicationDiscoveryScanner {
 
             // A volume can disappear after some of its entries have been seen.
             // Its whole source is then unknown, including intermediate ENOENTs.
-            switch pathState(root, manager: manager) {
+            switch sourceRootState(root, manager: manager) {
             case .missing:
                 state.unavailablePrefixes.insert(root)
                 state.offline = customSources.contains(source)
                 if !state.offline { shouldRetry = true }
+            case .notDirectory:
+                state.unavailablePrefixes.insert(root)
+                state.offline = true
             case .inaccessible(let retry):
                 state.unavailablePrefixes.insert(root)
                 shouldRetry = shouldRetry || retry
-            case .present:
+            case .directory where rootListingFailed:
+                // The directory exists again, but this pass did not list it.
+                state.unavailablePrefixes.insert(root)
+                shouldRetry = true
+            case .directory:
                 break
             }
             // Validation may have raced the same disappearance. Recheck affected
@@ -296,7 +376,8 @@ nonisolated enum ApplicationDiscoveryScanner {
                 available.insert(target)
             case .inaccessible:
                 unavailable.insert(target)
-            case .missing where isMissingInsideOfflineSource(target, origins: origins, pending: pending):
+            case .missing where offlineLinkTargets.contains(target)
+                || isMissingInsideOfflineSource(target, origins: origins, pending: pending):
                 unavailable.insert(target)
             case .missing, .invalid:
                 // A missing external target is a real removal even if its discovery
@@ -309,6 +390,9 @@ nonisolated enum ApplicationDiscoveryScanner {
         let applicationURLs = available.sorted().map { URL(fileURLWithPath: $0) }
         let indexedTargets = Set(index.originsByTarget.keys).union(index.unresolvedLegacySources.keys)
         index.targetsByPath = previousIndex.targetsByPath.filter { indexedTargets.contains($0.value) }
+        // Indexed targets include every saved or protected app, so this keeps
+        // each name a placeholder can still show and drops removed apps.
+        index.displayNames = index.displayNames.filter { indexedTargets.contains($0.key) }
         for (target, aliases) in aliasesByTarget {
             if available.contains(target) {
                 available.formUnion(aliases.subtracting(inaccessibleAliases))
@@ -337,6 +421,28 @@ nonisolated enum ApplicationDiscoveryScanner {
         } catch {
             return classify(error)
         }
+    }
+
+    /// A link whose destination folder is gone, as on an unplugged drive, points
+    /// at an offline app. If only the app is gone, it was deleted.
+    private static func isOfflineLinkTarget(_ target: String, manager: FileManager) -> Bool {
+        if case .missing = pathState(URL(fileURLWithPath: target).deletingLastPathComponent().path, manager: manager) {
+            return true
+        }
+        return false
+    }
+
+    /// Only a directory can be enumerated as a source. The root has already been
+    /// resolved through symbolic links, so its own type is the destination's type.
+    private static func sourceRootState(_ root: String, manager: FileManager) -> SourceRootState {
+        let attributes: [FileAttributeKey: Any]
+        do {
+            attributes = try manager.attributesOfItem(atPath: root)
+        } catch {
+            if case .inaccessible(let retry) = classify(error) { return .inaccessible(retry: retry) }
+            return .missing
+        }
+        return (attributes[.type] as? FileAttributeType) == .typeDirectory ? .directory : .notDirectory
     }
 
     private static func classify(_ error: Error) -> PathState {

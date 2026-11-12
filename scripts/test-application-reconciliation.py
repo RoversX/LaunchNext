@@ -39,7 +39,7 @@ DECLARATIONS = [
     "    private func finishApplicationReconciliation(",
     "    private func performApplicationReconciliation(",
     "    private func processScannedApplications(",
-    "    private func isValidApp(",
+    "    private func handleVolumeEvent(",
     "    private func generateCacheAfterScan(",
     "    private func hasPersistedOrderData(",
     "    private func mergeCurrentOrderWithPersistedData(",
@@ -85,6 +85,17 @@ VERSIONED_DECLARATIONS = [
     "    func applyOrderAndFolders(",
     "    func applyImportedOrderAndFolders(",
 ]
+
+# Settings asks AppStore which apps a source provides. Older sources listed
+# them by literal path in SettingsView; the fallback mirrors that query so
+# those snapshots compile and show their listing behavior.
+SOURCE_LISTING_MARKER = "    func isApplication(atPath path: String, providedBySource"
+VERSIONED_DECLARATIONS.append(SOURCE_LISTING_MARKER)
+SOURCE_LISTING_FALLBACK = """\
+    func isApplication(atPath path: String, providedBySource source: String) -> Bool {
+        ApplicationPath.isPath(URL(fileURLWithPath: path).standardized.path,
+                               within: URL(fileURLWithPath: source).standardized.path)
+    }"""
 
 
 def declaration(source: str, marker: str) -> str:
@@ -171,6 +182,10 @@ def run_tests(directory: Path, app_store: Path, lifecycle_root: Path = REPOSITOR
     methods = "\n\n".join(declaration(source, marker) for marker in declarations)
     metadata_method = declaration(source, "    private func appInfo(from")
     methods += "\n" + metadata_method.replace("func appInfo(", "func productionAppInfo(", 1)
+    # The harness wraps validation so a fixture can change the filesystem at a
+    # precise point inside a background scan.
+    validation_method = declaration(source, "    private func isValidApp(")
+    methods += "\n" + validation_method.replace("func isValidApp(", "func productionIsValidApp(", 1)
     metadata_call = "productionAppInfo(from: url, preferredName: preferredName"
     if "includeCustomTitle:" in metadata_method:
         metadata_call += ", includeCustomTitle: includeCustomTitle"
@@ -196,11 +211,12 @@ def run_tests(directory: Path, app_store: Path, lifecycle_root: Path = REPOSITOR
     if len(fallback_lines) != 1:
         raise ValueError("Expected one production window-show fallback interval")
     window_calls = window_show_store_calls(lifecycle_root)
+    listing_fallback = "" if SOURCE_LISTING_MARKER in source else SOURCE_LISTING_FALLBACK
     for marker in ("// INSERT_PRODUCTION_DISCOVERY", "// INSERT_PRODUCTION_MODELS",
                    "// INSERT_PRODUCTION_APP_INFO", "// INSERT_METADATA_CALL",
                    "        // INSERT_SOURCE_CHANGE_CALL", "        // INSERT_IMPORT_CALL",
                    "        // INSERT_WINDOW_SHOW_CALLS", "    // INSERT_PRODUCTION_FALLBACK_INTERVAL",
-                   "    // INSERT_PRODUCTION_METHODS"):
+                   "    // INSERT_SOURCE_LISTING_FALLBACK", "    // INSERT_PRODUCTION_METHODS"):
         if template.count(marker) != 1:
             raise ValueError(f"Harness template must contain exactly one {marker}")
     generated = template.replace("// INSERT_PRODUCTION_DISCOVERY", discovery_source).replace(
@@ -211,6 +227,8 @@ def run_tests(directory: Path, app_store: Path, lifecycle_root: Path = REPOSITOR
         "        // INSERT_IMPORT_CALL", "        " + import_call
     ).replace("        // INSERT_WINDOW_SHOW_CALLS", window_calls).replace(
         "    // INSERT_PRODUCTION_FALLBACK_INTERVAL", fallback_lines[0]
+    ).replace(
+        "    // INSERT_SOURCE_LISTING_FALLBACK", listing_fallback
     ).replace(
         "    // INSERT_PRODUCTION_METHODS", methods
     )

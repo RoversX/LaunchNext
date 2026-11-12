@@ -2444,6 +2444,7 @@ final class AppStore: ObservableObject {
     private var applicationReconciliationReasons: Set<ApplicationReconciliationReason> = []
     private var applicationReconciliationInProgress = false
     private var applicationReconciliationWorkItem: DispatchWorkItem?
+    /// The last scan that applied its snapshot, including partial scans.
     private var lastSuccessfulApplicationReconciliationAt: Date?
     private var needsReconciliationAfterExternalUninstall = false
     private var applicationDiscoveryIndex = ApplicationDiscoveryIndex.load(from: .standard)
@@ -3618,7 +3619,6 @@ final class AppStore: ObservableObject {
             return
         }
 
-        if reason != .retry { applicationReconciliationRetryCount = 0 }
         applicationReconciliationReasons.insert(reason)
         guard !applicationReconciliationInProgress else { return }
 
@@ -3669,18 +3669,31 @@ final class AppStore: ObservableObject {
         performApplicationReconciliation(reasons: reasons)
     }
 
+    /// `succeeded` means the scan applied its snapshot, even if some sources were
+    /// incomplete; unavailable paths stay protected and readable ones are current.
+    /// `retryable` reports transient failures, which get bounded retries without
+    /// discarding that applied state. Only a superseded scan does not succeed.
     private func finishApplicationReconciliation(reasons: Set<ApplicationReconciliationReason>,
-                                                 succeeded: Bool) {
+                                                 succeeded: Bool,
+                                                 retryable: Bool = false) {
         precondition(Thread.isMainThread)
         if succeeded {
+            // Partial scans count too. Otherwise a persistent error makes every
+            // window show rescan and every retry rebuild and save the layout.
             lastSuccessfulApplicationReconciliationAt = Date()
-            applicationReconciliationRetryCount = 0
             if reasons.contains(.externalUninstallerReturn) {
                 needsReconciliationAfterExternalUninstall = false
             }
         }
+        // Only a complete scan restores the retry budget. While an error
+        // persists, each later request then costs one scan, not three.
+        if succeeded && !retryable { applicationReconciliationRetryCount = 0 }
         applicationReconciliationInProgress = false
-        if isInitialLoading { isInitialLoading = false }
+        // A superseded scan reruns from the pending reasons. Keep the initial
+        // loading screen until a scan applies, unless nothing else will run.
+        if isInitialLoading && (succeeded || applicationReconciliationReasons.isEmpty) {
+            isInitialLoading = false
+        }
 
         if !applicationReconciliationReasons.isEmpty {
             if applicationReconciliationReasons == [.fileSystemEvent] {
@@ -3688,7 +3701,7 @@ final class AppStore: ObservableObject {
             } else {
                 startPendingApplicationReconciliation()
             }
-        } else if !succeeded,
+        } else if !succeeded || retryable,
                   applicationReconciliationRetryCount < Self.applicationReconciliationRetryDelays.count {
             let delay = Self.applicationReconciliationRetryDelays[applicationReconciliationRetryCount]
             applicationReconciliationRetryCount += 1
@@ -3743,16 +3756,12 @@ final class AppStore: ObservableObject {
                 isValidApplication: self.isValidApp
             )
             // Keep saved path spellings as layout identities; source discovery
-            // uses canonical targets only inside its background index.
-            var savedPathByTarget: [String: String] = [:]
-            for rawPath in savedPathOrder {
-                let path = self.standardizedFilePath(rawPath)
-                let target = snapshot.canonicalPathsBySavedPath[path] ?? path
-                if savedPathByTarget[target] == nil { savedPathByTarget[target] = rawPath }
-            }
+            // uses canonical targets only inside its background index. Every
+            // target gets a distinct layout path, which the lookups below require.
+            let layoutPathsByTarget = snapshot.layoutPathsByTarget(savedPathOrder: savedPathOrder)
             var found: [(app: AppInfo, targetPath: String)] = []
             for url in snapshot.applicationURLs {
-                let path = savedPathByTarget[url.path] ?? url.path
+                let path = layoutPathsByTarget[url.path] ?? url.path
                 // Keep the default name so clearing an override during the scan
                 // can restore it. User-owned titles are read only on the main queue.
                 let metadata = self.appInfo(from: url, includeCustomTitle: false)
@@ -3763,8 +3772,9 @@ final class AppStore: ObservableObject {
             DispatchQueue.main.async {
                 guard generation == self.applicationReconciliationGeneration else {
                     // Source removal or layout import superseded this scan.
-                    // Never write its old provenance or inventory back.
-                    self.applicationReconciliationReasons.insert(.sourceChange)
+                    // Never write its old provenance or inventory back. The rerun
+                    // keeps this scan's reasons, such as an uninstaller check.
+                    self.applicationReconciliationReasons.formUnion(reasons.union([.sourceChange]))
                     self.finishApplicationReconciliation(reasons: reasons, succeeded: false)
                     return
                 }
@@ -3806,7 +3816,8 @@ final class AppStore: ObservableObject {
                     didApplyChanges = self.processScannedApplications(newApps, reasons: reconciliationReasons)
                 }
                 if didApplyChanges { self.generateCacheAfterScan() }
-                self.finishApplicationReconciliation(reasons: reasons, succeeded: !snapshot.shouldRetry)
+                self.finishApplicationReconciliation(reasons: reasons, succeeded: true,
+                                                     retryable: snapshot.shouldRetry)
             }
         }
     }
@@ -4419,10 +4430,14 @@ final class AppStore: ObservableObject {
         let volumePath = url.standardizedFileURL.path
         guard !volumePath.isEmpty else { return }
 
+        // Apps reached through a link, or through a linked source root, can live
+        // on the volume even when no configured source path does.
+        let knownPaths = (applicationScanSnapshot?.availablePaths ?? [])
+            .union(applicationScanSnapshot?.unavailablePaths ?? [])
         let relevant = customAppSourcePaths.contains { source in
             guard let normalized = normalizeApplicationPath(source) else { return false }
             return ApplicationPath.isPath(normalized, within: volumePath)
-        }
+        } || knownPaths.contains { ApplicationPath.isPath($0, within: volumePath) }
 
         guard relevant else { return }
 

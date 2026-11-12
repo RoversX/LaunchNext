@@ -61,7 +61,10 @@ final class ProbeStore {
     var inventoryObserver: (([AppInfo]) -> Void)?
     var folders: [FolderInfo] = []
     var items: [LaunchpadItem] = []
-    var isInitialLoading = true
+    var isInitialLoading = true {
+        didSet { loadingObserver?(isInitialLoading) }
+    }
+    var loadingObserver: ((Bool) -> Void)?
     var hasPerformedInitialScan = false
     var hasAppliedOrderFromStore = true
     private var applicationReconciliationReasons: Set<ApplicationReconciliationReason> = []
@@ -113,10 +116,21 @@ final class ProbeStore {
         afterMetadataRead?(url)
         return info
     }
+    // Runs on the scan queue after each production validation result.
+    var afterApplicationValidation: ((URL) -> Void)?
+    func isValidApp(at url: URL) -> Bool {
+        let valid = productionIsValidApp(at: url)
+        afterApplicationValidation?(url)
+        return valid
+    }
     func scheduleCustomTitleCacheRefresh() {}
     func triggerFolderUpdate() {}
     func triggerGridRefresh() {}
     func rescan() { requestApplicationReconciliation(reason: .explicit) }
+    func fileSystemEventRescan() { requestApplicationReconciliation(reason: .fileSystemEvent) }
+    // The real volume handler runs; fixtures install no FSEvents stream.
+    func restartAutoRescan() {}
+    func volumeDidChange(at url: URL, mounted: Bool) { handleVolumeEvent(at: url, isMount: mounted) }
     func staleRescan() { requestApplicationReconciliation(reason: .staleWindowFallback) }
     func sourceConfigurationDidChange() {
         // INSERT_SOURCE_CHANGE_CALL
@@ -136,6 +150,8 @@ final class ProbeStore {
         applicationReconciliationInProgress = true
         finishApplicationReconciliation(reasons: [.initial], succeeded: false)
     }
+
+    // INSERT_SOURCE_LISTING_FALLBACK
 
     // INSERT_PRODUCTION_METHODS
 }
@@ -1385,6 +1401,290 @@ func testTitleChangeDuringScan(_ root: URL, initial: String, replacement: String
     try expect(store.reconciliationStartCount == starts + 1, "a rename unnecessarily restarted inventory discovery")
 }
 
+func testSourceReplacedByFile(_ root: URL, custom: Bool) throws {
+    let fixture = try Fixture(root: root, name: custom ? "custom-source-became-file" : "builtin-source-became-file",
+                              customSource: custom)
+    defer { fixture.restorePermissions() }
+    let store = try fixture.seedLayout()
+    let moved = fixture.directory.appendingPathComponent("Applications.moved")
+    try fixture.fileManager.moveItem(at: fixture.source, to: moved)
+    // Enumerating a file reports ENOTDIR at the source root. That must not read
+    // as a complete source that no longer contains any applications.
+    try Data("not a directory".utf8).write(to: fixture.source)
+    for _ in 0..<2 {
+        store.rescan()
+        try finishScan(store)
+        let rows = try savedLayout(store)
+        try expect(rows == fixture.originalLayout,
+                   "a file in place of the source directory discarded saved positions, folder members, or pins")
+    }
+    try fixture.fileManager.removeItem(at: fixture.source)
+    try fixture.fileManager.moveItem(at: moved, to: fixture.source)
+    store.rescan()
+    try finishScan(store)
+    let recovered = try savedLayout(store)
+    try expect(recovered == fixture.originalLayout, "restoring the source directory changed the saved layout")
+    try expect(!store.items.contains { if case .missingApp = $0 { return true }; return false },
+               "restoring the source directory left a missing placeholder")
+}
+
+func testLinkReplacingAppDuringScan(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "link-replaces-app-during-scan")
+    defer { fixture.restorePermissions() }
+    let store = try fixture.seedLayout()
+    // A second source holds an application that is not in the saved layout.
+    let laterSource = fixture.directory.appendingPathComponent("LaterSource")
+    let fresh = laterSource.appendingPathComponent("Fresh.app")
+    try fixture.createApp(fresh)
+    store.customAppSourcePaths = [laterSource.path]
+    let visible = store.apps.first { $0.name == "Visible" }!
+    let link = fixture.source.appendingPathComponent("Visible.app")
+    var replaced = false
+    // Enumeration has just validated Visible.app as its own target. Replacing it
+    // with a link now makes its saved path resolve to Fresh.app, so two targets
+    // claim the same saved layout path.
+    store.afterApplicationValidation = { url in
+        guard !replaced, url.lastPathComponent == "Visible.app" else { return }
+        replaced = true
+        try? FileManager.default.removeItem(at: link)
+        try? FileManager.default.createSymbolicLink(at: link, withDestinationURL: fresh)
+    }
+    store.rescan()
+    try finishScan(store)
+    store.afterApplicationValidation = nil
+    try expect(replaced, "fixture did not replace the application during the scan")
+    let rows = try savedLayout(store)
+    try expect(store.apps.contains { $0.url.path == visible.url.path }
+               && store.apps.contains { $0.url.lastPathComponent == "Fresh.app" },
+               "a layout path claimed by two targets merged them into one application")
+    try expect(Array(rows.prefix(fixture.originalLayout.count)) == fixture.originalLayout
+               && persistedApplicationPaths(rows).contains { $0.hasSuffix("/Fresh.app") },
+               "a layout path claimed by two targets moved saved items or lost the new application")
+
+    // The next scan sees a consistent link, so the saved slot now represents Fresh.app.
+    store.rescan()
+    try finishScan(store)
+    let settled = try savedLayout(store)
+    let freshEntries = store.apps.filter { $0.url.resolvingSymlinksInPath().lastPathComponent == "Fresh.app" }
+    try expect(freshEntries.map(\.url.path) == [visible.url.path],
+               "a consistent link did not represent its target once, at the saved path")
+    try expect(Array(settled.prefix(fixture.originalLayout.count)) == fixture.originalLayout
+               && !persistedApplicationPaths(settled).contains { $0.hasSuffix("/Fresh.app") },
+               "resolving the link changed saved positions or kept a duplicate entry")
+}
+
+/// Waits for the current scan and every retry it schedules.
+func settleScans(_ store: ProbeStore) throws {
+    let deadline = Date().addingTimeInterval(20)
+    while (store.applicationReconciliationInProgress || store.applicationReconciliationWorkItem != nil)
+            && Date() < deadline {
+        _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
+    }
+    try expect(!store.applicationReconciliationInProgress && store.applicationReconciliationWorkItem == nil,
+               "scan retries did not settle within 20 seconds")
+}
+
+/// saveAllOrder replaces every row, so unchanged identifiers mean no rewrite.
+func layoutRowIDs(_ store: ProbeStore) throws -> Set<PersistentIdentifier> {
+    Set(try store.modelContext!.fetch(FetchDescriptor<PageEntryData>()).map(\.persistentModelID))
+}
+
+func testPersistentRetryableError(_ root: URL, restart: Bool) throws {
+    let fixture = try Fixture(root: root, name: restart ? "persistent-retry-restart" : "persistent-retry-stale-window")
+    defer { fixture.restorePermissions() }
+    let seeded = try fixture.seedLayout()
+    // A name longer than NAME_MAX makes every stat of this link's target fail
+    // with ENAMETOOLONG. It is a deterministic non-permission error, so the
+    // scanner retries it like EIO or ETIMEDOUT from a network volume.
+    let unreachable = fixture.directory.appendingPathComponent(String(repeating: "u", count: 300) + ".app")
+    let link = fixture.source.appendingPathComponent("Unreachable.app").path
+    try fixture.fileManager.createSymbolicLink(atPath: link, withDestinationPath: unreachable.path)
+    let store: ProbeStore
+    if restart {
+        store = fixture.store(restarting: true)
+        store.performInitialScanIfNeeded()
+    } else {
+        store = seeded
+        store.makeSuccessfulScanStale()
+        store.presentWindowForTesting()
+    }
+    try finishScan(store)
+    try expect(store.applicationReconciliationWorkItem != nil, "a retryable scan error did not schedule a retry")
+    let rows = try layoutRowIDs(store)
+    let starts = store.reconciliationStartCount
+
+    try settleScans(store)
+    let rowsAfterRetries = try layoutRowIDs(store)
+    try expect(store.reconciliationStartCount == starts + 2, "retries for a persistent error were not bounded at two")
+    try expect(rowsAfterRetries == rows, "retrying a partial scan rewrote an unchanged saved layout")
+
+    store.presentWindowForTesting()
+    try settleScans(store)
+    let rowsAfterWindowShow = try layoutRowIDs(store)
+    try expect(store.reconciliationStartCount == starts + 2,
+               "showing the window rescanned soon after a partial scan was applied")
+    try expect(rowsAfterWindowShow == rows, "showing the window rewrote an unchanged saved layout")
+
+    // The retries are spent, so a later trigger costs one scan, not three.
+    store.fileSystemEventRescan()
+    try settleScans(store)
+    try expect(store.reconciliationStartCount == starts + 3,
+               "a file-system event during a persistent error started another round of retries")
+    let layout = try savedLayout(store)
+    try expect(layout == fixture.originalLayout, "a persistent retryable error changed the saved layout")
+
+    // Waiting for another retry round is slow, so check recovery once: a
+    // complete scan restores the retry budget for the next transient error.
+    guard !restart else { return }
+    try fixture.fileManager.removeItem(atPath: link)
+    store.fileSystemEventRescan()
+    try settleScans(store)
+    try fixture.fileManager.createSymbolicLink(atPath: link, withDestinationPath: unreachable.path)
+    let startsBeforeNewError = store.reconciliationStartCount
+    store.fileSystemEventRescan()
+    try settleScans(store)
+    try expect(store.reconciliationStartCount == startsBeforeNewError + 3,
+               "a complete scan did not restore retries for a new transient error")
+}
+
+func testSupersededScanKeepsReasons(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "superseded-scan-keeps-reasons")
+    defer { fixture.restorePermissions() }
+    let store = try fixture.seedLayout()
+    // The external uninstaller flow sets this before the window returns.
+    store.needsReconciliationAfterExternalUninstall = true
+    store.presentWindowForTesting()
+    try expect(store.applicationReconciliationInProgress, "returning from an uninstaller did not start a scan")
+    // The scan's main-queue result cannot apply before this synchronous change.
+    store.sourceConfigurationDidChange()
+    try finishScan(store)
+    try expect(!store.needsReconciliationAfterExternalUninstall,
+               "the rerun of a superseded scan dropped its uninstaller check")
+    let starts = store.reconciliationStartCount
+    store.presentWindowForTesting()
+    try finishScan(store)
+    try expect(store.reconciliationStartCount == starts, "the next window show repeated the uninstaller scan")
+}
+
+func testSupersededInitialScanKeepsLoading(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "superseded-initial-scan-loading")
+    defer { fixture.restorePermissions() }
+    let store = fixture.store()
+    var appsWhenLoadingEnded: Int?
+    store.loadingObserver = { [unowned store] loading in
+        if !loading && appsWhenLoadingEnded == nil { appsWhenLoadingEnded = store.apps.count }
+    }
+    store.performInitialScanIfNeeded()
+    try expect(store.applicationReconciliationInProgress, "initial scan did not start")
+    store.sourceConfigurationDidChange()
+    try finishScan(store)
+    try expect(appsWhenLoadingEnded == 3,
+               "the loading screen ended on a superseded scan, before any applications were applied")
+}
+
+func testDisplayNamesFollowIndexedTargets(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "display-names-follow-index")
+    defer { fixture.restorePermissions() }
+    let store = try fixture.seedLayout()
+    func names() -> [String: String] { ApplicationDiscoveryIndex.load(from: fixture.discoveryDefaults).displayNames }
+    try expect(names().keys.contains { $0.hasSuffix("/Visible.app") }, "control scan did not record a display name")
+    try fixture.denySubdirectory()
+    try fixture.fileManager.removeItem(at: fixture.source.appendingPathComponent("Visible.app"))
+    // The first scan removes the app from the layout; the next forgets it.
+    for _ in 0..<2 {
+        store.rescan()
+        try finishScan(store)
+    }
+    let remaining = names()
+    try expect(!remaining.keys.contains { $0.hasSuffix("/Visible.app") },
+               "a deleted application kept its display name indefinitely")
+    try expect(remaining.contains { $0.key.hasSuffix("/SavedTop.app") && $0.value == "SavedTop" },
+               "pruning dropped the name of an application protected by an unreadable directory")
+}
+
+func testLinkedSourceRoot(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "linked-source-root")
+    defer { fixture.restorePermissions() }
+    let realDirectory = fixture.directory.appendingPathComponent("RealDirectory")
+    try fixture.createApp(realDirectory.appendingPathComponent("BehindLink.app"))
+    let linkedRoot = fixture.directory.appendingPathComponent("LinkedRoot")
+    try fixture.fileManager.createSymbolicLink(at: linkedRoot, withDestinationURL: realDirectory)
+    let store = fixture.store()
+    store.customAppSourcePaths = [linkedRoot.path]
+    store.performInitialScanIfNeeded()
+    try finishScan(store)
+    try expect(store.apps.contains { $0.name == "BehindLink" }, "a source whose root is a link discovered none of its apps")
+    try expect(store.applicationReconciliationWorkItem == nil, "a readable linked source root scheduled a retry")
+    try fixture.fileManager.removeItem(at: realDirectory.appendingPathComponent("BehindLink.app"))
+    store.rescan()
+    try finishScan(store)
+    try expect(!store.apps.contains { $0.name == "BehindLink" }, "a linked source root did not report a removed app")
+}
+
+/// Waits for a scan that the code under test schedules on its own, then for it to finish.
+func waitForScheduledScan(_ store: ProbeStore, after starts: Int) throws {
+    let deadline = Date().addingTimeInterval(10)
+    while store.reconciliationStartCount == starts && Date() < deadline {
+        _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
+    }
+    try expect(store.reconciliationStartCount > starts, "the volume event did not start a scan")
+    try finishScan(store)
+}
+
+func testLinkedAppsOnUnpluggedDrive(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "linked-apps-on-unplugged-drive")
+    defer { fixture.restorePermissions() }
+    // Applications links to apps on a drive. The drive folder stands in for
+    // its mount point, which disappears when the drive is unplugged.
+    let drive = fixture.directory.appendingPathComponent("Drive")
+    for name in ["OnDriveTop", "OnDriveMember"] {
+        let app = drive.appendingPathComponent(name + ".app")
+        try fixture.createApp(app)
+        try fixture.fileManager.createSymbolicLink(at: fixture.source.appendingPathComponent(name + ".app"),
+                                                   withDestinationURL: app)
+    }
+    let store = fixture.store()
+    store.performInitialScanIfNeeded()
+    try finishScan(store)
+    guard let top = store.apps.first(where: { $0.name == "OnDriveTop" }),
+          let member = store.apps.first(where: { $0.name == "OnDriveMember" }),
+          let visible = store.apps.first(where: { $0.name == "Visible" }) else {
+        throw TestFailure(description: "drive control did not discover its linked applications")
+    }
+    let folder = FolderInfo(name: "Tools", apps: [member, visible])
+    store.apps.removeAll { $0.url == member.url || $0.url == visible.url }
+    store.folders = [folder]
+    store.items = [.folder(folder), .app(top)] + store.apps.filter { $0.url != top.url }.map { .app($0) }
+    store.saveAllOrder()
+    let original = try savedLayout(store)
+
+    let unplugged = fixture.directory.appendingPathComponent("Unplugged")
+    try fixture.fileManager.moveItem(at: drive, to: unplugged)
+    var starts = store.reconciliationStartCount
+    store.volumeDidChange(at: drive, mounted: false)
+    try waitForScheduledScan(store, after: starts)
+    let whileUnplugged = try savedLayout(store)
+    try expect(whileUnplugged == original, "unplugging a drive discarded the positions of linked apps on it")
+
+    try fixture.fileManager.moveItem(at: unplugged, to: drive)
+    starts = store.reconciliationStartCount
+    store.volumeDidChange(at: drive, mounted: true)
+    try waitForScheduledScan(store, after: starts)
+    let replugged = try savedLayout(store)
+    try expect(replugged == original
+               && !store.items.contains { if case .missingApp = $0 { return true }; return false }
+               && store.folders.first?.apps.map(\.name) == ["OnDriveMember", "Visible"],
+               "replugging the drive did not restore its linked apps in place")
+
+    // While the drive stays connected, a deleted app is a real removal.
+    try fixture.fileManager.removeItem(at: drive.appendingPathComponent("OnDriveTop.app"))
+    store.rescan()
+    try finishScan(store)
+    let rows = try savedLayout(store)
+    try expect(!persistedApplicationPaths(rows).contains { $0.hasSuffix("/OnDriveTop.app") },
+               "an app deleted from a connected drive kept its slot")
+}
+
 let root = URL(fileURLWithPath: CommandLine.arguments[1])
 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 let tests: [(String, (URL) throws -> Void)] = [
@@ -1443,7 +1743,17 @@ let tests: [(String, (URL) throws -> Void)] = [
     ("window show preserves real API removal of an external linked target", { try testRemoveLinkedSourceWithOfflineRoot($0, openWindow: true) }),
     ("recent window show preserves discovery without starting a scan", testRecentWindowShowPreservesDiscovery),
     ("stale window show starts exactly one scan", testStaleWindowShowStartsOneScan),
-    ("window show does not restart an in-flight scan", testWindowShowDoesNotRestartInFlightScan)
+    ("window show does not restart an in-flight scan", testWindowShowDoesNotRestartInFlightScan),
+    ("custom source replaced by a file preserves layout and recovers", { try testSourceReplacedByFile($0, custom: true) }),
+    ("built-in source replaced by a file preserves layout and recovers", { try testSourceReplacedByFile($0, custom: false) }),
+    ("link replacing an app during a scan keeps both applications", testLinkReplacingAppDuringScan),
+    ("persistent retryable error after restart does not rescan or rewrite layout", { try testPersistentRetryableError($0, restart: true) }),
+    ("persistent retryable error on stale window show does not rescan or rewrite layout", { try testPersistentRetryableError($0, restart: false) }),
+    ("superseded scan reruns with its own reasons", testSupersededScanKeepsReasons),
+    ("superseded initial scan keeps the loading screen", testSupersededInitialScanKeepsLoading),
+    ("display names follow indexed applications", testDisplayNamesFollowIndexedTargets),
+    ("source whose root is a link discovers and removes its apps", testLinkedSourceRoot),
+    ("linked apps keep their positions while their drive is unplugged", testLinkedAppsOnUnpluggedDrive)
 ]
 var failures = 0
 var skipped = 0
