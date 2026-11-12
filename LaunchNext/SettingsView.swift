@@ -3854,6 +3854,35 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top, spacing: 16) {
                     VStack(alignment: .leading, spacing: 6) {
+                        Label(appStore.localized(.pageSwitchHotkeysTitle), systemImage: "arrow.left.arrow.right")
+                            .font(.headline)
+                        Text(appStore.localized(.pageSwitchHotkeysDescription))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 12)
+
+                    Text("⌘←  ⌘→")
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.accentColor.opacity(colorScheme == .dark ? 0.18 : 0.12), in: Capsule())
+                }
+
+                Toggle(isOn: $appStore.pageSwitchHotkeysEnabled) {
+                    Text(appStore.localized(.pageSwitchHotkeysEnabledTitle))
+                }
+                .toggleStyle(.switch)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
                         Label(appStore.localized(.dockDragSectionTitle), systemImage: "dock.rectangle")
                             .font(.headline)
                         Text(appStore.localized(.dockDragSectionDescription))

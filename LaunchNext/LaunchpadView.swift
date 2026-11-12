@@ -680,6 +680,7 @@ struct LaunchpadView: View {
                     let maxPageIndex = max(pages.count - 1, 0)
                     DispatchQueue.main.async {
                         guard appStore.searchQuery == query, appStore.layoutRevealRequest == nil else { return }
+                        guard !query.isEmpty else { return }
                         appStore.currentPage = 0
                         if appStore.currentPage > maxPageIndex {
                             appStore.currentPage = maxPageIndex
@@ -2419,7 +2420,6 @@ extension LaunchpadView {
             return event
         }
         
-        guard !filteredItems.isEmpty else { return event }
         let code = event.keyCode
 
         if draggingItem != nil {
@@ -2428,6 +2428,22 @@ extension LaunchpadView {
             default: return event
             }
         }
+
+        if appStore.pageSwitchHotkeysEnabled,
+           !appStore.isSetting,
+           event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command,
+           code == 123 || code == 124 {
+            isSearchFieldFocused = false
+            appStore.clearSearch()
+            if code == 123 {
+                navigateToPreviousPage()
+            } else {
+                navigateToNextPage()
+            }
+            return nil
+        }
+
+        guard !filteredItems.isEmpty else { return event }
 
         if code == 53 { // esc
             AppDelegate.shared?.hideWindow()
