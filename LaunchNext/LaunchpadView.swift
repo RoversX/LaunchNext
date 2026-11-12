@@ -680,7 +680,6 @@ struct LaunchpadView: View {
                     let maxPageIndex = max(pages.count - 1, 0)
                     DispatchQueue.main.async {
                         guard appStore.searchQuery == query, appStore.layoutRevealRequest == nil else { return }
-                        guard !query.isEmpty else { return }
                         appStore.currentPage = 0
                         if appStore.currentPage > maxPageIndex {
                             appStore.currentPage = maxPageIndex
@@ -2420,21 +2419,24 @@ extension LaunchpadView {
             return event
         }
         
+        guard !filteredItems.isEmpty else { return event }
         let code = event.keyCode
 
-        if draggingItem != nil {
+        // The CA grid tracks its own drags; draggingItem only covers the classic grid.
+        if draggingItem != nil || folderPresentation.grid?.isItemDragInProgress == true {
             switch code {
             case 123, 124, 125, 126, 48, 36: return nil
             default: return event
             }
         }
 
-        if appStore.pageSwitchHotkeysEnabled,
-           !appStore.isSetting,
+        // ⌘← / ⌘→ switch between the pages on screen, which are the result pages
+        // while searching. The search text and the field's focus stay as they are.
+        if !appStore.isSetting,
            event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command,
            code == 123 || code == 124 {
-            isSearchFieldFocused = false
-            appStore.clearSearch()
+            // An input method may still be composing text in the search field.
+            if isSearchFieldFocused, isIMEComposing() { return event }
             if code == 123 {
                 navigateToPreviousPage()
             } else {
@@ -2442,8 +2444,6 @@ extension LaunchpadView {
             }
             return nil
         }
-
-        guard !filteredItems.isEmpty else { return event }
 
         if code == 53 { // esc
             AppDelegate.shared?.hideWindow()

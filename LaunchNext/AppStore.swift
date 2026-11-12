@@ -379,7 +379,6 @@ final class AppStore: ObservableObject {
     static let rememberPageKey = "rememberLastPage"
     static let rememberedPageIndexKey = "rememberedPageIndex"
     static let globalHotKeyKey = "globalHotKeyConfiguration"
-    static let pageSwitchHotkeysEnabledKey = "pageSwitchHotkeysEnabled"
     static let hoverMagnificationKey = "enableHoverMagnification"
     static let hoverMagnificationScaleKey = "hoverMagnificationScale"
     static let activePressEffectKey = "enableActivePressEffect"
@@ -2124,13 +2123,6 @@ final class AppStore: ObservableObject {
         }
     }
 
-    @Published var pageSwitchHotkeysEnabled: Bool = {
-        if UserDefaults.standard.object(forKey: AppStore.pageSwitchHotkeysEnabledKey) == nil { return true }
-        return UserDefaults.standard.bool(forKey: AppStore.pageSwitchHotkeysEnabledKey)
-    }() {
-        didSet { UserDefaults.standard.set(pageSwitchHotkeysEnabled, forKey: Self.pageSwitchHotkeysEnabledKey) }
-    }
-
     @Published var dockDragEnabled: Bool = {
         let defaults = UserDefaults.standard
         if let stored = defaults.object(forKey: AppStore.dockDragEnabledKey) as? Bool {
@@ -3206,20 +3198,12 @@ final class AppStore: ObservableObject {
         let path = app.url.standardizedFileURL.path
         guard layoutLocation(ofAppAtPath: path) != nil else { return false }
         layoutRevealRequest = LayoutRevealRequest(appPath: path)
-        clearSearch()
-        return true
-    }
-
-    func clearSearch() {
-        if !searchText.isEmpty {
-            searchText = ""
-        }
+        searchText = ""
         // Do not wait for search debounce or allow an older query to arrive later.
         searchQueryWorkItem?.cancel()
         searchQueryWorkItem = nil
-        if !searchQuery.isEmpty {
-            searchQuery = ""
-        }
+        searchQuery = ""
+        return true
     }
 
     private func scheduleSearchQueryUpdate(with value: String) {

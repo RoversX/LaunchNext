@@ -144,6 +144,9 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
 
     // 拖拽状态
     var isDraggingItem = false
+    /// An item drag that is really in progress. isDraggingItem alone can stay set
+    /// when the window hides mid-drag and mouseUp never reaches this view.
+    var isItemDragInProgress: Bool { isDraggingItem && NSEvent.pressedMouseButtons != 0 }
     var draggingIndex: Int?
     var draggingItem: LaunchpadItem?
     var draggingLayer: CALayer?
