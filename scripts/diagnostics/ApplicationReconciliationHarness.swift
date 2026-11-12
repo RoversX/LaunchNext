@@ -1665,19 +1665,113 @@ func waitForScheduledScan(_ store: ProbeStore, after starts: Int) throws {
     try finishScan(store)
 }
 
+/// A disposable real volume: a moved directory cannot establish whether the
+/// scanner distinguishes an unmounted volume from a deleted local directory.
+final class TestDiskVolume {
+    let image: URL
+    let mountPoint: URL
+    private var mounted = false
+
+    /// Every test disk has the same volume name, as two drives named Untitled do.
+    init(in directory: URL, name: String = "Volume", mountPoint: URL? = nil) throws {
+        image = directory.appendingPathComponent(name + ".dmg")
+        self.mountPoint = mountPoint ?? directory.appendingPathComponent("Drive")
+        try Self.run(["create", "-size", "32m", "-fs", "HFS+", "-volname", "LaunchNextTest", image.path])
+        try attach()
+    }
+
+    /// The UUID of the disk now mounted at the mount point. A fresh URL avoids
+    /// resource values cached before a different disk was mounted there.
+    var uuid: String? {
+        try? URL(fileURLWithPath: mountPoint.path).resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString
+    }
+
+    private static func run(_ arguments: [String]) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+        process.arguments = arguments
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw TestFailure(description: "hdiutil failed: " + String(decoding: data, as: UTF8.self))
+        }
+    }
+
+    func attach() throws {
+        try FileManager.default.createDirectory(at: mountPoint, withIntermediateDirectories: true)
+        try Self.run(["attach", "-nobrowse", "-noautoopen", "-mountpoint", mountPoint.path, image.path])
+        mounted = true
+    }
+
+    func detach() throws {
+        guard mounted else { return }
+        try Self.run(["detach", mountPoint.path])
+        mounted = false
+    }
+
+    deinit { try? detach() }
+}
+
+func testDeletedLinkedAppDirectory(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "deleted-linked-app-directory")
+    let parent = fixture.directory.appendingPathComponent("LocalTools/Tool")
+    for name in ["LinkedTop", "LinkedMember"] {
+        let target = parent.appendingPathComponent(name + ".app")
+        try fixture.createApp(target)
+        try fixture.fileManager.createSymbolicLink(at: fixture.source.appendingPathComponent(name + ".app"),
+                                                   withDestinationURL: target)
+    }
+    let volume = try parent.resourceValues(forKeys: [.volumeURLKey]).volume!
+    let store = fixture.store()
+    store.performInitialScanIfNeeded()
+    try finishScan(store)
+    let top = store.apps.first { $0.name == "LinkedTop" }!
+    let member = store.apps.first { $0.name == "LinkedMember" }!
+    let visible = store.apps.first { $0.name == "Visible" }!
+    let folder = FolderInfo(name: "Tools", apps: [member, visible], pinnedAppPaths: [member.url.path])
+    store.apps.removeAll { $0.url == member.url || $0.url == visible.url }
+    store.folders = [folder]
+    store.items = [.folder(folder), .app(top)]
+    store.saveAllOrder()
+
+    try fixture.fileManager.removeItem(at: parent)
+    let mounted = fixture.fileManager.mountedVolumeURLs(includingResourceValuesForKeys: nil) ?? []
+    try expect(mounted.contains { $0.standardizedFileURL == volume.standardizedFileURL },
+               "the control volume must remain mounted after deleting the parent folder")
+    for pass in 0..<3 {
+        let current = pass == 2 ? fixture.store(restarting: true) : store
+        if pass == 2 { current.performInitialScanIfNeeded() } else { current.rescan() }
+        try finishScan(current)
+        let rows = try savedLayout(current)
+        try expect(!persistedApplicationPaths(rows).contains {
+            $0.hasSuffix("/LinkedTop.app") || $0.hasSuffix("/LinkedMember.app")
+        }, "a deleted local folder was treated as an unmounted volume")
+        try expect(!current.items.contains { if case .missingApp = $0 { return true }; return false },
+                   "a deleted local folder left a permanent missing-app placeholder")
+        try expect(current.folders.first?.apps.map(\.name) == ["Visible"]
+                   && current.folders.first?.pinnedAppPaths.isEmpty == true,
+                   "deleting a linked member lost an unrelated app or retained a stale pin")
+    }
+}
+
 func testLinkedAppsOnUnpluggedDrive(_ root: URL) throws {
     let fixture = try Fixture(root: root, name: "linked-apps-on-unplugged-drive")
     defer { fixture.restorePermissions() }
-    // Applications links to apps on a drive. The drive folder stands in for
-    // its mount point, which disappears when the drive is unplugged.
-    let drive = fixture.directory.appendingPathComponent("Drive")
+    let volume = try TestDiskVolume(in: fixture.directory)
+    defer { try? volume.detach() }
+    let drive = volume.mountPoint
+    let tools = drive.appendingPathComponent("Tools")
     for name in ["OnDriveTop", "OnDriveMember"] {
-        let app = drive.appendingPathComponent(name + ".app")
+        let app = tools.appendingPathComponent(name + ".app")
         try fixture.createApp(app)
         try fixture.fileManager.createSymbolicLink(at: fixture.source.appendingPathComponent(name + ".app"),
                                                    withDestinationURL: app)
     }
-    let store = fixture.store()
+    var store = fixture.store()
     store.performInitialScanIfNeeded()
     try finishScan(store)
     guard let top = store.apps.first(where: { $0.name == "OnDriveTop" }),
@@ -1692,15 +1786,22 @@ func testLinkedAppsOnUnpluggedDrive(_ root: URL) throws {
     store.saveAllOrder()
     let original = try savedLayout(store)
 
-    let unplugged = fixture.directory.appendingPathComponent("Unplugged")
-    try fixture.fileManager.moveItem(at: drive, to: unplugged)
+    try volume.detach()
     var starts = store.reconciliationStartCount
     store.volumeDidChange(at: drive, mounted: false)
     try waitForScheduledScan(store, after: starts)
     let whileUnplugged = try savedLayout(store)
     try expect(whileUnplugged == original, "unplugging a drive discarded the positions of linked apps on it")
 
-    try fixture.fileManager.moveItem(at: unplugged, to: drive)
+    // The volume is mounted outside /Volumes. Its recorded location must survive
+    // a restart even though the mount point directory still exists while offline.
+    store = fixture.store(restarting: true)
+    store.performInitialScanIfNeeded()
+    try finishScan(store)
+    let afterRestart = try savedLayout(store)
+    try expect(afterRestart == original, "restarting while the volume is offline discarded linked apps")
+
+    try volume.attach()
     starts = store.reconciliationStartCount
     store.volumeDidChange(at: drive, mounted: true)
     try waitForScheduledScan(store, after: starts)
@@ -1711,12 +1812,78 @@ func testLinkedAppsOnUnpluggedDrive(_ root: URL) throws {
                "replugging the drive did not restore its linked apps in place")
 
     // While the drive stays connected, a deleted app is a real removal.
-    try fixture.fileManager.removeItem(at: drive.appendingPathComponent("OnDriveTop.app"))
+    try fixture.fileManager.removeItem(at: tools.appendingPathComponent("OnDriveTop.app"))
     store.rescan()
     try finishScan(store)
     let rows = try savedLayout(store)
     try expect(!persistedApplicationPaths(rows).contains { $0.hasSuffix("/OnDriveTop.app") },
                "an app deleted from a connected drive kept its slot")
+    try fixture.fileManager.removeItem(at: tools)
+    store.rescan()
+    try finishScan(store)
+    let afterFolderDeletion = try savedLayout(store)
+    try expect(!persistedApplicationPaths(afterFolderDeletion).contains { $0.hasSuffix("/OnDriveMember.app") },
+               "a folder deleted from a mounted external volume kept its linked app")
+    try volume.detach()
+}
+
+func testSameNamedDriveAtSamePath(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "same-named-drive-at-same-path")
+    defer { fixture.restorePermissions() }
+    let volume = try TestDiskVolume(in: fixture.directory)
+    defer { try? volume.detach() }
+    let drive = volume.mountPoint
+    let app = drive.appendingPathComponent("Tools/OnDrive.app")
+    try fixture.createApp(app)
+    try fixture.fileManager.createSymbolicLink(at: fixture.source.appendingPathComponent("OnDrive.app"),
+                                               withDestinationURL: app)
+    var store = fixture.store()
+    store.performInitialScanIfNeeded()
+    try finishScan(store)
+    guard let onDrive = store.apps.first(where: { $0.name == "OnDrive" }),
+          let visible = store.apps.first(where: { $0.name == "Visible" }) else {
+        throw TestFailure(description: "same-named drive control did not discover its linked application")
+    }
+    let folder = FolderInfo(name: "Tools", apps: [onDrive, visible])
+    store.apps.removeAll { $0.url == onDrive.url || $0.url == visible.url }
+    store.folders = [folder]
+    store.items = [.folder(folder)] + store.apps.map { .app($0) }
+    store.saveAllOrder()
+    let original = try savedLayout(store)
+    let originalUUID = volume.uuid
+
+    // A different disk with the same name takes the drive's mount point. The
+    // app is absent there, but it was not deleted from its own disk.
+    try volume.detach()
+    let other = try TestDiskVolume(in: fixture.directory, name: "Other", mountPoint: drive)
+    defer { try? other.detach() }
+    try expect(originalUUID != nil && other.uuid != nil && other.uuid != originalUUID,
+               "the two test disks must have distinct volume UUIDs")
+    var starts = store.reconciliationStartCount
+    store.volumeDidChange(at: drive, mounted: true)
+    try waitForScheduledScan(store, after: starts)
+    let whileSwapped = try savedLayout(store)
+    try expect(whileSwapped == original,
+               "a different drive at the same path discarded the position of a linked app")
+
+    store = fixture.store(restarting: true)
+    store.performInitialScanIfNeeded()
+    try finishScan(store)
+    let afterRestart = try savedLayout(store)
+    try expect(afterRestart == original,
+               "restarting with a different drive at the same path discarded a linked app")
+
+    try other.detach()
+    try volume.attach()
+    starts = store.reconciliationStartCount
+    store.volumeDidChange(at: drive, mounted: true)
+    try waitForScheduledScan(store, after: starts)
+    let returned = try savedLayout(store)
+    try expect(returned == original
+               && !store.items.contains { if case .missingApp = $0 { return true }; return false }
+               && store.folders.first?.apps.map(\.name) == ["OnDrive", "Visible"],
+               "returning the original drive did not restore its linked app in place")
+    try volume.detach()
 }
 
 let root = URL(fileURLWithPath: CommandLine.arguments[1])
@@ -1788,7 +1955,9 @@ let tests: [(String, (URL) throws -> Void)] = [
     ("display names follow indexed applications", testDisplayNamesFollowIndexedTargets),
     ("source whose root is a link discovers and removes its apps", testLinkedSourceRoot),
     ("source app listing follows discovery links like removal", testSourceListingMatchesRemoval),
-    ("linked apps keep their positions while their drive is unplugged", testLinkedAppsOnUnpluggedDrive)
+    ("deleted linked app directory is removed on a mounted volume", testDeletedLinkedAppDirectory),
+    ("linked apps keep their positions while their drive is unplugged", testLinkedAppsOnUnpluggedDrive),
+    ("linked apps keep their positions when another drive mounts at their path", testSameNamedDriveAtSamePath)
 ]
 var failures = 0
 var skipped = 0

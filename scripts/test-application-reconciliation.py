@@ -171,7 +171,8 @@ def window_show_store_calls(lifecycle_root: Path) -> str:
     return "\n".join(ordered)
 
 
-def run_tests(directory: Path, app_store: Path, lifecycle_root: Path = REPOSITORY) -> int:
+def run_tests(directory: Path, app_store: Path, lifecycle_root: Path = REPOSITORY,
+              discovery: Path | None = None) -> int:
     source = app_store.read_text()
     model_source = (REPOSITORY / "LaunchNext/FolderInfo.swift").read_text()
     models = "\n\n".join(
@@ -193,7 +194,7 @@ def run_tests(directory: Path, app_store: Path, lifecycle_root: Path = REPOSITOR
     template = (
         REPOSITORY / "scripts/diagnostics/ApplicationReconciliationHarness.swift"
     ).read_text()
-    discovery_source = (REPOSITORY / "LaunchNext/ApplicationDiscovery.swift").read_text()
+    discovery_source = (discovery or REPOSITORY / "LaunchNext/ApplicationDiscovery.swift").read_text()
     # Invoke the real hook used by each version's source-property observer,
     # without installing filesystem watchers or changing user preferences.
     source_change_call = (
@@ -268,6 +269,8 @@ def main() -> int:
                         help="AppStore source to test; useful for proving a regression fails before a fix")
     parser.add_argument("--lifecycle-source-root", type=Path, default=REPOSITORY,
                         help="Root containing LaunchNext/LaunchpadApp.swift and LaunchpadView.swift for window-show calls")
+    parser.add_argument("--discovery-source", type=Path,
+                        help="Discovery source snapshot for before/after regression checks")
     parser.add_argument("--keep-temp", action="store_true", help="Keep generated Swift and logs for diagnostics")
     args = parser.parse_args()
     if sys.platform != "darwin":
@@ -277,9 +280,9 @@ def main() -> int:
     if args.keep_temp:
         directory = Path(tempfile.mkdtemp(prefix="launchnext-reconciliation-"))
         print(f"Diagnostic directory: {directory}")
-        return run_tests(directory, args.app_store, args.lifecycle_source_root)
+        return run_tests(directory, args.app_store, args.lifecycle_source_root, args.discovery_source)
     with tempfile.TemporaryDirectory(prefix="launchnext-reconciliation-") as temporary:
-        return run_tests(Path(temporary), args.app_store, args.lifecycle_source_root)
+        return run_tests(Path(temporary), args.app_store, args.lifecycle_source_root, args.discovery_source)
 
 
 if __name__ == "__main__":

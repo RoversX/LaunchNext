@@ -17,6 +17,14 @@ nonisolated struct ApplicationDiscoveryOrigin: Codable, Hashable, Sendable {
     var sourceRootPath: String? = nil
 }
 
+/// The volume a linked application was on when it was last readable. The UUID
+/// tells apart different disks that mount at the same path, such as two drives
+/// that are both named Untitled.
+nonisolated struct ApplicationDiscoveryVolume: Codable, Hashable, Sendable {
+    var path: String
+    var uuid: String? = nil
+}
+
 nonisolated struct ApplicationDiscoveryIndex: Codable, Equatable, Sendable {
     static let defaultsKey = "applicationDiscoveryIndex.v1"
 
@@ -24,9 +32,10 @@ nonisolated struct ApplicationDiscoveryIndex: Codable, Equatable, Sendable {
     var unresolvedLegacySources: [String: Set<String>] = [:]
     var displayNames: [String: String] = [:]
     var targetsByPath: [String: String] = [:]
+    var volumesByTarget: [String: ApplicationDiscoveryVolume] = [:]
 
     private enum CodingKeys: String, CodingKey {
-        case originsByTarget, unresolvedLegacySources, displayNames, targetsByPath
+        case originsByTarget, unresolvedLegacySources, displayNames, targetsByPath, volumesByTarget
     }
 
     static func load(from defaults: UserDefaults) -> Self {
@@ -48,6 +57,7 @@ extension ApplicationDiscoveryIndex {
         unresolvedLegacySources = try values.decodeIfPresent([String: Set<String>].self, forKey: .unresolvedLegacySources) ?? [:]
         displayNames = try values.decodeIfPresent([String: String].self, forKey: .displayNames) ?? [:]
         targetsByPath = try values.decodeIfPresent([String: String].self, forKey: .targetsByPath) ?? [:]
+        volumesByTarget = try values.decodeIfPresent([String: ApplicationDiscoveryVolume].self, forKey: .volumesByTarget) ?? [:]
     }
 }
 
@@ -146,7 +156,8 @@ nonisolated enum ApplicationDiscoveryScanner {
         var sources: [String: SourceState] = [:]
         var observedOrigins: [String: Set<ApplicationDiscoveryOrigin>] = [:]
         var targetStates: [String: TargetState] = [:]
-        var offlineLinkTargets = Set<String>()
+        var missingLinkTargets = Set<String>()
+        var volumesByTarget = previousIndex.volumesByTarget
         var shouldRetry = false
 
         func targetState(_ target: String) -> TargetState {
@@ -244,13 +255,21 @@ nonisolated enum ApplicationDiscoveryScanner {
                     // Record every source edge before coalescing applications by target.
                     let origin = ApplicationDiscoveryOrigin(sourcePath: source, entryPath: entry, sourceRootPath: root)
                     switch targetState(target) {
-                    case .valid, .inaccessible:
+                    case .valid:
+                        // Remember the actual volume while the target is readable,
+                        // including volumes mounted outside /Volumes.
+                        if isLink == true,
+                           let volume = try? targetURL.resourceValues(forKeys: [.volumeURLKey]).volume {
+                            volumesByTarget[target] = ApplicationDiscoveryVolume(
+                                path: ApplicationPath.standardized(volume.path), uuid: volumeUUID(volume))
+                        }
                         observedOrigins[target, default: []].insert(origin)
-                    case .missing where isLink == true && isOfflineLinkTarget(target, manager: manager):
-                        // An app on an unplugged drive keeps its slot. Removing the
-                        // link, or deleting the app while its folder remains, is
-                        // still a removal.
-                        offlineLinkTargets.insert(target)
+                    case .inaccessible:
+                        observedOrigins[target, default: []].insert(origin)
+                    case .missing where isLink == true:
+                        // Check volume availability after enumeration. A missing
+                        // parent directory alone is not evidence of an unplugged drive.
+                        missingLinkTargets.insert(target)
                         observedOrigins[target, default: []].insert(origin)
                     case .missing, .invalid:
                         break
@@ -366,6 +385,11 @@ nonisolated enum ApplicationDiscoveryScanner {
 
         var available = Set<String>()
         var unavailable = Set<String>()
+        let mountedVolumePaths: Set<String>? = missingLinkTargets.isEmpty ? nil
+            : manager.mountedVolumeURLs(includingResourceValuesForKeys: nil).map {
+                Set($0.map { ApplicationPath.standardized($0.path) })
+            }
+        if !missingLinkTargets.isEmpty && mountedVolumePaths == nil { shouldRetry = true }
         let targets = Set(index.originsByTarget.keys).union(index.unresolvedLegacySources.keys)
         for target in targets {
             let origins = index.originsByTarget[target] ?? []
@@ -376,7 +400,9 @@ nonisolated enum ApplicationDiscoveryScanner {
                 available.insert(target)
             case .inaccessible:
                 unavailable.insert(target)
-            case .missing where offlineLinkTargets.contains(target)
+            case .missing where (missingLinkTargets.contains(target)
+                && isOfflineLinkTarget(target, volume: volumesByTarget[target],
+                                       mountedVolumePaths: mountedVolumePaths))
                 || isMissingInsideOfflineSource(target, origins: origins, pending: pending):
                 unavailable.insert(target)
             case .missing, .invalid:
@@ -390,6 +416,7 @@ nonisolated enum ApplicationDiscoveryScanner {
         let applicationURLs = available.sorted().map { URL(fileURLWithPath: $0) }
         let indexedTargets = Set(index.originsByTarget.keys).union(index.unresolvedLegacySources.keys)
         index.targetsByPath = previousIndex.targetsByPath.filter { indexedTargets.contains($0.value) }
+        index.volumesByTarget = volumesByTarget.filter { indexedTargets.contains($0.key) }
         // Indexed targets include every saved or protected app, so this keeps
         // each name a placeholder can still show and drops removed apps.
         index.displayNames = index.displayNames.filter { indexedTargets.contains($0.key) }
@@ -423,13 +450,38 @@ nonisolated enum ApplicationDiscoveryScanner {
         }
     }
 
-    /// A link whose destination folder is gone, as on an unplugged drive, points
-    /// at an offline app. If only the app is gone, it was deleted.
-    private static func isOfflineLinkTarget(_ target: String, manager: FileManager) -> Bool {
-        if case .missing = pathState(URL(fileURLWithPath: target).deletingLastPathComponent().path, manager: manager) {
-            return true
+    /// Retain a missing linked app only when the disk that held it is not mounted.
+    /// Ordinary directory deletion on that mounted disk must remove the app.
+    private static func isOfflineLinkTarget(_ target: String, volume: ApplicationDiscoveryVolume?,
+                                            mountedVolumePaths: Set<String>?) -> Bool {
+        let expectedVolume: ApplicationDiscoveryVolume
+        if let volume {
+            // The volume URL and layout target may use different parent aliases
+            // (/private/tmp versus /tmp). Trust the recorded association.
+            expectedVolume = volume
+        } else {
+            // Older indexes have no recorded volume. Preserve their links to
+            // conventional external mount points, without treating local folders
+            // under /Users (or arbitrary missing parents) as unplugged drives.
+            let components = URL(fileURLWithPath: target).pathComponents
+            guard components.count > 3, components[1] == "Volumes" else { return false }
+            expectedVolume = ApplicationDiscoveryVolume(path: "/Volumes/" + components[2])
         }
-        return false
+        // Failure to obtain the mount list is uncertainty, not proof of deletion.
+        guard let mountedVolumePaths else { return true }
+        guard mountedVolumePaths.contains(expectedVolume.path) else { return true }
+        // A different disk can mount at the same path, for example a second
+        // drive with the same name. Only the recorded disk proves a deletion.
+        guard let uuid = expectedVolume.uuid else { return false }
+        return volumeUUID(URL(fileURLWithPath: expectedVolume.path, isDirectory: true)) != uuid
+    }
+
+    /// The persistent identity of the disk mounted at a volume URL. The startup
+    /// volume cannot be unplugged, so its path alone identifies it.
+    private static func volumeUUID(_ volume: URL) -> String? {
+        guard let values = try? volume.resourceValues(forKeys: [.volumeIsRootFileSystemKey, .volumeUUIDStringKey]),
+              values.volumeIsRootFileSystem != true else { return nil }
+        return values.volumeUUIDString
     }
 
     /// Only a directory can be enumerated as a source. The root has already been

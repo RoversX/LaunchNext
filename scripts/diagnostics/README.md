@@ -69,8 +69,17 @@ former literal-path check.
 
 Links in a source that point to apps on a drive keep their positions while the
 drive is unplugged, and return in place when it is plugged back in. The test
-calls the real volume handler, which must rescan when known apps live on that
-volume. Deleting an app while its drive stays connected is still a removal.
+creates a disposable 32 MB HFS+ disk image with `hdiutil`, mounts it under the
+temporary fixture directory, then actually unmounts and remounts it. It calls
+the real volume handler and also restarts discovery while the volume is offline.
+The image is unmounted and removed on cleanup. Deleting an app or its containing
+folder while the volume stays mounted must remove it; a separate startup-volume
+fixture checks that dead links do not preserve deleted folders across scans or
+restart. Another fixture mounts a second image with the same volume name at the
+same mount point, as when two drives are both named Untitled. The scanner
+compares volume UUIDs, so the linked app keeps its slot, also across a restart,
+until its own disk returns. Use `--discovery-source <path>` with the scan runner
+for a before/after comparison against an older discovery source.
 
 ## Legacy drag completion
 
