@@ -1523,14 +1523,24 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     private var hiddenAppsSection: some View {
         return LazyVStack(alignment: .leading, spacing: 16) {
-            HStack {
+            HStack(alignment: .center, spacing: 16) {
+                Text(appStore.localized(.hiddenAppsHint))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 12)
+
                 Button {
                     presentHiddenAppPicker()
                 } label: {
                     Label(appStore.localized(.hiddenAppsAddButton), systemImage: "eye.slash")
                 }
-                Spacer()
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
             }
+
+            Divider()
 
             HStack(alignment: .center, spacing: 14) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -1555,13 +1565,11 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+            Divider()
+
             DisclosureGroup(isExpanded: $showHiddenApps) {
                 LazyVStack(alignment: .leading, spacing: 16){
                     if hasHiddenAppEntries {
-                        Text(appStore.localized(.hiddenAppsHint))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        
                         TextField("", text: $hiddenSearch, prompt: Text(appStore.localized(.hiddenAppsSearchPlaceholder)))
                             .textFieldStyle(.roundedBorder)
                             .padding(3)
@@ -1593,10 +1601,20 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
             } label: {
-                Label(appStore.localized(.settingsSectionHiddenApps), systemImage: "eye.slash")
-                    .font(.headline)
+                HStack(spacing: 8) {
+                    Label(appStore.localized(.settingsSectionHiddenApps), systemImage: "eye.slash")
+                        .font(.headline)
+                    if !appStore.hiddenAppPaths.isEmpty {
+                        Text("\(appStore.hiddenAppPaths.count)")
+                            .font(.caption.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                    }
+                }
             }
-                
+
             DisclosureGroup(isExpanded: $showNotHiddenApps) {
                 LazyVStack(alignment: .leading, spacing: 16){
                     if hasNotHiddenAppEntries{
