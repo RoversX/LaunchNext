@@ -20,6 +20,7 @@ public enum AppContextMenuAction: Hashable {
     case copyPath
     case removeQuarantine
     case hideApp
+    case unhideApp
     case uninstallWithConfiguredTool
     case startBatchSelection
     case finishBatchSelection
@@ -36,6 +37,7 @@ public enum AppContextMenuTitleKey: Equatable {
     case copyAppPath
     case removeQuarantineInTerminal
     case hideApp
+    case unhideApp
     case uninstallWithConfiguredTool
     case batchSelectApps
     case finishBatchSelection
@@ -110,6 +112,9 @@ public struct AppContextMenuCapabilities: Equatable {
     public var folderQuickLaunchEnabled: Bool
     public var folderQuickLaunchPinningEnabled: Bool
     public var quickLaunchApps: [AppContextMenuQuickLaunchApp]
+    /// A hidden app shown only as a search result. It has no layout position,
+    /// so it offers Unhide instead of Hide, Show in Layout or batch selection.
+    public var isHiddenApp: Bool
 
     public init(
         canShowInLayout: Bool = false,
@@ -119,7 +124,8 @@ public struct AppContextMenuCapabilities: Equatable {
         isBatchSelectionActive: Bool = false,
         folderQuickLaunchEnabled: Bool = false,
         folderQuickLaunchPinningEnabled: Bool = false,
-        quickLaunchApps: [AppContextMenuQuickLaunchApp] = []
+        quickLaunchApps: [AppContextMenuQuickLaunchApp] = [],
+        isHiddenApp: Bool = false
     ) {
         self.canShowInLayout = canShowInLayout
         self.showQuarantineRemovalAction = showQuarantineRemovalAction
@@ -129,6 +135,7 @@ public struct AppContextMenuCapabilities: Equatable {
         self.folderQuickLaunchEnabled = folderQuickLaunchEnabled
         self.folderQuickLaunchPinningEnabled = folderQuickLaunchPinningEnabled
         self.quickLaunchApps = quickLaunchApps
+        self.isHiddenApp = isHiddenApp
     }
 }
 
@@ -158,7 +165,7 @@ public enum AppContextMenuBuilder {
             item(.copyPath, .copyAppPath, symbol: "doc.on.doc")
         ]
 
-        if capabilities.canShowInLayout {
+        if capabilities.canShowInLayout, !capabilities.isHiddenApp {
             entries.insert(item(.showInLayout, .showInLayout, symbol: "square.grid.3x3"), at: 0)
         }
 
@@ -178,9 +185,13 @@ public enum AppContextMenuBuilder {
         }
 
         entries.append(.separator)
-        entries.append(item(.hideApp, .hideApp, symbol: "eye.slash"))
+        entries.append(
+            capabilities.isHiddenApp
+                ? item(.unhideApp, .unhideApp, symbol: "eye")
+                : item(.hideApp, .hideApp, symbol: "eye.slash")
+        )
 
-        if surface == .coreAnimationMainGrid, capabilities.allowsBatchSelection {
+        if surface == .coreAnimationMainGrid, capabilities.allowsBatchSelection, !capabilities.isHiddenApp {
             entries.append(.separator)
             entries.append(
                 capabilities.isBatchSelectionActive
@@ -290,6 +301,7 @@ public enum AppContextMenuRoute<App, Folder> {
     case copyPath(App)
     case removeQuarantine(App)
     case hideApp(App)
+    case unhideApp(App)
     case uninstallWithConfiguredTool(App)
     case startBatchSelection
     case finishBatchSelection
@@ -312,6 +324,7 @@ public protocol AppContextMenuRouteHandling: AnyObject {
     func copyPath(_ app: App)
     func removeQuarantine(_ app: App)
     func hideApp(_ app: App)
+    func unhideApp(_ app: App)
     func uninstallWithConfiguredTool(_ app: App)
     func startBatchSelection()
     func finishBatchSelection()
@@ -338,6 +351,8 @@ public enum AppContextMenuRouter {
             return .removeQuarantine(app)
         case (.hideApp, .app(let app, _)):
             return .hideApp(app)
+        case (.unhideApp, .app(let app, _)):
+            return .unhideApp(app)
         case (.uninstallWithConfiguredTool, .app(let app, _)):
             return .uninstallWithConfiguredTool(app)
         case (.startBatchSelection, .app):
@@ -389,6 +404,8 @@ public enum AppContextMenuRouter {
             handler.removeQuarantine(app)
         case .hideApp(let app):
             handler.hideApp(app)
+        case .unhideApp(let app):
+            handler.unhideApp(app)
         case .uninstallWithConfiguredTool(let app):
             handler.uninstallWithConfiguredTool(app)
         case .startBatchSelection:

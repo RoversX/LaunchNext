@@ -86,6 +86,36 @@ final class AppContextMenuTests: XCTestCase {
         )
     }
 
+    func testHiddenSearchResultOffersUnhideWithoutLayoutActions() {
+        // Search enables Show in Layout; batch selection is forced on here to
+        // prove a hidden result never offers either, on both main grids.
+        let capabilities = AppContextMenuCapabilities(
+            canShowInLayout: true,
+            showQuarantineRemovalAction: true,
+            canUseConfiguredUninstallTool: true,
+            allowsBatchSelection: true,
+            isHiddenApp: true
+        )
+
+        for surface in [AppContextMenuSurface.swiftUIMainGrid, .coreAnimationMainGrid] {
+            let menu = entries(target: .app(container: .mainGrid), surface: surface, capabilities: capabilities)
+            XCTAssertEqual(
+                tokens(for: menu),
+                [
+                    .action(.showInFinder),
+                    .action(.copyPath),
+                    .action(.removeQuarantine),
+                    .separator,
+                    .action(.unhideApp),
+                    .separator,
+                    .action(.uninstallWithConfiguredTool)
+                ],
+                "Unexpected hidden-result menu on \(surface)"
+            )
+            XCTAssertEqual(item(with: .unhideApp, in: menu)?.title, .localized(.unhideApp))
+        }
+    }
+
     func testShowInLayoutAppearsOnlyWhenNavigationIsAvailable() {
         for surface in [AppContextMenuSurface.swiftUIMainGrid, .coreAnimationMainGrid] {
             let target = AppContextMenuTarget.app(container: .mainGrid)
@@ -282,6 +312,7 @@ final class AppContextMenuTests: XCTestCase {
             (.copyPath, appTarget, .copyPath("Example")),
             (.removeQuarantine, appTarget, .removeQuarantine("Example")),
             (.hideApp, appTarget, .hideApp("Example")),
+            (.unhideApp, appTarget, .unhideApp("Example")),
             (.uninstallWithConfiguredTool, appTarget, .uninstallWithConfiguredTool("Example")),
             (.startBatchSelection, appTarget, .startBatchSelection),
             (.finishBatchSelection, appTarget, .finishBatchSelection),
@@ -366,6 +397,10 @@ final class AppContextMenuTests: XCTestCase {
 
         func hideApp(_ app: String) {
             routes.append(.hideApp(app))
+        }
+
+        func unhideApp(_ app: String) {
+            routes.append(.unhideApp(app))
         }
 
         func uninstallWithConfiguredTool(_ app: String) {

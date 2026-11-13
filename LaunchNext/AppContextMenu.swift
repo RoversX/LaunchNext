@@ -18,6 +18,8 @@ extension AppContextMenuTitleKey {
             return .contextMenuRemoveQuarantineInTerminal
         case .hideApp:
             return .hiddenAppsAddButton
+        case .unhideApp:
+            return .hiddenAppsRemoveButton
         case .uninstallWithConfiguredTool:
             return .contextMenuUninstallWithConfiguredTool
         case .batchSelectApps:
@@ -49,9 +51,12 @@ struct AppContextMenuConfiguration {
         folder.pinnedAppPaths.contains(app.url.standardizedFileURL.path)
     }
     var isOpenFolderAppPinned: (AppInfo) -> Bool = { _ in false }
+    /// Whether an app is a hidden app shown only as a search result.
+    var isHiddenApp: (AppInfo) -> Bool = { _ in false }
 
     func capabilities(
         for target: AppContextMenuTarget,
+        app: AppInfo? = nil,
         folder: FolderInfo? = nil,
         isBatchSelectionActive: Bool = false
     ) -> AppContextMenuCapabilities {
@@ -62,7 +67,8 @@ struct AppContextMenuConfiguration {
             allowsBatchSelection: allowsBatchSelection,
             isBatchSelectionActive: isBatchSelectionActive,
             folderQuickLaunchEnabled: folderQuickLaunchEnabled,
-            folderQuickLaunchPinningEnabled: folderQuickLaunchPinningEnabled
+            folderQuickLaunchPinningEnabled: folderQuickLaunchPinningEnabled,
+            isHiddenApp: app.map(isHiddenApp) ?? false
         )
 
         if target == .folder, folderQuickLaunchEnabled, let folder {
@@ -115,6 +121,10 @@ private final class LaunchNextContextMenuRouteHandler: AppContextMenuRouteHandli
 
     func hideApp(_ app: AppInfo) {
         _ = appStore.hideApp(app)
+    }
+
+    func unhideApp(_ app: AppInfo) {
+        appStore.unhideApp(path: app.url.path)
     }
 
     func uninstallWithConfiguredTool(_ app: AppInfo) {
