@@ -3198,12 +3198,17 @@ final class AppStore: ObservableObject {
         let path = app.url.standardizedFileURL.path
         guard layoutLocation(ofAppAtPath: path) != nil else { return false }
         layoutRevealRequest = LayoutRevealRequest(appPath: path)
+        clearSearch()
+        return true
+    }
+
+    /// Clears the field and its results at once. Neither waits for the search
+    /// delay nor lets an older query arrive later.
+    func clearSearch() {
         searchText = ""
-        // Do not wait for search debounce or allow an older query to arrive later.
         searchQueryWorkItem?.cancel()
         searchQueryWorkItem = nil
         searchQuery = ""
-        return true
     }
 
     private func scheduleSearchQueryUpdate(with value: String) {

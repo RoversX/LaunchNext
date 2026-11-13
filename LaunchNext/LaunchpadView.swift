@@ -2474,13 +2474,32 @@ extension LaunchpadView {
             return event
         }
         
-        guard !filteredItems.isEmpty else { return event }
         let code = event.keyCode
+        // The CA grid tracks its own drags; draggingItem only covers the classic grid.
+        let isItemDragActive = draggingItem != nil || folderPresentation.grid?.isItemDragInProgress == true
+
+        // Esc closes the launcher. When a search found nothing, the first Esc
+        // clears it instead, and the next one closes.
+        if code == 53, !isItemDragActive {
+            // An input method cancels its composition with Esc first.
+            if isSearchFieldFocused, isIMEComposing() { return event }
+            if filteredItems.isEmpty {
+                // Settings handles its own Esc, as it did before.
+                if appStore.isSetting { return event }
+                if !appStore.searchText.isEmpty {
+                    appStore.clearSearch()
+                    return nil
+                }
+            }
+            AppDelegate.shared?.hideWindow()
+            return nil
+        }
+
+        guard !filteredItems.isEmpty else { return event }
         // A fresh key press may bounce at an edge again; its repeats may not.
         if !event.isARepeat { edgeBounceUsed = false }
 
-        // The CA grid tracks its own drags; draggingItem only covers the classic grid.
-        if draggingItem != nil || folderPresentation.grid?.isItemDragInProgress == true {
+        if isItemDragActive {
             switch code {
             case 123, 124, 125, 126, 48, 36: return nil
             default: return event
@@ -2499,11 +2518,6 @@ extension LaunchpadView {
             } else {
                 navigateToNextPage(bouncingAtEdge: !edgeBounceUsed)
             }
-            return nil
-        }
-
-        if code == 53 { // esc
-            AppDelegate.shared?.hideWindow()
             return nil
         }
 
