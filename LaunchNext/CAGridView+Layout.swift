@@ -399,6 +399,7 @@ extension CAGridView {
         pageContainerLayer.frame = CGRect(x: 0, y: 0, width: totalWidth, height: bounds.height)
         pageContainerLayer.transform = CATransform3DMakeTranslation(scrollOffset, 0, 0)
         refreshBatchSelectionUI()
+        refreshHiddenResultBadges()
 
         syncFolderGlass()
         CATransaction.commit()
@@ -437,6 +438,67 @@ extension CAGridView {
         }
 
         CATransaction.commit()
+    }
+
+    static let hiddenResultBadgeName = "hiddenResultBadge"
+
+    /// Marks hidden apps among search results with a corner badge. Badges are
+    /// created on demand, so the ordinary grid draws no extra layers. Each one
+    /// lives in its icon layer, so hover and selection scaling move it too.
+    func refreshHiddenResultBadges() {
+        guard !hiddenResultAppPaths.isEmpty || showsHiddenResultBadges else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        var showsBadge = false
+        for (pageIndex, pageLayers) in iconLayers.enumerated() {
+            let pageStart = pageIndex * itemsPerPage
+            for (localIndex, containerLayer) in pageLayers.enumerated() {
+                let globalIndex = pageStart + localIndex
+                guard let iconLayer = containerLayer.sublayers?.first(where: { $0.name == "icon" }) else { continue }
+                let existing = iconLayer.sublayers?.first { $0.name == Self.hiddenResultBadgeName }
+                guard items.indices.contains(globalIndex),
+                      case .app(let app) = items[globalIndex],
+                      hiddenResultAppPaths.contains(app.url.path) else {
+                    existing?.removeFromSuperlayer()
+                    continue
+                }
+                let badge = existing ?? makeHiddenResultBadge()
+                if existing == nil { iconLayer.addSublayer(badge) }
+                // Bottom-right, clear of the batch-selection checkbox at the top.
+                let iconBounds = iconLayer.bounds
+                let size = max(16, min(22, iconBounds.width * 0.28))
+                let inset = max(2.5, min(5.0, iconBounds.width * 0.055))
+                badge.frame = CGRect(x: iconBounds.maxX - size - inset,
+                                     y: iconBounds.minY + inset,
+                                     width: size, height: size)
+                badge.cornerRadius = size / 2
+                badge.sublayers?.first?.frame = badge.bounds.insetBy(dx: size * 0.2, dy: size * 0.2)
+                showsBadge = true
+            }
+        }
+        showsHiddenResultBadges = showsBadge
+        CATransaction.commit()
+    }
+
+    private func makeHiddenResultBadge() -> CALayer {
+        let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+        let badge = CALayer()
+        badge.name = Self.hiddenResultBadgeName
+        badge.zPosition = 20
+        badge.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
+        badge.borderColor = NSColor.white.withAlphaComponent(0.6).cgColor
+        badge.borderWidth = 0.5
+        badge.contentsScale = scale
+
+        let glyph = CALayer()
+        glyph.contentsGravity = .resizeAspect
+        glyph.contentsScale = scale
+        let configuration = NSImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [.white]))
+        glyph.contents = NSImage(systemSymbolName: "eye.slash.fill", accessibilityDescription: nil)?
+            .withSymbolConfiguration(configuration)
+        badge.addSublayer(glyph)
+        return badge
     }
 
     func checkboxMarkPath(in bounds: CGRect) -> CGPath {

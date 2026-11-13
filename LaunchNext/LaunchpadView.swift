@@ -243,6 +243,7 @@ struct LaunchpadView: View {
 
     var filteredItems: [LaunchpadItem] {
         searchEngine.filter(items: appStore.items,
+                            searchOnlyItems: appStore.hiddenSearchItems,
                             query: appStore.searchQuery,
                             fuzzyEnabled: appStore.fuzzySearchEnabled)
     }
@@ -373,12 +374,12 @@ struct LaunchpadView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: appStore.showFPSOverlay)
          .onChange(of: appStore.items) {
-             guard draggingItem == nil else { return }
-             clampSelection()
-             let maxPageIndex = max(pages.count - 1, 0)
-             if appStore.currentPage > maxPageIndex {
-                 appStore.currentPage = maxPageIndex
-             }
+             clampSelectionAndPageToResults()
+          }
+          .onChange(of: appStore.hiddenSearchItems) {
+             // Hidden results change without a layout change: the option, a
+             // cleared field, or hiding and unhiding apps during a search.
+             clampSelectionAndPageToResults()
           }
           .onChange(of: isSearchFieldFocused) { _, focused in
              if focused { isKeyboardNavigationActive = false }
@@ -2794,11 +2795,16 @@ extension LaunchpadView {
                     hoverMagnificationScale: CGFloat(appStore.hoverMagnificationScale),
                     activePressEffectEnabled: appStore.enableActivePressEffect,
                     activePressScale: CGFloat(appStore.activePressScale),
+                    hiddenBadgeHelp: item.appInfoIfApp.flatMap { app in
+                        appStore.hiddenAppPaths.contains(app.url.path)
+                            ? appStore.localized(.hiddenAppsSearchResultBadge) : nil
+                    },
                     onTap: { if draggingItem == nil { handleItemTap(item) } }
                 )
                 .frame(height: appHeight)
                 // 保持稳定的视图身份，避免在文件夹更新后中断拖拽手势
                 .id(item.id)
+            // Hidden results need search text, which already turns dragging off.
             if appStore.searchText.isEmpty && !isFolderOpen && !appStore.isLayoutLocked {
                 let isDraggingThisTile = (draggingItem == item)
 
@@ -3256,6 +3262,16 @@ struct ScrollEventCatcher: NSViewRepresentable {
 
 // MARK: - Selection Helpers
 extension LaunchpadView {
+    /// After the results change, keep the selection and page inside them.
+    private func clampSelectionAndPageToResults() {
+        guard draggingItem == nil else { return }
+        clampSelection()
+        let maxPageIndex = max(pages.count - 1, 0)
+        if appStore.currentPage > maxPageIndex {
+            appStore.currentPage = maxPageIndex
+        }
+    }
+
     private func clampSelection() {
         guard isKeyboardNavigationActive else { return }
         let count = filteredItems.count

@@ -15,6 +15,8 @@ struct LaunchpadItemButton: View {
     var hoverMagnificationScale: CGFloat = 1.2
     var activePressEffectEnabled: Bool = false
     var activePressScale: CGFloat = 0.92
+    /// Set for a hidden app shown as a search result: draws a badge with this help text.
+    var hiddenBadgeHelp: String? = nil
     let onTap: () -> Void
     let onDoubleClick: (() -> Void)?
 
@@ -34,6 +36,7 @@ struct LaunchpadItemButton: View {
          hoverMagnificationScale: CGFloat = 1.2,
          activePressEffectEnabled: Bool = false,
          activePressScale: CGFloat = 0.92,
+         hiddenBadgeHelp: String? = nil,
          onTap: @escaping () -> Void,
          onDoubleClick: (() -> Void)? = nil) {
         self.item = item
@@ -49,6 +52,7 @@ struct LaunchpadItemButton: View {
         self.hoverMagnificationScale = hoverMagnificationScale
         self.activePressEffectEnabled = activePressEffectEnabled
         self.activePressScale = activePressScale
+        self.hiddenBadgeHelp = hiddenBadgeHelp
         self.onTap = onTap
         self.onDoubleClick = onDoubleClick
     }
@@ -66,7 +70,8 @@ struct LaunchpadItemButton: View {
                 shouldAllowHover: shouldAllowHover,
                 externalScale: externalScale,
                 hoverMagnificationEnabled: hoverMagnificationEnabled,
-                hoverMagnificationScale: hoverMagnificationScale
+                hoverMagnificationScale: hoverMagnificationScale,
+                hiddenBadgeHelp: hiddenBadgeHelp
             )
         }
         .buttonStyle(PressFeedbackButtonStyle(
@@ -102,6 +107,7 @@ private struct LaunchpadItemButtonContent: View {
     let externalScale: CGFloat?
     let hoverMagnificationEnabled: Bool
     let hoverMagnificationScale: CGFloat
+    let hiddenBadgeHelp: String?
     @State private var isHovered = false
     @State private var forceRefreshTrigger: UUID = UUID()
 
@@ -160,6 +166,23 @@ private struct LaunchpadItemButtonContent: View {
                     .antialiased(true)
                     .frame(width: iconSize, height: iconSize)
                     .opacity(isMissingItem ? 0.65 : 1.0)
+                    // Anchored to the icon, so it scales with it and leaves the cell size alone.
+                    .overlay(alignment: .bottomTrailing) {
+                        if let hiddenBadgeHelp {
+                            Circle()
+                                .fill(Color.black.opacity(0.55))
+                                .overlay(Circle().strokeBorder(Color.white.opacity(0.6), lineWidth: 0.5))
+                                .frame(width: iconSize * 0.24, height: iconSize * 0.24)
+                                .overlay(
+                                    Image(systemName: "eye.slash.fill")
+                                        .font(.system(size: iconSize * 0.12, weight: .semibold))
+                                        .foregroundStyle(Color.white)
+                                )
+                                .padding(iconSize * 0.06)
+                                .help(hiddenBadgeHelp)
+                                .accessibilityLabel(hiddenBadgeHelp)
+                        }
+                    }
                     .id(item.id + "_" + forceRefreshTrigger.uuidString)
 
                 if isMissingItem {

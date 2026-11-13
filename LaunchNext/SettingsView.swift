@@ -1532,6 +1532,29 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 Spacer()
             }
 
+            HStack(alignment: .center, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                        Text(appStore.localized(.hiddenAppsShowInSearchTitle))
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    Text(appStore.localized(.hiddenAppsShowInSearchDescription))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 20)
+
+                Toggle("", isOn: $appStore.showHiddenAppsInSearch)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             DisclosureGroup(isExpanded: $showHiddenApps) {
                 LazyVStack(alignment: .leading, spacing: 16){
                     if hasHiddenAppEntries {
@@ -5838,6 +5861,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
                 }
                 if hiddenCheckbox.state == .on {
                     keys.insert(AppStore.hiddenAppsKey)
+                    keys.insert(AppStore.showHiddenAppsInSearchKey)
                 }
                 if sourcesCheckbox.state == .on {
                     keys.insert(AppStore.customAppSourcesKey)

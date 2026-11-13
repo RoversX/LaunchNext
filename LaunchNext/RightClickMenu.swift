@@ -93,7 +93,8 @@ extension View {
             localize: { appStore.localized($0.localizationKey) },
             canShowInLayout: !appStore.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
             showQuarantineRemovalAction: appStore.showQuarantineRemovalAction,
-            canUseConfiguredUninstallTool: appStore.uninstallToolAppURL != nil
+            canUseConfiguredUninstallTool: appStore.uninstallToolAppURL != nil,
+            isHiddenApp: { appStore.hiddenAppPaths.contains($0.url.path) }
         )
 
         if let app {
@@ -101,7 +102,7 @@ extension View {
             let entries = AppContextMenuBuilder.entries(
                 for: target,
                 surface: .swiftUIMainGrid,
-                capabilities: configuration.capabilities(for: target)
+                capabilities: configuration.capabilities(for: target, app: app)
             )
             contextMenu {
                 SwiftUIContextMenuContent(
@@ -202,15 +203,18 @@ extension CAGridView {
 
         let target: AppContextMenuTarget
         let runtimeTarget: AppContextMenuRuntimeTarget
+        let app: AppInfo?
         let folder: FolderInfo?
         switch item {
-        case .app(let app):
+        case .app(let selectedApp):
             target = .app(container: .mainGrid)
-            runtimeTarget = .app(app, folderID: nil)
+            runtimeTarget = .app(selectedApp, folderID: nil)
+            app = selectedApp
             folder = nil
         case .folder(let selectedFolder):
             target = .folder
             runtimeTarget = .folder(selectedFolder)
+            app = nil
             folder = selectedFolder
         default:
             return nil
@@ -218,6 +222,7 @@ extension CAGridView {
 
         let capabilities = contextMenuConfiguration.capabilities(
             for: target,
+            app: app,
             folder: folder,
             isBatchSelectionActive: isBatchSelectionMode
         )

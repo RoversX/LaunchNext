@@ -130,6 +130,14 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     var onReorderAppBatch: (([String], Int) -> Void)?       // 批量重排（按路径顺序）
     var onRequestNewPage: (() -> Void)?                     // 请求创建新页面
     var contextMenuConfiguration = AppContextMenuConfiguration()
+    /// Hidden apps among the current search results, marked with a badge.
+    var hiddenResultAppPaths: Set<String> = [] {
+        didSet {
+            guard hiddenResultAppPaths != oldValue else { return }
+            refreshHiddenResultBadges()
+        }
+    }
+    var showsHiddenResultBadges = false
     /// Off while searching: result positions are not layout positions, so a
     /// reorder or merge would move the wrong items. The classic grid matches.
     var allowsItemDragging = true {

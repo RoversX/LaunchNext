@@ -67,7 +67,8 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         view.contextMenuConfiguration = makeContextMenuConfiguration(allowsBatchSelection: allowsBatchSelection)
         view.allowsBatchSelectionMode = allowsBatchSelection
         view.allowsItemDragging = allowsItemDragging
-        
+        view.hiddenResultAppPaths = hiddenResultAppPaths
+
         // Set current page BEFORE items to ensure correct initial position
         view.setInitialPage(appStore.currentPage)
         view.items = items
@@ -229,6 +230,7 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         nsView.contextMenuConfiguration = makeContextMenuConfiguration(allowsBatchSelection: allowsBatchSelection)
         nsView.allowsBatchSelectionMode = allowsBatchSelection
         nsView.allowsItemDragging = allowsItemDragging
+        nsView.hiddenResultAppPaths = hiddenResultAppPaths
 
         // 检查刷新触发器是否变化（文件夹创建/修改会触发）
         let triggerChanged = context.coordinator.lastGridRefreshTrigger != gridRefreshTrigger ||
@@ -293,6 +295,10 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         Coordinator()
     }
 
+    private var hiddenResultAppPaths: Set<String> {
+        Set(appStore.hiddenSearchItems.compactMap { $0.appInfoIfApp?.url.path })
+    }
+
     /// Like the classic grid, drag only while the grid shows the layout itself,
     /// including while a typed or cleared query waits out the search delay.
     private var allowsItemDragging: Bool {
@@ -313,6 +319,9 @@ struct CAGridViewRepresentable: NSViewRepresentable {
             },
             isFolderQuickLaunchAppPinned: { [weak store] folder, app in
                 store?.isFolderQuickLaunchAppPinned(app, inFolderID: folder.id) ?? false
+            },
+            isHiddenApp: { [weak store] app in
+                store?.hiddenAppPaths.contains(app.url.path) ?? false
             }
         )
     }

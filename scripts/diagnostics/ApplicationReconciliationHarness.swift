@@ -11,6 +11,8 @@ import SwiftData
 
 // INSERT_PRODUCTION_APP_INFO
 
+// INSERT_PRODUCTION_SEARCH
+
 extension AppInfo {
     init(name: String, url: URL) { self.init(name: name, icon: NSImage(size: .zero), url: url) }
 }
@@ -37,6 +39,16 @@ struct MissingAppPlaceholder {
 
 enum LaunchpadItem {
     case app(AppInfo), folder(FolderInfo), empty(String), missingApp(MissingAppPlaceholder)
+
+    // Production identity, which AppStore.rebuildItems compares.
+    var id: String {
+        switch self {
+        case .app(let app): return "app_\(app.id)"
+        case .folder(let folder): return "folder_\(folder.id)"
+        case .empty(let token): return "empty_\(token)"
+        case .missingApp(let placeholder): return "missing_\(placeholder.bundlePath)"
+        }
+    }
 }
 
 final class FolderIconBitmapCache {
@@ -60,7 +72,18 @@ final class ProbeStore {
     }
     var inventoryObserver: (([AppInfo]) -> Void)?
     var folders: [FolderInfo] = []
-    var items: [LaunchpadItem] = []
+    // As in AppStore, the layout and the hidden inventory feed the search index.
+    var items: [LaunchpadItem] = [] {
+        didSet { refreshSearchIndex() }
+    }
+    var hiddenApplicationInventory: [AppInfo] = [] {
+        didSet { refreshSearchIndex() }
+    }
+    var showHiddenAppsInSearch = false
+    var fuzzySearchEnabled = true
+    var searchText = ""
+    var searchQuery = ""
+    let searchEngine = LaunchpadSearchEngine()
     var isInitialLoading = true {
         didSet { loadingObserver?(isInitialLoading) }
     }
@@ -150,6 +173,23 @@ final class ProbeStore {
         applicationReconciliationInProgress = true
         finishApplicationReconciliation(reasons: [.initial], succeeded: false)
     }
+    /// The hidden-app steps of AppStore.reloadPreferencesFromDefaults after a
+    /// preference import: load the imported set, then prune the app list.
+    func reloadImportedHiddenApps(_ paths: Set<String>) {
+        hiddenAppPaths = paths
+        pruneHiddenAppsFromAppList()
+    }
+    /// Types a query as the search field does, with the debounce already applied.
+    func search(_ text: String) -> [LaunchpadItem] {
+        searchText = text
+        searchQuery = text
+        return filteredItems
+    }
+
+    // LaunchpadView's search results, with its `appStore.` receiver removed.
+    // INSERT_VIEW_FILTERED_ITEMS
+
+    // INSERT_SEARCH_FALLBACKS
 
     // INSERT_SOURCE_LISTING_FALLBACK
 
@@ -1886,6 +1926,300 @@ func testSameNamedDriveAtSamePath(_ root: URL) throws {
     try volume.detach()
 }
 
+// MARK: - Hidden apps in search
+
+/// Every application path an item list shows, including folder members.
+func appPaths(_ items: [LaunchpadItem]) -> [String] {
+    items.flatMap { item -> [String] in
+        switch item {
+        case .app(let app): return [app.url.path]
+        case .folder(let folder): return folder.apps.map(\.url.path)
+        case .missingApp(let placeholder): return [placeholder.bundlePath]
+        case .empty: return []
+        }
+    }
+}
+
+func occurrences(of app: AppInfo, in items: [LaunchpadItem]) -> Int {
+    appPaths(items).filter { $0 == app.url.path }.count
+}
+
+/// Scans Visible, SavedTop, SavedFolder, Tool and Member, puts Member and
+/// SavedFolder in a folder the way createFolder leaves them, then hides Tool.
+func seedHiddenSearch(_ fixture: Fixture) throws -> (store: ProbeStore, tool: AppInfo) {
+    try fixture.createApp(fixture.source.appendingPathComponent("Tool.app"))
+    try fixture.createApp(fixture.source.appendingPathComponent("Member.app"))
+    let store = fixture.store()
+    store.performInitialScanIfNeeded()
+    try finishScan(store)
+    guard let tool = store.apps.first(where: { $0.name == "Tool" }),
+          let member = store.apps.first(where: { $0.name == "Member" }),
+          let savedFolder = store.apps.first(where: { $0.name == "SavedFolder" }) else {
+        throw TestFailure(description: "hidden-search fixture did not discover its applications")
+    }
+    let folder = FolderInfo(name: "Folder", apps: [member, savedFolder])
+    store.apps.removeAll { $0.url == member.url || $0.url == savedFolder.url }
+    store.folders = [folder]
+    store.items = store.apps.map { .app($0) } + [.folder(folder)]
+    store.saveAllOrder()
+    try expect(store.hideApp(atPath: tool.url.path), "hiding the fixture app failed")
+    return (store, tool)
+}
+
+func testHiddenAppsStayOutOfSearchByDefault(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "hidden-search-default")
+    let (store, tool) = try seedHiddenSearch(fixture)
+    try expect(occurrences(of: tool, in: store.items) == 0 && !store.apps.contains(tool),
+               "hiding an app left it in the grid")
+    try expect(store.hiddenApplicationInventory.map(\.url) == [tool.url],
+               "hiding an app did not keep its metadata for search")
+    try expect(occurrences(of: tool, in: store.search("Tool")) == 0,
+               "a hidden app appeared in search while the option was off")
+    try expect(appPaths(store.search("")) == appPaths(store.items),
+               "an empty search did not show the grid unchanged")
+}
+
+func testHiddenAppsAppearOnlyForSearchText(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "hidden-search-text")
+    let (store, tool) = try seedHiddenSearch(fixture)
+    store.showHiddenAppsInSearch = true
+    try expect(occurrences(of: tool, in: store.search("Tool")) == 1,
+               "an enabled search did not find the hidden app exactly once")
+    try expect(occurrences(of: tool, in: store.items) == 0, "searching put the hidden app back in the grid")
+    for blank in ["", "   "] {
+        try expect(appPaths(store.search(blank)) == appPaths(store.items),
+                   "a blank search (\(blank.count) spaces) showed more than the grid")
+    }
+    // Clearing the field removes hidden results before the debounced query follows.
+    store.searchText = ""
+    store.searchQuery = "Tool"
+    try expect(occurrences(of: tool, in: store.filteredItems) == 0,
+               "a cleared field kept showing the hidden app until the search delay passed")
+    store.fuzzySearchEnabled = false
+    try expect(occurrences(of: tool, in: store.search("oo")) == 1,
+               "substring search did not find the hidden app")
+    store.fuzzySearchEnabled = true
+    for enabled in [false, true, false] { store.showHiddenAppsInSearch = enabled }
+    try expect(occurrences(of: tool, in: store.search("Tool")) == 0,
+               "turning the option off left the hidden app in the results")
+    store.showHiddenAppsInSearch = true
+    try expect(occurrences(of: tool, in: store.search("Tool")) == 1,
+               "turning the option back on did not restore the hidden result")
+}
+
+func testHiddenSearchFollowsHideUnhideAndRescans(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "hidden-search-lifecycle")
+    let (store, tool) = try seedHiddenSearch(fixture)
+    store.showHiddenAppsInSearch = true
+
+    store.unhideApp(path: tool.url.path)
+    try expect(store.hiddenApplicationInventory.isEmpty, "unhiding left a search-only entry behind")
+    try expect(occurrences(of: tool, in: store.items) == 1, "unhiding did not return the app to the grid")
+    try expect(occurrences(of: tool, in: store.search("Tool")) == 1,
+               "an unhidden app appeared more than once in search")
+
+    try expect(store.hideApp(atPath: tool.url.path), "hiding the app again failed")
+    try expect(occurrences(of: tool, in: store.items) == 0
+               && occurrences(of: tool, in: store.search("Tool")) == 1,
+               "hiding during a search did not move the app from the grid to search only")
+
+    store.rescan()
+    try finishScan(store)
+    try expect(occurrences(of: tool, in: store.items) == 0
+               && occurrences(of: tool, in: store.search("Tool")) == 1,
+               "a rescan changed where the hidden app appears")
+
+    // Nothing is cached on disk: a restart offers the app again after its first scan.
+    let restarted = fixture.store(restarting: true)
+    restarted.hiddenAppPaths = store.hiddenAppPaths
+    restarted.showHiddenAppsInSearch = true
+    restarted.performInitialScanIfNeeded()
+    try expect(occurrences(of: tool, in: restarted.search("Tool")) == 0,
+               "a restart offered a hidden app before scanning confirmed it")
+    try finishScan(restarted)
+    try expect(occurrences(of: tool, in: restarted.items) == 0
+               && occurrences(of: tool, in: restarted.search("Tool")) == 1,
+               "after a restart the hidden app was not search-only")
+}
+
+func testHiddenFolderMemberSearch(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "hidden-search-folder-member")
+    let (store, _) = try seedHiddenSearch(fixture)
+    store.showHiddenAppsInSearch = true
+    guard let member = store.folders.first?.apps.first(where: { $0.name == "Member" }) else {
+        throw TestFailure(description: "fixture folder lost its member")
+    }
+    try expect(store.hideApp(atPath: member.url.path), "hiding a folder member failed")
+    try expect(store.folders.first?.apps.map(\.name) == ["SavedFolder"]
+               && occurrences(of: member, in: store.items) == 0,
+               "the hidden member stayed in its folder")
+    try expect(occurrences(of: member, in: store.search("Member")) == 1,
+               "a hidden folder member was not found exactly once")
+    store.rescan()
+    try finishScan(store)
+    try expect(occurrences(of: member, in: store.items) == 0
+               && occurrences(of: member, in: store.search("Member")) == 1,
+               "a rescan returned the hidden member to its folder or duplicated it")
+}
+
+func testLinkedHiddenAppAppearsOnce(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "hidden-search-linked")
+    // The target is in its own source and also linked from the main source.
+    let targets = fixture.directory.appendingPathComponent("LinkedTargets")
+    let target = targets.appendingPathComponent("Linked.app")
+    try fixture.createApp(target)
+    try fixture.fileManager.createSymbolicLink(at: fixture.source.appendingPathComponent("Linked.app"),
+                                               withDestinationURL: target)
+    let store = fixture.store()
+    store.customAppSourcePaths = [targets.path]
+    store.performInitialScanIfNeeded()
+    try finishScan(store)
+    let linked = store.apps.filter { $0.name == "Linked" }
+    try expect(linked.count == 1, "two sources made the linked app appear \(linked.count) times")
+    store.items = store.apps.map { .app($0) }
+    try expect(store.hideApp(atPath: linked[0].url.path), "hiding the linked app failed")
+    store.showHiddenAppsInSearch = true
+    try expect(store.search("Linked").filter { if case .app(let app) = $0 { return app.name == "Linked" }; return false }.count == 1,
+               "the hidden linked app was not found exactly once")
+    store.rescan()
+    try finishScan(store)
+    try expect(store.search("Linked").filter { if case .app(let app) = $0 { return app.name == "Linked" }; return false }.count == 1,
+               "a rescan duplicated the hidden linked app")
+}
+
+func testUninstalledHiddenAppLeavesSearch(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "hidden-search-uninstalled")
+    let (store, tool) = try seedHiddenSearch(fixture)
+    store.showHiddenAppsInSearch = true
+    try fixture.fileManager.removeItem(at: tool.url)
+    store.fileSystemEventRescan()
+    try finishScan(store)
+    try expect(store.hiddenApplicationInventory.isEmpty && occurrences(of: tool, in: store.search("Tool")) == 0,
+               "an uninstalled hidden app stayed a launchable search result")
+}
+
+func testRemovedSourceTakesHiddenAppsFromSearch(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "hidden-search-removed-source", customSource: true)
+    let (store, tool) = try seedHiddenSearch(fixture)
+    store.showHiddenAppsInSearch = true
+    store.removeCustomAppSource(path: fixture.source.path)
+    try expect(occurrences(of: tool, in: store.search("Tool")) == 0,
+               "removing a source left its hidden app in search until the next scan")
+    store.sourceConfigurationDidChange()
+    try finishScan(store)
+    try expect(store.hiddenApplicationInventory.isEmpty && occurrences(of: tool, in: store.search("Tool")) == 0,
+               "the rescan after removing a source restored its hidden app")
+    try expect(store.hiddenAppPaths.contains(tool.url.path),
+               "removing a source changed which apps are hidden")
+}
+
+/// A hidden app on an unplugged drive cannot open, so it leaves search until
+/// the drive returns, and never enters the grid.
+func testOfflineHiddenAppLeavesSearchUntilDriveReturns(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "hidden-search-offline-drive")
+    defer { fixture.restorePermissions() }
+    let volume = try TestDiskVolume(in: fixture.directory)
+    defer { try? volume.detach() }
+    let drive = volume.mountPoint
+    for name in ["OnDrive", "LaterHidden"] {
+        let target = drive.appendingPathComponent("Tools/\(name).app")
+        try fixture.createApp(target)
+        try fixture.fileManager.createSymbolicLink(at: fixture.source.appendingPathComponent("\(name).app"),
+                                                   withDestinationURL: target)
+    }
+    let store = fixture.store()
+    store.performInitialScanIfNeeded()
+    try finishScan(store)
+    guard let onDrive = store.apps.first(where: { $0.name == "OnDrive" }),
+          let laterHidden = store.apps.first(where: { $0.name == "LaterHidden" }) else {
+        throw TestFailure(description: "drive control did not discover its linked applications")
+    }
+    store.items = store.apps.map { .app($0) }
+    store.saveAllOrder()
+    try expect(store.hideApp(atPath: onDrive.url.path), "hiding the drive app failed")
+    store.showHiddenAppsInSearch = true
+    try expect(occurrences(of: onDrive, in: store.search("OnDrive")) == 1, "the hidden drive app was not searchable")
+
+    try volume.detach()
+    var starts = store.reconciliationStartCount
+    store.volumeDidChange(at: drive, mounted: false)
+    try waitForScheduledScan(store, after: starts)
+    try expect(occurrences(of: onDrive, in: store.search("OnDrive")) == 0,
+               "an offline hidden app stayed a launchable search result")
+    try expect(occurrences(of: onDrive, in: store.items) == 0, "an offline hidden app entered the grid")
+    // Hiding an app whose drive is unplugged must not offer it in search either.
+    try expect(store.hideApp(atPath: laterHidden.url.path), "hiding an offline app failed")
+    try expect(occurrences(of: laterHidden, in: store.search("LaterHidden")) == 0,
+               "an app hidden while its drive was unplugged became a launchable search result")
+
+    try volume.attach()
+    starts = store.reconciliationStartCount
+    store.volumeDidChange(at: drive, mounted: true)
+    try waitForScheduledScan(store, after: starts)
+    for app in [onDrive, laterHidden] {
+        try expect(occurrences(of: app, in: store.search(app.name)) == 1
+                   && occurrences(of: app, in: store.items) == 0,
+                   "the returning drive did not restore \(app.name) to search only")
+    }
+    try volume.detach()
+}
+
+/// Pinyin matching needs the background index, so hidden apps must be indexed.
+func testHiddenAppsKeepTransliteratedSearch(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "hidden-search-transliteration")
+    try fixture.createApp(fixture.source.appendingPathComponent("微信测试.app"))
+    let store = fixture.store()
+    store.performInitialScanIfNeeded()
+    try finishScan(store)
+    guard let app = store.apps.first(where: { $0.name == "微信测试" }) else {
+        throw TestFailure(description: "transliteration fixture did not discover its application")
+    }
+    store.items = store.apps.map { .app($0) }
+    try expect(store.hideApp(atPath: app.url.path), "hiding the CJK-named app failed")
+    store.showHiddenAppsInSearch = true
+    let deadline = Date().addingTimeInterval(10)
+    while occurrences(of: app, in: store.search("weixin")) == 0 && Date() < deadline {
+        _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
+    }
+    try expect(occurrences(of: app, in: store.search("weixin")) == 1,
+               "pinyin did not find the hidden app because the index left it out")
+}
+
+func testImportedHiddenAppsUpdateSearch(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "hidden-search-import")
+    let (store, tool) = try seedHiddenSearch(fixture)
+    store.showHiddenAppsInSearch = true
+    guard let visible = store.apps.first(where: { $0.name == "Visible" }) else {
+        throw TestFailure(description: "fixture lost its visible app")
+    }
+    // The imported preferences unhide Tool and hide Visible.
+    store.reloadImportedHiddenApps([visible.url.path])
+    try expect(store.hiddenApplicationInventory.map(\.url) == [visible.url],
+               "an import did not replace the hidden apps search offers")
+    // An import refreshes the library, which returns Tool to the grid.
+    store.rescan()
+    try finishScan(store)
+    try expect(occurrences(of: tool, in: store.items) == 1 && occurrences(of: tool, in: store.search("Tool")) == 1,
+               "the app the import unhid did not return to the grid exactly once")
+    try expect(occurrences(of: visible, in: store.items) == 0
+               && occurrences(of: visible, in: store.search("Visible")) == 1,
+               "the app the import hid was not search-only")
+}
+
+func testRenamedHiddenAppSearchesByNewName(_ root: URL) throws {
+    let fixture = try Fixture(root: root, name: "hidden-search-rename")
+    let (store, tool) = try seedHiddenSearch(fixture)
+    store.showHiddenAppsInSearch = true
+    store.setCustomTitle("Wrench", for: tool)
+    try expect(occurrences(of: tool, in: store.search("Wrench")) == 1,
+               "renaming a hidden app did not update its search name")
+    store.rescan()
+    try finishScan(store)
+    try expect(occurrences(of: tool, in: store.search("Wrench")) == 1
+               && occurrences(of: tool, in: store.items) == 0,
+               "a rescan lost the hidden app's new name")
+}
+
 let root = URL(fileURLWithPath: CommandLine.arguments[1])
 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 let tests: [(String, (URL) throws -> Void)] = [
@@ -1957,7 +2291,18 @@ let tests: [(String, (URL) throws -> Void)] = [
     ("source app listing follows discovery links like removal", testSourceListingMatchesRemoval),
     ("deleted linked app directory is removed on a mounted volume", testDeletedLinkedAppDirectory),
     ("linked apps keep their positions while their drive is unplugged", testLinkedAppsOnUnpluggedDrive),
-    ("linked apps keep their positions when another drive mounts at their path", testSameNamedDriveAtSamePath)
+    ("linked apps keep their positions when another drive mounts at their path", testSameNamedDriveAtSamePath),
+    ("hidden apps stay out of the grid and of search by default", testHiddenAppsStayOutOfSearchByDefault),
+    ("enabled search offers hidden apps only for search text", testHiddenAppsAppearOnlyForSearchText),
+    ("hidden search results follow hide, unhide, rescan and restart", testHiddenSearchFollowsHideUnhideAndRescans),
+    ("hidden folder member is searchable once and leaves its folder", testHiddenFolderMemberSearch),
+    ("hidden app reached through a link and a source appears once", testLinkedHiddenAppAppearsOnce),
+    ("uninstalled hidden app leaves search", testUninstalledHiddenAppLeavesSearch),
+    ("removing a source takes its hidden apps out of search", testRemovedSourceTakesHiddenAppsFromSearch),
+    ("hidden app on an unplugged drive leaves search until it returns", testOfflineHiddenAppLeavesSearchUntilDriveReturns),
+    ("hidden apps keep pinyin search through the index", testHiddenAppsKeepTransliteratedSearch),
+    ("imported hidden apps update search", testImportedHiddenAppsUpdateSearch),
+    ("renamed hidden app is found by its new name", testRenamedHiddenAppSearchesByNewName)
 ]
 var failures = 0
 var skipped = 0

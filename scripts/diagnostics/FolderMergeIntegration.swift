@@ -47,6 +47,11 @@ struct FolderMergeIntegration {
             }
         }
         Task { @MainActor in
+            if CommandLine.arguments.contains("--search-results-only") {
+                checkHiddenSearchResults(grid, apps: apps)
+                app.terminate(nil)
+                return
+            }
             if CommandLine.arguments.contains("--guardrails-only") {
                 checkPreferenceMigration()
                 checkDissolveTiles(apps: apps)
@@ -398,6 +403,49 @@ struct FolderMergeIntegration {
         grid.finishFolderDissolve()
         precondition(transition == nil, "cleanup must release the temporary state and borrowed preview")
         print("PASS dissolve handoff: cold grid has pixels, async replacement, state released")
+    }
+    /// Search results cannot be dragged: their positions are not layout positions.
+    /// Hidden results carry a badge inside their icon, so it scales with the icon.
+    @MainActor static func checkHiddenSearchResults(_ grid: CAGridView, apps: [AppInfo]) {
+        func icon(_ index: Int) -> CALayer {
+            grid.iconLayers[0][index].sublayers!.first { $0.name == "icon" }!
+        }
+        func badge(_ index: Int) -> CALayer? {
+            icon(index).sublayers?.first { $0.name == CAGridView.hiddenResultBadgeName }
+        }
+        let hiddenPath = apps[1].url.path
+        grid.allowsItemDragging = false
+        grid.hiddenResultAppPaths = [hiddenPath]
+        grid.items = apps.map { .app($0) }
+        precondition(badge(1) != nil && badge(0) == nil && badge(2) == nil, "only the hidden result shows a badge")
+        precondition(icon(1).bounds.contains(badge(1)!.frame), "the badge must sit inside the hidden result's icon")
+        grid.updateSelection(1, animated: false)
+        precondition(icon(1).transform.m11 > 1 && badge(1)?.superlayer === icon(1),
+                     "the badge must scale with its selected icon")
+        grid.updateSelection(nil, animated: false)
+
+        for index in 0..<2 {
+            grid.startDragging(item: grid.items[index], index: index, at: iconCenter(grid, index: 2))
+            precondition(!grid.isDraggingItem, "a search result at \(index) must not start a layout drag")
+        }
+        // Without a search, ordinary apps drag; a search starting mid-drag cancels it.
+        grid.allowsItemDragging = true
+        grid.startDragging(item: grid.items[0], index: 0, at: iconCenter(grid, index: 2))
+        precondition(grid.isDraggingItem, "an app must still drag without a search")
+        grid.allowsItemDragging = false
+        precondition(!grid.isDraggingItem, "starting a search must cancel a layout drag")
+
+        // Unhiding during a search keeps the item, so its layer is reused.
+        grid.hiddenResultAppPaths = []
+        precondition(badge(1) == nil, "an unhidden result kept its badge")
+        grid.hiddenResultAppPaths = [hiddenPath]
+        grid.items = [.app(apps[1]), .app(apps[0])]
+        precondition(badge(0) != nil && badge(1) == nil, "badges must follow their apps when results reorder")
+        grid.hiddenResultAppPaths = []
+        grid.allowsItemDragging = true
+        grid.items = apps.map { .app($0) }
+        precondition((0..<3).allSatisfy { badge($0) == nil }, "clearing the search left a badge behind")
+        print("PASS search results: no layout drag, badge inside the scaled icon, badge removal and reordering")
     }
     @MainActor static func iconCenter(_ grid: CAGridView, index: Int) -> CGPoint {
         let icon = grid.iconLayers[index / grid.itemsPerPage][index % grid.itemsPerPage]

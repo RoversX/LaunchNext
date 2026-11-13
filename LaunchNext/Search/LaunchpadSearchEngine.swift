@@ -63,14 +63,20 @@ final class LaunchpadSearchEngine: ObservableObject {
         }
     }
 
-    func filter(items: [LaunchpadItem], query: String, fuzzyEnabled: Bool) -> [LaunchpadItem] {
+    /// `searchOnlyItems` are ranked by the same rules as `items` and lose only
+    /// ties to them. A blank query returns `items` unchanged as the grid.
+    func filter(items: [LaunchpadItem],
+                searchOnlyItems: [LaunchpadItem] = [],
+                query: String,
+                fuzzyEnabled: Bool) -> [LaunchpadItem] {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return items }
 
+        let candidates = searchOnlyItems.isEmpty ? items : items + searchOnlyItems
         if fuzzyEnabled {
-            return fuzzyFilter(items: items, query: trimmedQuery)
+            return fuzzyFilter(items: candidates, query: trimmedQuery)
         }
-        return containsFilter(items: items, query: trimmedQuery)
+        return containsFilter(items: candidates, query: trimmedQuery)
     }
 
     private func fuzzyFilter(items: [LaunchpadItem], query: String) -> [LaunchpadItem] {

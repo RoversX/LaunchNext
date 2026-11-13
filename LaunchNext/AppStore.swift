@@ -367,6 +367,7 @@ final class AppStore: ObservableObject {
 
     static let customTitlesKey = "customAppTitles"
     static let hiddenAppsKey = "hiddenAppBundlePaths"
+    static let showHiddenAppsInSearchKey = "showHiddenAppsInSearch"
     static let legacyPreferencesDomain = "LaunchNext"
     private static let legacyPreferencesMigrationKey = "didMigratePreferencesFromLaunchNextBundleID"
     static let gridColumnsKey = "gridColumnsPerPage"
@@ -712,11 +713,28 @@ final class AppStore: ObservableObject {
     let searchEngine = LaunchpadSearchEngine()
     @Published var items: [LaunchpadItem] = [] {
         didSet {
-            searchEngine.updateIndex(for: items)
+            refreshSearchIndex()
         }
     }
     @Published private(set) var missingPlaceholders: [String: MissingAppPlaceholder] = [:]
     @Published private(set) var hiddenAppPaths: Set<String> = AppStore.loadHiddenApps()
+    /// Hidden apps the latest scan found, kept out of `apps` and the layout.
+    /// Search offers them only while `showHiddenAppsInSearch` is on. Memory only:
+    /// every applied scan replaces it, so removed or offline apps never linger.
+    @Published private(set) var hiddenApplicationInventory: [AppInfo] = [] {
+        didSet {
+            refreshSearchIndex()
+        }
+    }
+    /// Off by default, so hiding an app keeps removing it from search as well.
+    @Published var showHiddenAppsInSearch: Bool = {
+        UserDefaults.standard.object(forKey: AppStore.showHiddenAppsInSearchKey) as? Bool ?? false
+    }() {
+        didSet {
+            guard showHiddenAppsInSearch != oldValue else { return }
+            UserDefaults.standard.set(showHiddenAppsInSearch, forKey: Self.showHiddenAppsInSearchKey)
+        }
+    }
 
     private func persistHiddenApps(_ set: Set<String>) {
         let array = Array(set).sorted()
@@ -730,6 +748,8 @@ final class AppStore: ObservableObject {
         guard updated != original else { return }
         hiddenAppPaths = updated
         persistHiddenApps(updated)
+        // An app that is no longer hidden must not stay a search-only result.
+        syncHiddenApplicationInventory()
     }
 
     @Published var launchpadBackgroundStyle: BackgroundStyle = AppStore.loadBackgroundStyle() {
@@ -1071,6 +1091,7 @@ final class AppStore: ObservableObject {
     // Reload selected preferences from UserDefaults after an import
     func reloadPreferencesFromDefaults() {
         hiddenAppPaths = AppStore.loadHiddenApps()
+        showHiddenAppsInSearch = UserDefaults.standard.object(forKey: Self.showHiddenAppsInSearchKey) as? Bool ?? false
 
         if let savedSources = UserDefaults.standard.array(forKey: AppStore.customAppSourcesKey) as? [String] {
             customAppSourcePaths = savedSources
@@ -2780,6 +2801,21 @@ final class AppStore: ObservableObject {
             applicationDiscoveryIndex.save(to: applicationDiscoveryDefaults)
         }
 
+        // Hidden apps are outside the layout, so the removal set never names them
+        // and they stay hidden. Their search entries leave with their source.
+        let remainingHiddenApps = hiddenApplicationInventory.filter { app in
+            let path = standardizedFilePath(app.url.path)
+            let target = applicationTargetPath(for: path)
+            if removedTargets.contains(target) { return false }
+            let hasOtherKnownSource = previousIndex.originsByTarget[target]?.contains {
+                !sourceSet.contains($0.sourcePath)
+            } == true
+            return hasOtherKnownSource || !sourceSet.contains { ApplicationPath.isPath(path, within: $0) }
+        }
+        if remainingHiddenApps != hiddenApplicationInventory {
+            hiddenApplicationInventory = remainingHiddenApps
+        }
+
         guard !removalSet.isEmpty else { return }
 
         var updatedItems = items
@@ -3056,6 +3092,9 @@ final class AppStore: ObservableObject {
         }
         if defaults.object(forKey: Self.fuzzySearchEnabledKey) == nil {
             defaults.set(true, forKey: Self.fuzzySearchEnabledKey)
+        }
+        if defaults.object(forKey: Self.showHiddenAppsInSearchKey) == nil {
+            defaults.set(false, forKey: Self.showHiddenAppsInSearchKey)
         }
         if defaults.object(forKey: Self.searchDebounceMillisecondsKey) == nil {
             defaults.set(300, forKey: Self.searchDebounceMillisecondsKey)
@@ -3824,6 +3863,8 @@ final class AppStore: ObservableObject {
                     self.applicationDiscoveryIndex = snapshot.index
                     self.applicationDiscoveryIndex.save(to: self.applicationDiscoveryDefaults)
                 }
+                // The scan saw hidden apps too; only those it found stay searchable.
+                self.replaceHiddenApplicationInventory(withScanned: newApps)
                 let didApplyChanges: Bool
                 if self.resetLayoutAfterApplicationScan {
                     self.resetLayoutAfterApplicationScan = false
@@ -6103,7 +6144,7 @@ final class AppStore: ObservableObject {
         }
         guard didInsert else { return false }
 
-        removeHiddenAppMetadata(forPath: path)
+        syncHiddenApplicationInventory(adding: removeHiddenAppMetadata(forPath: path).map { [$0] } ?? [])
         items = filteredItemsRemovingHidden(from: items)
         folders = sanitizedFolders(folders)
         applyHiddenFilteringToOpenFolder()
@@ -6139,9 +6180,8 @@ final class AppStore: ObservableObject {
 
         guard inserted else { return false }
 
-        for path in resolvedPaths {
-            removeHiddenAppMetadata(forPath: path)
-        }
+        // One inventory update, so the search index is rebuilt once.
+        syncHiddenApplicationInventory(adding: resolvedPaths.compactMap { removeHiddenAppMetadata(forPath: $0) })
 
         items = filteredItemsRemovingHidden(from: items)
         folders = sanitizedFolders(folders)
@@ -6187,15 +6227,68 @@ final class AppStore: ObservableObject {
         saveAllOrder()
     }
 
-    private func removeHiddenAppMetadata(forPath path: String) {
+    /// Removes a newly hidden app from `apps` and returns its metadata for search.
+    private func removeHiddenAppMetadata(forPath path: String) -> AppInfo? {
         if let index = apps.firstIndex(where: { $0.url.path == path }) {
-            apps.remove(at: index)
+            return apps.remove(at: index)
         }
+        // Folder members and loaded layout items need not be in `apps`.
+        return folders.lazy.flatMap(\.apps).first { $0.url.path == path }
+            ?? items.lazy.compactMap { item -> AppInfo? in
+                if case .app(let app) = item { return app }
+                return nil
+            }.first { $0.url.path == path }
     }
 
     private func pruneHiddenAppsFromAppList() {
-        guard !hiddenAppPaths.isEmpty else { return }
-        apps.removeAll { hiddenAppPaths.contains($0.url.path) }
+        guard !hiddenAppPaths.isEmpty else {
+            syncHiddenApplicationInventory()
+            return
+        }
+        let hidden = hiddenAppPaths
+        let prunedApps = apps.filter { hidden.contains($0.url.path) }
+        apps.removeAll { hidden.contains($0.url.path) }
+        syncHiddenApplicationInventory(adding: prunedApps)
+    }
+
+    /// Hidden apps a search may offer, ranked like any other match. They need
+    /// the option and text in both the field and the applied query, so clearing
+    /// the field removes them at once rather than after the search delay.
+    var hiddenSearchItems: [LaunchpadItem] {
+        guard showHiddenAppsInSearch, !hiddenApplicationInventory.isEmpty,
+              !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        return hiddenApplicationInventory.map { .app($0) }
+    }
+
+    /// The index also covers hidden apps, so turning the option on never
+    /// searches them without their transliterations.
+    private func refreshSearchIndex() {
+        let hidden = hiddenApplicationInventory
+        searchEngine.updateIndex(for: hidden.isEmpty ? items : items + hidden.map { .app($0) })
+    }
+
+    /// Replaces the hidden inventory with the hidden apps an applied scan found.
+    private func replaceHiddenApplicationInventory(withScanned scannedApps: [AppInfo]) {
+        let hidden = hiddenAppPaths
+        hiddenApplicationInventory = hidden.isEmpty ? [] : scannedApps.filter { hidden.contains($0.url.path) }
+    }
+
+    /// Drops entries that are no longer hidden and adds apps that were just
+    /// hidden. Only apps the latest scan found available qualify, so a missing
+    /// or offline app never turns into a launchable search result.
+    private func syncHiddenApplicationInventory(adding newlyHidden: [AppInfo] = []) {
+        let hidden = hiddenAppPaths
+        var inventory = hiddenApplicationInventory.filter { hidden.contains($0.url.path) }
+        var inventoryPaths = Set(inventory.map { $0.url.path })
+        for app in newlyHidden where hidden.contains(app.url.path)
+            && isApplicationPathAvailable(app.url.path)
+            && inventoryPaths.insert(app.url.path).inserted {
+            inventory.append(app)
+        }
+        if inventory != hiddenApplicationInventory {
+            hiddenApplicationInventory = inventory
+        }
     }
 
     private func applyHiddenFilteringToOpenFolder() {
@@ -6449,6 +6542,11 @@ final class AppStore: ObservableObject {
 
         if let index = apps.firstIndex(where: { $0.url == url }) {
             apps[index] = info
+            changed = true
+        }
+
+        if let index = hiddenApplicationInventory.firstIndex(where: { $0.url == url }) {
+            hiddenApplicationInventory[index] = info
             changed = true
         }
 

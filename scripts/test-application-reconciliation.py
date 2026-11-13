@@ -66,6 +66,13 @@ DECLARATIONS = [
     "    private func filteredFolderRemovingHidden(from folder: FolderInfo, hidden:",
     "    func setCustomTitle(",
     "    private func applyCustomTitleOverride(",
+    "    func hideApp(atPath path: String)",
+    "    func unhideApp(path: String)",
+    "    private func removeHiddenAppMetadata(",
+    "    private func applyHiddenFilteringToOpenFolder(",
+    "    func removeEmptyPages(",
+    "    func rebuildItems(",
+    "    private func updateCacheAfterChanges(",
 ]
 
 # Keep --app-store compatible with earlier source snapshots. Extract each
@@ -84,7 +91,20 @@ VERSIONED_DECLARATIONS = [
     "    private func invalidateApplicationDiscoveryForImportedLayout(",
     "    func applyOrderAndFolders(",
     "    func applyImportedOrderAndFolders(",
+    "    private func syncHiddenApplicationInventory(",
+    "    private func replaceHiddenApplicationInventory(",
+    "    private func refreshSearchIndex(",
+    "    var hiddenSearchItems:",
 ]
+
+# Snapshots from before hidden apps could appear in search: no hidden results,
+# and an index built from the layout alone. The hidden-search checks then fail.
+SEARCH_FALLBACKS = {
+    "    var hiddenSearchItems:": "    var hiddenSearchItems: [LaunchpadItem] { [] }",
+    "    private func refreshSearchIndex(": "    private func refreshSearchIndex() { searchEngine.updateIndex(for: items) }",
+}
+SEARCH_SOURCES = ["CJKTransliterator.swift", "FuzzyMatcher.swift", "SearchIndexEntry.swift",
+                  "LaunchpadSearchEngine.swift"]
 
 # Settings asks AppStore which apps a source provides. Older sources listed
 # them by literal path in SettingsView; the fallback mirrors that query so
@@ -171,6 +191,12 @@ def window_show_store_calls(lifecycle_root: Path) -> str:
     return "\n".join(ordered)
 
 
+def view_filtered_items(lifecycle_root: Path) -> str:
+    """The view's search results, reading the store directly instead of appStore."""
+    view_source = (lifecycle_root / "LaunchNext/LaunchpadView.swift").read_text()
+    return declaration(view_source, "    var filteredItems: [LaunchpadItem] {").replace("appStore.", "")
+
+
 def run_tests(directory: Path, app_store: Path, lifecycle_root: Path = REPOSITORY,
               discovery: Path | None = None) -> int:
     source = app_store.read_text()
@@ -213,16 +239,25 @@ def run_tests(directory: Path, app_store: Path, lifecycle_root: Path = REPOSITOR
         raise ValueError("Expected one production window-show fallback interval")
     window_calls = window_show_store_calls(lifecycle_root)
     listing_fallback = "" if SOURCE_LISTING_MARKER in source else SOURCE_LISTING_FALLBACK
+    search_fallbacks = "\n".join(fallback for marker, fallback in SEARCH_FALLBACKS.items()
+                                 if marker not in source)
+    search_sources = "\n\n".join((REPOSITORY / "LaunchNext/Search" / name).read_text()
+                                 for name in SEARCH_SOURCES)
     for marker in ("// INSERT_PRODUCTION_DISCOVERY", "// INSERT_PRODUCTION_MODELS",
-                   "// INSERT_PRODUCTION_APP_INFO", "// INSERT_METADATA_CALL",
+                   "// INSERT_PRODUCTION_APP_INFO", "// INSERT_PRODUCTION_SEARCH",
+                   "// INSERT_METADATA_CALL",
                    "        // INSERT_SOURCE_CHANGE_CALL", "        // INSERT_IMPORT_CALL",
                    "        // INSERT_WINDOW_SHOW_CALLS", "    // INSERT_PRODUCTION_FALLBACK_INTERVAL",
+                   "    // INSERT_VIEW_FILTERED_ITEMS", "    // INSERT_SEARCH_FALLBACKS",
                    "    // INSERT_SOURCE_LISTING_FALLBACK", "    // INSERT_PRODUCTION_METHODS"):
         if template.count(marker) != 1:
             raise ValueError(f"Harness template must contain exactly one {marker}")
     generated = template.replace("// INSERT_PRODUCTION_DISCOVERY", discovery_source).replace(
         "// INSERT_PRODUCTION_APP_INFO", (REPOSITORY / "LaunchNext/AppInfo.swift").read_text()
-    ).replace("// INSERT_METADATA_CALL", metadata_call).replace(
+    ).replace("// INSERT_PRODUCTION_SEARCH", search_sources).replace(
+        "    // INSERT_VIEW_FILTERED_ITEMS", view_filtered_items(lifecycle_root)
+    ).replace("    // INSERT_SEARCH_FALLBACKS", search_fallbacks).replace(
+        "// INSERT_METADATA_CALL", metadata_call).replace(
         "// INSERT_PRODUCTION_MODELS", models
     ).replace("        // INSERT_SOURCE_CHANGE_CALL", "        " + source_change_call).replace(
         "        // INSERT_IMPORT_CALL", "        " + import_call

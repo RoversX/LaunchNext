@@ -11,6 +11,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--record', action='store_true', help='record only the verification window')
 parser.add_argument('--hover-rebuild-only', action='store_true', help='check highlight restoration without requiring display-link animation frames')
 parser.add_argument('--guardrails-only', action='store_true', help='check preference migration, merge cleanup, and dissolve bitmap reuse')
+parser.add_argument('--search-results-only', action='store_true', help='check that search results do not drag and the hidden-result badge')
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[2]
 with tempfile.TemporaryDirectory(prefix='launchnext-merge-integration-') as temporary:
@@ -43,5 +44,7 @@ with tempfile.TemporaryDirectory(prefix='launchnext-merge-integration-') as temp
         command.append('--hover-rebuild-only')
     if args.guardrails_only:
         command.append('--guardrails-only')
+    if args.search_results_only:
+        command.append('--search-results-only')
     environment = dict(os.environ, LLVM_PROFILE_FILE=str(work / "merge-%p.profraw"))
     subprocess.run(command, check=True, timeout=60, env=environment, cwd=work)

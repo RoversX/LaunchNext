@@ -81,6 +81,18 @@ compares volume UUIDs, so the linked app keeps its slot, also across a restart,
 until its own disk returns. Use `--discovery-source <path>` with the scan runner
 for a before/after comparison against an older discovery source.
 
+The suite also compiles the production search engine and LaunchpadView's
+`filteredItems` to check hidden apps in search. With the option off, a hidden
+app stays out of the grid and of search. With it on, search finds the app once,
+only while the field and the applied query both contain text, including folder
+members, linked apps and pinyin through the background index. Hiding,
+unhiding, renaming, rescans and restarts keep the results current. An imported
+hidden-app list is checked through a harness copy of the two hidden-app steps
+in `reloadPreferencesFromDefaults`, not that whole method. Uninstalling the app
+or removing its source drops the result at once, and an unplugged drive keeps it
+out of search until the drive returns. These checks do not exercise the view's
+selection, paging or rendering.
+
 ## Legacy drag completion
 
 ```sh
@@ -388,6 +400,8 @@ python3 scripts/diagnostics/run_folder_merge_integration.py --record
 python3 scripts/diagnostics/run_folder_merge_integration.py --hover-rebuild-only
 # Deterministic robustness and cold-icon handoff checks:
 python3 scripts/diagnostics/run_folder_merge_integration.py --guardrails-only
+# Search results do not drag; hidden results carry a badge that scales with the icon:
+python3 scripts/diagnostics/run_folder_merge_integration.py --search-results-only
 ```
 
 Requires an unlocked macOS GUI session and Xcode. Builds a temporary copy of
