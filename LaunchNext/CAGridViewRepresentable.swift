@@ -66,6 +66,7 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         let allowsBatchSelection = appStore.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         view.contextMenuConfiguration = makeContextMenuConfiguration(allowsBatchSelection: allowsBatchSelection)
         view.allowsBatchSelectionMode = allowsBatchSelection
+        view.allowsItemDragging = allowsItemDragging
         
         // Set current page BEFORE items to ensure correct initial position
         view.setInitialPage(appStore.currentPage)
@@ -227,6 +228,7 @@ struct CAGridViewRepresentable: NSViewRepresentable {
         let allowsBatchSelection = appStore.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         nsView.contextMenuConfiguration = makeContextMenuConfiguration(allowsBatchSelection: allowsBatchSelection)
         nsView.allowsBatchSelectionMode = allowsBatchSelection
+        nsView.allowsItemDragging = allowsItemDragging
 
         // 检查刷新触发器是否变化（文件夹创建/修改会触发）
         let triggerChanged = context.coordinator.lastGridRefreshTrigger != gridRefreshTrigger ||
@@ -289,6 +291,12 @@ struct CAGridViewRepresentable: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
+    }
+
+    /// Like the classic grid, drag only while the grid shows the layout itself,
+    /// including while a typed or cleared query waits out the search delay.
+    private var allowsItemDragging: Bool {
+        appStore.searchText.isEmpty && appStore.searchQuery.isEmpty
     }
 
     private func makeContextMenuConfiguration(allowsBatchSelection: Bool) -> AppContextMenuConfiguration {

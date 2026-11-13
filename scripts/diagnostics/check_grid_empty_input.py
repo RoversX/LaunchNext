@@ -40,7 +40,7 @@ final class ProbeGrid: NSView {
     var showLabels = true
     var contentInsets = NSEdgeInsetsZero
     var externalAppDragSessionActive = false, isPageDragging = false, isDraggingItem = false
-    var isBatchSelectionMode = false, isLayoutLocked = false
+    var isBatchSelectionMode = false, isLayoutLocked = false, allowsItemDragging = true
     var pressedIndex: Int?, currentPage = 0
     var pageDragStartX: CGFloat = 0, pageDragStartOffset: CGFloat = 0
     var dragStartPoint = CGPoint.zero, dragCurrentPoint = CGPoint.zero

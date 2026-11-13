@@ -337,7 +337,7 @@ extension CAGridView {
 
         // Check if moved enough distance to start dragging
         if !isDraggingItem, let idx = pressedIndex {
-            if isLayoutLocked { return }
+            if isLayoutLocked || !allowsItemDragging { return }
             let distance = hypot(location.x - dragStartPoint.x, location.y - dragStartPoint.y)
             if distance > 10 {
                 // 取消长按计时器，立即开始拖拽
@@ -442,7 +442,7 @@ extension CAGridView {
     // MARK: - Drag and Drop
 
     func startDragging(item: LaunchpadItem, index: Int, at point: CGPoint) {
-        guard !isLayoutLocked else { return }
+        guard !isLayoutLocked, allowsItemDragging else { return }
         if isBatchSelectionMode {
             guard case .app(let app) = item else { return }
             let dragPath = app.url.path

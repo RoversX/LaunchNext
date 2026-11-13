@@ -130,6 +130,15 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     var onReorderAppBatch: (([String], Int) -> Void)?       // 批量重排（按路径顺序）
     var onRequestNewPage: (() -> Void)?                     // 请求创建新页面
     var contextMenuConfiguration = AppContextMenuConfiguration()
+    /// Off while searching: result positions are not layout positions, so a
+    /// reorder or merge would move the wrong items. The classic grid matches.
+    var allowsItemDragging = true {
+        didSet {
+            if !allowsItemDragging, isDraggingItem, !externalAppDragSessionActive {
+                cancelDragging()
+            }
+        }
+    }
     var isContextMenuTracking: Bool = false
     var allowsBatchSelectionMode: Bool = true {
         didSet {
