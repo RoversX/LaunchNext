@@ -1631,7 +1631,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSGestureR
     
     private func getCurrentActiveScreen() -> NSScreen? {
         let mouse = NSEvent.mouseLocation
-        return NSScreen.screens.first { $0.frame.contains(mouse) }
+        // CGRect.contains misses a pointer pinned to the top edge (y == maxY),
+        // which is where a top hot corner fires.
+        return NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
     }
 
     // MARK: - Window animation helpers

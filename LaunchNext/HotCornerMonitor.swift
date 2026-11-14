@@ -12,9 +12,7 @@ final class HotCornerMonitor {
     private var localMonitor: Any?
     private var globalMonitor: Any?
     private var pendingTrigger: DispatchWorkItem?
-    private var activeHotCornerID: String?
-    private var cooldownUntil: Date?
-    private let cooldown: TimeInterval = 1.0
+    private var tracker = HotCornerTracker()
     private let onTrigger: () -> Void
     private var configuration: Configuration
 
@@ -28,7 +26,7 @@ final class HotCornerMonitor {
     }
 
     func update(configuration: Configuration) {
-        let wasEnabled = self.configuration.isEnabled
+        let previous = self.configuration
         self.configuration = configuration
 
         if !configuration.isEnabled {
@@ -36,7 +34,13 @@ final class HotCornerMonitor {
             return
         }
 
-        if !wasEnabled || localMonitor == nil || globalMonitor == nil {
+        if configuration.position != previous.position || configuration.hitboxSize != previous.hitboxSize {
+            // A visit or pending trigger belongs to the old corner.
+            cancelPendingTrigger()
+            tracker.reset()
+        }
+
+        if !previous.isEnabled || localMonitor == nil || globalMonitor == nil {
             start()
         }
     }
@@ -67,41 +71,41 @@ final class HotCornerMonitor {
         }
 
         cancelPendingTrigger()
-        activeHotCornerID = nil
+        tracker.reset()
     }
 
     private func handlePointerActivity() {
         guard configuration.isEnabled else { return }
 
-        let mouseLocation = NSEvent.mouseLocation
-        guard let hotCornerID = hotCornerIdentifier(at: mouseLocation) else {
-            activeHotCornerID = nil
+        switch tracker.pointerMoved(to: NSEvent.mouseLocation,
+                                    at: ProcessInfo.processInfo.systemUptime,
+                                    triggerDelay: configuration.triggerDelay,
+                                    corners: corners) {
+        case .ignore:
+            break
+        case .cancel:
             cancelPendingTrigger()
-            return
+        case .schedule(let visit, let delay):
+            scheduleTrigger(forVisit: visit, after: delay)
         }
+    }
 
-        guard hotCornerID != activeHotCornerID else { return }
-
-        activeHotCornerID = hotCornerID
+    private func scheduleTrigger(forVisit visit: Int, after delay: TimeInterval) {
         cancelPendingTrigger()
-
-        if let cooldownUntil, cooldownUntil > Date() {
-            return
-        }
-
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
             guard self.configuration.isEnabled else { return }
-            guard self.activeHotCornerID == hotCornerID else { return }
-            self.cooldownUntil = Date().addingTimeInterval(self.cooldown)
+            guard self.tracker.mayTrigger(visit: visit) else { return }
+            self.pendingTrigger = nil
+            self.tracker.didTrigger(visit: visit, at: ProcessInfo.processInfo.systemUptime)
             self.onTrigger()
         }
         pendingTrigger = workItem
 
-        if configuration.triggerDelay <= 0 {
+        if delay <= 0 {
             DispatchQueue.main.async(execute: workItem)
         } else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + configuration.triggerDelay, execute: workItem)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
         }
     }
 
@@ -110,16 +114,11 @@ final class HotCornerMonitor {
         pendingTrigger = nil
     }
 
-    private func hotCornerIdentifier(at location: NSPoint) -> String? {
+    private func corners() -> [HotCornerTracker.Corner] {
         let size = max(configuration.hitboxSize, 1)
-        for (index, screen) in NSScreen.screens.enumerated() {
-            let frame = screen.frame
-            let hitbox = hitboxRect(in: frame, size: size)
-            if hitbox.contains(location) {
-                return "\(screenIdentifier(for: screen, fallbackIndex: index)):\(configuration.position.rawValue)"
-            }
+        return NSScreen.screens.map { screen in
+            HotCornerTracker.Corner(hitbox: hitboxRect(in: screen.frame, size: size), screenFrame: screen.frame)
         }
-        return nil
     }
 
     private func hitboxRect(in frame: CGRect, size: CGFloat) -> CGRect {
@@ -133,12 +132,5 @@ final class HotCornerMonitor {
         case .bottomRight:
             return CGRect(x: frame.maxX - size, y: frame.minY, width: size, height: size)
         }
-    }
-
-    private func screenIdentifier(for screen: NSScreen, fallbackIndex: Int) -> String {
-        if let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
-            return number.stringValue
-        }
-        return "screen-\(fallbackIndex)"
     }
 }
