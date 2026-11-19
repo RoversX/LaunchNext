@@ -268,34 +268,45 @@ extension CAGridView {
     }
 
     func getCachedIcon(for path: String) -> CGImage? {
-        iconCacheLock.lock()
-        defer { iconCacheLock.unlock() }
-        return iconCache[path]
+        iconCache.image(for: path)
     }
 
     func loadIcon(for path: String, icon: NSImage) -> CGImage? {
-        iconCacheLock.lock()
-        if let cached = iconCache[path] {
-            iconCacheLock.unlock()
+        if let cached = iconCache.image(for: path) {
             return cached
         }
-        iconCacheLock.unlock()
 
-        // 渲染为 CGImage
-        let size = NSSize(width: iconSize * 2, height: iconSize * 2) // Retina
-        let image = NSImage(size: size)
-        image.lockFocus()
-        icon.draw(in: NSRect(origin: .zero, size: size))
-        image.unlockFocus()
-
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+        // Render straight into one bitmap at display resolution. The previous
+        // path drew a `iconSize * 2` *point* image through NSImage.lockFocus(),
+        // which on a 2x display produced a 4x oversampled backing store plus a
+        // second image copy kept alive by the returned CGImage: ~10 MB per icon
+        // instead of the ~0.5 MB the layer actually needs.
+        let side = max(1, (iconSize * 2).rounded()) // points -> pixels at 2x
+        let pixels = Int(side)
+        guard pixels > 0,
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil,
+                  width: pixels,
+                  height: pixels,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 0,
+                  space: colorSpace,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else {
             return nil
         }
 
-        iconCacheLock.lock()
-        iconCache[path] = cgImage
-        iconCacheLock.unlock()
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        icon.draw(in: NSRect(x: 0, y: 0, width: side, height: side))
+        NSGraphicsContext.restoreGraphicsState()
 
+        guard let cgImage = context.makeImage() else {
+            return nil
+        }
+
+        iconCache.insert(cgImage, for: path)
         return cgImage
     }
 
