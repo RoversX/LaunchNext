@@ -112,9 +112,8 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
     var currentFPS: Double = 120
     var frameTimes: [Double] = []
 
-    // 图标缓存
-    var iconCache: [String: CGImage] = [:]
-    let iconCacheLock = NSLock()
+    // 图标缓存（按字节上限做 LRU，避免图标位图随翻页无限驻留）
+    let iconCache = GridIconBitmapCache()
     var enableIconPreload: Bool = false
 
     // 回调
@@ -837,9 +836,7 @@ final class CAGridView: NSView, CALayerDelegate, NSDraggingSource {
         // An explicit content refresh must not reuse pre-refresh layers.
         finishFolderDissolve()
         finishDragLanding()
-        iconCacheLock.lock()
         iconCache.removeAll()
-        iconCacheLock.unlock()
     }
 
     func refreshLayout() {
